@@ -19,7 +19,7 @@ For real, this code is bad and totally LLM generated. If you insist on extending
 ## Requirements
 
 - Python 3.10+
-- Node.js 18+
+- Node.js 18+ (only needed for frontend development)
 - UV (Python package manager): `curl -LsSf https://astral.sh/uv/install.sh | sh`
 - MeshCore-compatible radio connected via USB serial
 
@@ -28,6 +28,10 @@ For real, this code is bad and totally LLM generated. If you insist on extending
 ### Backend
 
 ```bash
+# Clone repo
+https://github.com/jkingsman/Remote-Terminal-for-MeshCore.git
+cd Remote-Terminal-for-MeshCore
+
 # Install dependencies
 uv sync
 
@@ -38,9 +42,11 @@ uv run uvicorn app.main:app --reload
 MESHCORE_SERIAL_PORT=/dev/cu.usbserial-0001 uv run uvicorn app.main:app --reload
 ```
 
-Backend runs at http://localhost:8000, and will preferentially serve from `./frontend/dist` for the GUI. If you want to do GUI development, see below and use http://localhost:5173 for the GUI. If you just want to run this as-is (all commits push a distribution-ready frontend build), you can just run the backend and access the GUI from there.
+Backend runs at http://localhost:8000, and will preferentially serve from `./frontend/dist` for the GUI. If you want to do GUI development, see below and use http://localhost:5173 for the GUI.
 
-### Frontend
+**If you just want to run this as-is (all commits push a distribution-ready frontend build), you can just run the backend and access the GUI from there; no need to boot the frontend**
+
+### Frontend Dev
 
 ```bash
 cd frontend
@@ -51,7 +57,7 @@ npm install
 # Development server (proxies API to localhost:8000)
 npm run dev
 
-# Production build
+# Production build; writes out to dist/
 npm run build
 ```
 
@@ -65,7 +71,7 @@ For production, the FastAPI backend serves the compiled frontend directly.
 # 1. Install Python dependencies
 uv sync
 
-# 2. Build frontend
+# 2. Build frontend if you've made changes
 cd frontend
 npm install
 npm run build
@@ -80,9 +86,22 @@ MESHCORE_SERIAL_PORT=/dev/ttyUSB0 uv run uvicorn app.main:app --host 0.0.0.0 --p
 
 Access the app at http://localhost:8000 (or your server's IP/hostname), which will serve static files from `./frontend/dist`.
 
-### HTTPS (Required for WebGPU Cracking)
+## Environment Variables
 
-WebGPU requires a secure context. To use the channel key cracker, serve over HTTPS:
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MESHCORE_SERIAL_PORT` | (auto-detect) | Serial port path |
+| `MESHCORE_SERIAL_BAUDRATE` | 115200 | Baud rate |
+| `MESHCORE_LOG_LEVEL` | INFO | DEBUG, INFO, WARNING, ERROR |
+| `MESHCORE_DATABASE_PATH` | data/meshcore.db | SQLite database path |
+| `MESHCORE_MAX_RADIO_CONTACTS` | 200 | Max recent contacts to keep on radio for DM ACKs |
+
+## Other Details...
+
+<details>
+<summary>HTTPS (Required for WebGPU Cracking)</summary>
+
+WebGPU requires a secure context. To use the channel key cracker when not serving on `localhost` (which is always permitted GPU access), serve over HTTPS:
 
 ```bash
 # Generate self-signed cert
@@ -93,8 +112,10 @@ uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --ssl-keyfile=key.pem --s
 ```
 
 Accept the browser security warning on first visit. For locally-trusted certs without warnings, use [mkcert](https://github.com/FiloSottile/mkcert).
+</details>
 
-### Systemd Service (Linux)
+<details>
+<summary>Systemd Service (Linux)</summary>
 
 To run as a system service:
 
@@ -129,18 +150,10 @@ sudo journalctl -u remoteterm -f
 ```
 
 Edit `/etc/systemd/system/remoteterm.service` to set `MESHCORE_SERIAL_PORT` if auto-detection doesn't work.
+</details>
 
-## Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MESHCORE_SERIAL_PORT` | (auto-detect) | Serial port path |
-| `MESHCORE_SERIAL_BAUDRATE` | 115200 | Baud rate |
-| `MESHCORE_LOG_LEVEL` | INFO | DEBUG, INFO, WARNING, ERROR |
-| `MESHCORE_DATABASE_PATH` | data/meshcore.db | SQLite database path |
-| `MESHCORE_MAX_RADIO_CONTACTS` | 200 | Max recent contacts to keep on radio for DM ACKs |
-
-## Testing
+<details>
+<summary>Testing</summary>
 
 ### Backend (pytest)
 
@@ -159,6 +172,7 @@ PYTHONPATH=. uv run pytest tests/test_decoder.py -v
 
 ```bash
 cd frontend
+npm install
 
 # Run tests once
 npm run test:run
@@ -166,6 +180,7 @@ npm run test:run
 # Run tests in watch mode
 npm test
 ```
+</details>
 
 ## API Docs
 
