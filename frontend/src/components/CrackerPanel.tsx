@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { GroupTextCracker, type ProgressReport } from 'meshcore-hashtag-cracker';
 import NoSleep from 'nosleep.js';
 import type { RawPacket, Channel } from '../types';
+import { api } from '../api';
 import { cn } from '@/lib/utils';
 
 interface CrackedRoom {
@@ -44,6 +45,7 @@ export function CrackerPanel({ packets, channels, onChannelCreate, onRunningChan
   const queueRef = useRef<Map<number, QueueItem>>(new Map());
   const retryFailedRef = useRef(false);
   const maxLengthRef = useRef(6);
+  const undecryptedIdsRef = useRef<Set<number>>(new Set());
 
   // Initialize cracker and NoSleep
   useEffect(() => {
@@ -114,6 +116,11 @@ export function CrackerPanel({ packets, channels, onChannelCreate, onRunningChan
     maxLengthRef.current = maxLength;
   }, [maxLength]);
 
+  // Keep undecrypted IDs ref in sync - used to skip packets already decrypted by other means
+  useEffect(() => {
+    undecryptedIdsRef.current = new Set(undecryptedGroupText.map(p => p.id));
+  }, [undecryptedGroupText]);
+
   // Notify parent of running state changes
   useEffect(() => {
     onRunningChange?.(isRunning);
@@ -160,6 +167,21 @@ export function CrackerPanel({ packets, channels, onChannelCreate, onRunningChan
       // Nothing to process right now, but keep running and check again later
       if (isRunningRef.current) {
         setTimeout(() => processNext(), 1000);
+      }
+      return;
+    }
+
+    // Check if this packet is still undecrypted - it may have been decrypted
+    // by historical decrypt when we cracked another packet from the same channel
+    if (!undecryptedIdsRef.current.has(nextId)) {
+      // Already decrypted by other means, remove from queue and continue
+      setQueue(prev => {
+        const updated = new Map(prev);
+        updated.delete(nextId);
+        return updated;
+      });
+      if (isRunningRef.current) {
+        setTimeout(() => processNext(), 10);
       }
       return;
     }
@@ -221,9 +243,13 @@ export function CrackerPanel({ packets, channels, onChannelCreate, onRunningChan
         const keyUpper = result.key.toUpperCase();
         if (!existingChannelKeys.has(keyUpper)) {
           try {
-            await onChannelCreate('#' + result.roomName, result.key);
+            const channelName = '#' + result.roomName;
+            await onChannelCreate(channelName, result.key);
+            // Decrypt any other historical packets with this newly discovered key
+            // This prevents wasting cracking cycles on packets from the same channel
+            await api.decryptHistoricalPackets({ key_type: 'channel', channel_name: channelName });
           } catch (err) {
-            console.error('Failed to create channel:', err);
+            console.error('Failed to create channel or decrypt historical:', err);
           }
         }
       } else {
