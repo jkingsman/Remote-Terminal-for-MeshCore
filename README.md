@@ -8,9 +8,13 @@ Web interface for MeshCore mesh radio networks. Attach your radio over serial, a
 * Use your radio remotely over your network or away from home over a VPN
 * Look for hashtag room names by brute forcing channel keys of GroupTexts you don't have the keys for yet
 
+This app is fully trustful, with no endpoint protection, and is intended to be run on a protected, private network. **Do not run this application on the open internet unless you want strangers sending traffic as you!**
+
+![Screenshot of the application's web interface](screenshot.png)
+
 ## This is a personal toolkit, and not optimized for general consumption! This is entirely vibecoded slop and I make no warranty of fitness for any purpose.
 
-For real, this code is bad and totally LLM generated. If you insist on extending it, there are three `CLAUDE.md` fils you should have your LLM read in `./`, `./frontend`, and `./app`.
+For real, this code is bad and totally LLM generated. If you insist on extending it, there are three `CLAUDE.md` fils you should have your LLM read in `./CLAUDE.md`, `./frontend/CLAUDE.md`, and `./app/CLAUDE.md`.
 
 ## Requirements
 
@@ -34,7 +38,7 @@ uv run uvicorn app.main:app --reload
 MESHCORE_SERIAL_PORT=/dev/cu.usbserial-0001 uv run uvicorn app.main:app --reload
 ```
 
-Backend runs at http://localhost:8000
+Backend runs at http://localhost:8000, and will preferentially serve from `./frontend/dist` for the GUI. If you want to do GUI development, see below and use http://localhost:5173 for the GUI. If you just want to run this as-is (all commits push a distribution-ready frontend build), you can just run the backend and access the GUI from there.
 
 ### Frontend
 
@@ -51,7 +55,7 @@ npm run dev
 npm run build
 ```
 
-Dev server runs at http://localhost:5173
+Dev server runs the frontend at http://localhost:5173
 
 ## Production Deployment
 
@@ -74,7 +78,7 @@ uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 MESHCORE_SERIAL_PORT=/dev/ttyUSB0 uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-Access the app at http://localhost:8000 (or your server's IP/hostname).
+Access the app at http://localhost:8000 (or your server's IP/hostname), which will serve static files from `./frontend/dist`.
 
 ### HTTPS (Required for WebGPU Cracking)
 
