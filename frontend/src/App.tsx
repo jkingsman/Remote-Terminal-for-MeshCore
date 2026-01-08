@@ -515,6 +515,28 @@ export function App() {
     setSidebarOpen(false);
   }, []);
 
+  // Mark all conversations as read
+  const handleMarkAllRead = useCallback(() => {
+    const now = Math.floor(Date.now() / 1000);
+
+    // Update localStorage for all channels
+    for (const channel of channels) {
+      const key = getStateKey('channel', channel.key);
+      setLastReadTime(key, now);
+    }
+
+    // Update localStorage for all contacts
+    for (const contact of contacts) {
+      if (contact.public_key) {
+        const key = getStateKey('contact', contact.public_key);
+        setLastReadTime(key, now);
+      }
+    }
+
+    // Clear all unread counts
+    setUnreadCounts({});
+  }, [channels, contacts]);
+
   // Delete channel handler
   const handleDeleteChannel = useCallback(async (key: string) => {
     if (!confirm('Delete this channel? Message history will be preserved.')) return;
@@ -640,6 +662,7 @@ export function App() {
       showCracker={showCracker}
       crackerRunning={crackerRunning}
       onToggleCracker={() => setShowCracker((prev) => !prev)}
+      onMarkAllRead={handleMarkAllRead}
     />
   );
 

@@ -21,15 +21,16 @@ interface SidebarProps {
   showCracker: boolean;
   crackerRunning: boolean;
   onToggleCracker: () => void;
+  onMarkAllRead: () => void;
 }
 
-// Load sort preference from localStorage
+// Load sort preference from localStorage (default to 'recent')
 function loadSortOrder(): SortOrder {
   try {
     const stored = localStorage.getItem('remoteterm-sortOrder');
-    return stored === 'recent' ? 'recent' : 'alpha';
+    return stored === 'alpha' ? 'alpha' : 'recent';
   } catch {
-    return 'alpha';
+    return 'recent';
   }
 }
 
@@ -53,6 +54,7 @@ export function Sidebar({
   showCracker,
   crackerRunning,
   onToggleCracker,
+  onMarkAllRead,
 }: SidebarProps) {
   const [sortOrder, setSortOrder] = useState<SortOrder>(loadSortOrder);
   const [searchQuery, setSearchQuery] = useState('');
@@ -244,6 +246,17 @@ export function Sidebar({
                 ({crackerRunning ? 'running' : 'stopped'})
               </span>
             </span>
+          </div>
+        )}
+
+        {/* Mark All Read */}
+        {!query && Object.keys(unreadCounts).length > 0 && (
+          <div
+            className="px-3 py-2.5 cursor-pointer flex items-center gap-2 border-l-2 border-transparent hover:bg-accent"
+            onClick={onMarkAllRead}
+          >
+            <span className="text-muted-foreground text-xs">✓</span>
+            <span className="flex-1 truncate text-muted-foreground">Mark all as read</span>
           </div>
         )}
 
