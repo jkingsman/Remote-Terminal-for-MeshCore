@@ -216,7 +216,8 @@ export function CrackerPanel({ packets, channels, onChannelCreate, onRunningChan
     isProcessingRef.current = true;
 
     const currentMaxLength = maxLengthRef.current;
-    const targetLength = nextItem.lastAttemptLength > 0
+    const isRetry = nextItem.lastAttemptLength > 0;
+    const targetLength = isRetry
       ? nextItem.lastAttemptLength + 1
       : currentMaxLength;
 
@@ -228,6 +229,8 @@ export function CrackerPanel({ packets, channels, onChannelCreate, onRunningChan
           useTimestampFilter: true,
           useUtf8Filter: true,
           ...(turboModeRef.current && { gpuDispatchMs: 10000 }),
+          // For retries, skip dictionary and shorter lengths - we already checked those
+          ...(isRetry && { useDictionary: false, startingLength: targetLength }),
         },
         (prog) => {
           setProgress(prog);
