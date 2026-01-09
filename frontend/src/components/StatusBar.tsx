@@ -61,16 +61,10 @@ export function StatusBar({ health, config, onConfigClick, onAdvertise, onMenuCl
       {config && (
         <>
           <div className="hidden lg:flex items-center gap-1 text-[#888]">
-            Name: <span className="text-[#e0e0e0]">{config.name || 'Unnamed'}</span>
+            <span className="text-[#e0e0e0]">{config.name || 'Unnamed'}</span>
           </div>
           <div className="hidden xl:flex items-center gap-1 text-[#888]">
-            Freq: <span className="text-[#e0e0e0]">{config.radio.freq} MHz</span>
-          </div>
-          <div className="hidden xl:flex items-center gap-1 text-[#888]">
-            SF{config.radio.sf}/CR{config.radio.cr}
-          </div>
-          <div className="hidden xl:flex items-center gap-1 text-[#888]">
-            TX: <span className="text-[#e0e0e0]">{config.tx_power} dBm</span>
+            {config.radio.freq} MHz/SF{config.radio.sf}/CR{config.radio.cr}/{config.tx_power}dBm
           </div>
         </>
       )}
