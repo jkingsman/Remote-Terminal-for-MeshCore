@@ -79,6 +79,22 @@ async def create_message_from_decrypted(
 
     # Mark the raw packet as decrypted
     await RawPacketRepository.mark_decrypted(packet_id, msg_id)
+
+    # Broadcast new message to connected clients (for historical decryption visibility)
+    broadcast_event("message", {
+        "id": msg_id,
+        "type": "CHAN",
+        "conversation_key": channel_key.upper(),
+        "text": text,
+        "sender_timestamp": timestamp,
+        "received_at": received,
+        "path_len": None,
+        "txt_type": 0,
+        "signature": None,
+        "outgoing": False,
+        "acked": False,
+    })
+
     return msg_id
 
 

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { GroupTextCracker, type ProgressReport } from 'meshcore-hashtag-cracker';
+import { ENGLISH_WORDLIST } from 'meshcore-hashtag-cracker/wordlist';
 import NoSleep from 'nosleep.js';
 import type { RawPacket, Channel } from '../types';
 import { api } from '../api';
@@ -59,10 +60,9 @@ export function CrackerPanel({ packets, channels, onChannelCreate, onRunningChan
     const noSleep = new NoSleep();
     noSleepRef.current = noSleep;
 
-    // Load wordlist
-    cracker.loadWordlist('/words_alpha.txt')
-      .then(() => setWordlistLoaded(true))
-      .catch((err) => console.error('Failed to load wordlist:', err));
+    // Use built-in wordlist
+    cracker.setWordlist(ENGLISH_WORDLIST);
+    setWordlistLoaded(true);
 
     return () => {
       cracker.destroy();
@@ -387,9 +387,11 @@ export function CrackerPanel({ packets, channels, onChannelCreate, onRunningChan
           />
           Decrypt historical
         </label>
-        {decryptHistorical && undecryptedPacketCount !== null && undecryptedPacketCount > 0 && (
+        {decryptHistorical && (
           <span className="text-xs text-muted-foreground">
-            (may take a while for {undecryptedPacketCount.toLocaleString()} packets)
+            {undecryptedPacketCount !== null && undecryptedPacketCount > 0
+              ? `(${undecryptedPacketCount.toLocaleString()} packets; messages stream in as decrypted)`
+              : '(messages stream in as decrypted)'}
           </span>
         )}
       </div>

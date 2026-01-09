@@ -220,18 +220,25 @@ export function NewMessageModal({
         </Tabs>
 
         {showHistoricalOption && (
-          <div className="flex items-center justify-end space-x-2">
-            <Label
-              htmlFor="try-historical"
-              className="text-sm text-muted-foreground cursor-pointer"
-            >
-              Try decrypting {undecryptedCount.toLocaleString()} stored packet{undecryptedCount !== 1 ? 's' : ''}
-            </Label>
-            <Checkbox
-              id="try-historical"
-              checked={tryHistorical}
-              onCheckedChange={(checked) => setTryHistorical(checked === true)}
-            />
+          <div className="space-y-1">
+            <div className="flex items-center justify-end space-x-2">
+              <Label
+                htmlFor="try-historical"
+                className="text-sm text-muted-foreground cursor-pointer"
+              >
+                Try decrypting {undecryptedCount.toLocaleString()} stored packet{undecryptedCount !== 1 ? 's' : ''}
+              </Label>
+              <Checkbox
+                id="try-historical"
+                checked={tryHistorical}
+                onCheckedChange={(checked) => setTryHistorical(checked === true)}
+              />
+            </div>
+            {tryHistorical && (
+              <p className="text-xs text-muted-foreground text-right">
+                Messages will stream in as they decrypt in the background
+              </p>
+            )}
           </div>
         )}
 
