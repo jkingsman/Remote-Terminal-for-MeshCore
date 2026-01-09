@@ -33,6 +33,7 @@ export function CrackerPanel({ packets, channels, onChannelCreate, onRunningChan
   const [maxLength, setMaxLength] = useState(6);
   const [retryFailedAtNextLength, setRetryFailedAtNextLength] = useState(false);
   const [decryptHistorical, setDecryptHistorical] = useState(true);
+  const [turboMode, setTurboMode] = useState(false);
   const [progress, setProgress] = useState<ProgressReport | null>(null);
   const [queue, setQueue] = useState<Map<number, QueueItem>>(new Map());
   const [crackedRooms, setCrackedRooms] = useState<CrackedRoom[]>([]);
@@ -49,6 +50,7 @@ export function CrackerPanel({ packets, channels, onChannelCreate, onRunningChan
   const retryFailedRef = useRef(false);
   const maxLengthRef = useRef(6);
   const decryptHistoricalRef = useRef(true);
+  const turboModeRef = useRef(false);
   const undecryptedIdsRef = useRef<Set<number>>(new Set());
 
   // Initialize cracker and NoSleep
@@ -136,6 +138,10 @@ export function CrackerPanel({ packets, channels, onChannelCreate, onRunningChan
     decryptHistoricalRef.current = decryptHistorical;
   }, [decryptHistorical]);
 
+  useEffect(() => {
+    turboModeRef.current = turboMode;
+  }, [turboMode]);
+
   // Keep undecrypted IDs ref in sync - used to skip packets already decrypted by other means
   useEffect(() => {
     undecryptedIdsRef.current = new Set(undecryptedGroupText.map(p => p.id));
@@ -221,6 +227,7 @@ export function CrackerPanel({ packets, channels, onChannelCreate, onRunningChan
           maxLength: targetLength,
           useTimestampFilter: true,
           useUtf8Filter: true,
+          ...(turboModeRef.current && { gpuDispatchMs: 10000 }),
         },
         (prog) => {
           setProgress(prog);
@@ -394,6 +401,16 @@ export function CrackerPanel({ packets, channels, onChannelCreate, onRunningChan
               : '(messages stream in as decrypted)'}
           </span>
         )}
+
+        <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
+          <input
+            type="checkbox"
+            checked={turboMode}
+            onChange={(e) => setTurboMode(e.target.checked)}
+            className="rounded"
+          />
+          Turbo mode (experimental)
+        </label>
       </div>
 
       {/* Status */}
