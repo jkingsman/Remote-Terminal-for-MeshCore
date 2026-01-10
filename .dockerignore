@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# Data
+data/
+*.db
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Tests
+tests/
+frontend/src/test/
+
+# Docs
+*.md
+!README.md
+
+# Other
+references/
+*.pem
+.env*

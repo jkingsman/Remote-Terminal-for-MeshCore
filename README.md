@@ -23,6 +23,8 @@ For real, this code is bad and totally LLM generated. If you insist on extending
 - UV (Python package manager): `curl -LsSf https://astral.sh/uv/install.sh | sh`
 - MeshCore-compatible radio connected via USB serial
 
+*Prefer Docker? See the [Docker section](#docker) below.*
+
 ## Quick Start
 
 ### Backend
@@ -184,6 +186,58 @@ npm run test:run
 
 # Run tests in watch mode
 npm test
+```
+</details>
+
+<details>
+<summary>Docker</summary>
+
+Build and run with Docker, passing through your serial device:
+
+```bash
+# Build the image
+docker build -t remoteterm-meshcore .
+
+# Run with serial passthrough (replace /dev/ttyUSB0 with your device)
+docker run -d \
+  --name remoteterm \
+  --device=/dev/ttyUSB0 \
+  -e MESHCORE_SERIAL_PORT=/dev/ttyUSB0 \
+  -v remoteterm-data:/app/data \
+  -p 8000:8000 \
+  remoteterm-meshcore
+
+# View logs
+docker logs -f remoteterm
+```
+
+**Finding your serial device:**
+
+```bash
+# Linux
+ls /dev/ttyUSB* /dev/ttyACM*
+
+# macOS
+ls /dev/cu.usbserial-* /dev/cu.usbmodem*
+```
+
+**Persistent data:** The `-v remoteterm-data:/app/data` flag creates a named volume for the SQLite database, so your messages and contacts persist across container restarts.
+
+**HTTPS with Docker:** For WebGPU cracking support over non-localhost connections:
+
+```bash
+openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes -subj '/CN=localhost'
+
+docker run -d \
+  --name remoteterm \
+  --device=/dev/ttyUSB0 \
+  -e MESHCORE_SERIAL_PORT=/dev/ttyUSB0 \
+  -v remoteterm-data:/app/data \
+  -v $(pwd)/cert.pem:/app/cert.pem:ro \
+  -v $(pwd)/key.pem:/app/key.pem:ro \
+  -p 8000:8000 \
+  remoteterm-meshcore \
+  uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --ssl-keyfile=/app/key.pem --ssl-certfile=/app/cert.pem
 ```
 </details>
 
