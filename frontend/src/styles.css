@@ -6,8 +6,21 @@
   padding: 0;
 }
 
+html, body, #root {
+  height: 100%;
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  /* Prevent overscroll/bounce on mobile */
+  overscroll-behavior: none;
+}
+
+/* Fallback for browsers without dvh support */
+@supports not (height: 1dvh) {
+  .h-dvh {
+    height: 100vh;
+  }
 }
 
 /* Mobile sidebar override - ensures sidebar fills Sheet container */
