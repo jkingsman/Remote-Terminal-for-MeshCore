@@ -1,7 +1,7 @@
 {
-  "name": "MCTerm - MeshCore Terminal",
-  "short_name": "MCTerm",
-  "description": "Web interface for MeshCore mesh radio networks",
+  "name": "remoteterm-meshcore",
+  "short_name": "remoteterm-meshcore",
+  "description": "Web interface for serial MeshCore radios",
   "icons": [
     {
       "src": "/web-app-manifest-192x192.png",

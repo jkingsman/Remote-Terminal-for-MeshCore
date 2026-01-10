@@ -23,9 +23,30 @@ For real, this code is bad and totally LLM generated. If you insist on extending
 - UV (Python package manager): `curl -LsSf https://astral.sh/uv/install.sh | sh`
 - MeshCore-compatible radio connected via USB serial
 
-*Prefer Docker? See the [Docker section](#docker) below.*
-
 ## Quick Start
+
+### Docker
+
+```bash
+# basic invocation without TLS
+docker run -d \
+  --device=/dev/ttyUSB0 \
+  -v remoteterm-data:/app/data \
+  -p 8000:8000 \
+  jkingsman/remoteterm-meshcore:latest
+
+# optional; if you want roomname discover to work: WebGPU requires a cert, even snakeoil, to function
+openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes -subj '/CN=localhost'
+
+docker run -d \
+  --device=/dev/ttyUSB0 \
+  -v remoteterm-data:/app/data \
+  -v $(pwd)/cert.pem:/app/cert.pem:ro \
+  -v $(pwd)/key.pem:/app/key.pem:ro \
+  -p 8000:8000 \
+  jkingsman/remoteterm-meshcore:latest \
+  uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --ssl-keyfile=/app/key.pem --ssl-certfile=/app/cert.pem
+```
 
 ### Backend
 
@@ -42,9 +63,6 @@ uv run uvicorn app.main:app --reload
 
 # Or specify port explicitly
 MESHCORE_SERIAL_PORT=/dev/cu.usbserial-0001 uv run uvicorn app.main:app --reload
-
-# or disable hot reload for more permanent deployments
-uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
 Backend runs at http://localhost:8000, and will preferentially serve from `./frontend/dist` for the GUI. If you want to do GUI development, see below and use http://localhost:5173 for the GUI.
@@ -190,7 +208,7 @@ npm test
 </details>
 
 <details>
-<summary>Docker</summary>
+<summary>Docker Build</summary>
 
 Build and run with Docker, passing through your serial device:
 
