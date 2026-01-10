@@ -25,7 +25,39 @@ For real, this code is bad and totally LLM generated. If you insist on extending
 
 ## Quick Start
 
+### Run Backend + Serve Built-In Frontend (recommended)
+
+This is the most reliable way to run this system, as Docker has seen intermittent issues with serial forwarding in my experience. Note that you'll need to replace `/dev/ttyUSB0` with whatever appears when you run `ls /dev/ttyUSB* /dev/ttyACM*` (Linux) or `ls /dev/cu.usbserial-* /dev/cu.usbmodem*` (Mac).
+
+
+```bash
+# Clone repo
+https://github.com/jkingsman/Remote-Terminal-for-MeshCore.git
+cd Remote-Terminal-for-MeshCore
+
+# Install dependencies; run `curl -LsSf https://astral.sh/uv/install.sh | sh` if you don't have UV installed
+uv sync
+
+# Run with auto rela(auto-detects serial port)
+uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+# Or specify port explicitly
+MESHCORE_SERIAL_PORT=/dev/ttyUSB0 uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+Backend runs at http://localhost:8000, and will preferentially serve from `./frontend/dist` for the GUI. If you want to do GUI development, see below and use http://localhost:5173 for the GUI.
+
+See the `HTTPS` section below if you're serving this anywhere but localhost and need the GPU cracker to function.
+
+**If you just want to run this as-is (all commits push a distribution-ready frontend build), you can just run the backend and access the GUI from there; no need to boot the frontend**
+
+Dev server runs the frontend at http://localhost:5173
+
 ### Docker
+
+**Important note: I have seen intermittent issues with certain serial subscription events making it back from the radio with Docker. For now, I highly recommend using the "Backend" method listed above.**
+
+Note that you'll need to replace `/dev/ttyUSB0` with whatever appears when you run `ls /dev/ttyUSB* /dev/ttyACM*` (Linux) or `ls /dev/cu.usbserial-* /dev/cu.usbmodem*` (Mac).
 
 ```bash
 # basic invocation without TLS
@@ -35,9 +67,8 @@ docker run -d \
   -p 8000:8000 \
   jkingsman/remoteterm-meshcore:latest
 
-# optional; if you want roomname discover to work: WebGPU requires a cert, even snakeoil, to function
+# optional; if you want roomname discovery to work on any host except localhost: WebGPU requires a cert, even snakeoil, to function
 openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes -subj '/CN=localhost'
-
 docker run -d \
   --device=/dev/ttyUSB0 \
   -v remoteterm-data:/app/data \
@@ -48,68 +79,39 @@ docker run -d \
   uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --ssl-keyfile=/app/key.pem --ssl-certfile=/app/cert.pem
 ```
 
-### Backend
+## Development
+
+### Frontend hot reload
 
 ```bash
-# Clone repo
-https://github.com/jkingsman/Remote-Terminal-for-MeshCore.git
-cd Remote-Terminal-for-MeshCore
+cd frontend
 
 # Install dependencies
+npm install
+
+# Development server with hot reload (proxies API to localhost:8000)
+npm run dev
+```
+
+When you're done, write out the frontend so it can be served by FastAPI:
+
+```bash
+# Production build; writes out to dist/
+npm run build
+```
+
+## Backend hot reload
+
+```bash
+# Install dependencies; run `curl -LsSf https://astral.sh/uv/install.sh | sh` if you don't have UV installed
 uv sync
 
-# Run (auto-detects serial port)
+# Run with auto rela(auto-detects serial port)
 uv run uvicorn app.main:app --reload
 
 # Or specify port explicitly
 MESHCORE_SERIAL_PORT=/dev/cu.usbserial-0001 uv run uvicorn app.main:app --reload
 ```
-
-Backend runs at http://localhost:8000, and will preferentially serve from `./frontend/dist` for the GUI. If you want to do GUI development, see below and use http://localhost:5173 for the GUI.
-
-See the `HTTPS` section below if you're serving this anywhere but localhost and need the GPU cracker to function.
-
-**If you just want to run this as-is (all commits push a distribution-ready frontend build), you can just run the backend and access the GUI from there; no need to boot the frontend**
-
-### Frontend Dev
-
-```bash
-cd frontend
-
-# Install dependencies
-npm install
-
-# Development server (proxies API to localhost:8000)
-npm run dev
-
-# Production build; writes out to dist/
-npm run build
-```
-
-Dev server runs the frontend at http://localhost:5173
-
-## Production Deployment
-
-For production, the FastAPI backend serves the compiled frontend directly.
-
-```bash
-# 1. Install Python dependencies
-uv sync
-
-# 2. Build frontend if you've made changes
-cd frontend
-npm install
-npm run build
-cd ..
-
-# 3. Run server
-uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
-
-# Or with explicit serial port
-MESHCORE_SERIAL_PORT=/dev/ttyUSB0 uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
-
-Access the app at http://localhost:8000 (or your server's IP/hostname), which will serve static files from `./frontend/dist`.
 
 ## Environment Variables
 
@@ -119,12 +121,12 @@ Access the app at http://localhost:8000 (or your server's IP/hostname), which wi
 | `MESHCORE_SERIAL_BAUDRATE` | 115200 | Baud rate |
 | `MESHCORE_LOG_LEVEL` | INFO | DEBUG, INFO, WARNING, ERROR |
 | `MESHCORE_DATABASE_PATH` | data/meshcore.db | SQLite database path |
-| `MESHCORE_MAX_RADIO_CONTACTS` | 200 | Max recent contacts to keep on radio for DM ACKs |
+| `MESHCORE_MAX_RADIO_CONTACTS` | 200 | Default max recent contacts to keep on radio for DM ACKs |
 
 ## Other Details...
 
 <details>
-<summary>HTTPS (Required for WebGPU Cracking)</summary>
+<summary>HTTPS Reminder (Required for WebGPU Cracking)</summary>
 
 WebGPU requires a secure context. To use the channel key cracker when not serving on `localhost` (which is always permitted GPU access), serve over HTTPS:
 
@@ -175,6 +177,7 @@ sudo journalctl -u remoteterm -f
 ```
 
 Edit `/etc/systemd/system/remoteterm.service` to set `MESHCORE_SERIAL_PORT` if auto-detection doesn't work.
+
 </details>
 
 <details>
@@ -204,58 +207,6 @@ npm run test:run
 
 # Run tests in watch mode
 npm test
-```
-</details>
-
-<details>
-<summary>Docker Build</summary>
-
-Build and run with Docker, passing through your serial device:
-
-```bash
-# Build the image
-docker build -t remoteterm-meshcore .
-
-# Run with serial passthrough (replace /dev/ttyUSB0 with your device)
-docker run -d \
-  --name remoteterm \
-  --device=/dev/ttyUSB0 \
-  -e MESHCORE_SERIAL_PORT=/dev/ttyUSB0 \
-  -v remoteterm-data:/app/data \
-  -p 8000:8000 \
-  remoteterm-meshcore
-
-# View logs
-docker logs -f remoteterm
-```
-
-**Finding your serial device:**
-
-```bash
-# Linux
-ls /dev/ttyUSB* /dev/ttyACM*
-
-# macOS
-ls /dev/cu.usbserial-* /dev/cu.usbmodem*
-```
-
-**Persistent data:** The `-v remoteterm-data:/app/data` flag creates a named volume for the SQLite database, so your messages and contacts persist across container restarts.
-
-**HTTPS with Docker:** For WebGPU cracking support over non-localhost connections:
-
-```bash
-openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes -subj '/CN=localhost'
-
-docker run -d \
-  --name remoteterm \
-  --device=/dev/ttyUSB0 \
-  -e MESHCORE_SERIAL_PORT=/dev/ttyUSB0 \
-  -v remoteterm-data:/app/data \
-  -v $(pwd)/cert.pem:/app/cert.pem:ro \
-  -v $(pwd)/key.pem:/app/key.pem:ro \
-  -p 8000:8000 \
-  remoteterm-meshcore \
-  uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --ssl-keyfile=/app/key.pem --ssl-certfile=/app/cert.pem
 ```
 </details>
 
