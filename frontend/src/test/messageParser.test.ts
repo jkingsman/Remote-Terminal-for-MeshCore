@@ -38,13 +38,6 @@ describe('parseSenderFromText', () => {
     expect(result.content).toBe('Note:this is not a sender');
   });
 
-  it('rejects sender containing square brackets', () => {
-    const result = parseSenderFromText('[System]: Alert message');
-
-    expect(result.sender).toBeNull();
-    expect(result.content).toBe('[System]: Alert message');
-  });
-
   it('rejects sender containing colon', () => {
     const result = parseSenderFromText('12:30: Time announcement');
 

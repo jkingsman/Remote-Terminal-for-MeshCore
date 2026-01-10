@@ -360,7 +360,7 @@ PYTHONPATH=. uv run pytest tests/ -v
 Key test files:
 - `tests/test_decoder.py` - Channel + direct message decryption, key exchange, real-world test vectors
 - `tests/test_keystore.py` - Ephemeral key store operations
-- `tests/test_event_handlers.py` - ACK tracking, repeat detection
+- `tests/test_event_handlers.py` - ACK tracking, repeat detection, CLI response filtering
 - `tests/test_api.py` - API endpoint tests
 
 ## Common Tasks
@@ -443,3 +443,57 @@ class TelemetryResponse(BaseModel):
     neighbors: list[NeighborInfo]
     acl: list[AclEntry]
 ```
+
+## Repeater CLI Commands
+
+After login via telemetry endpoint, you can send CLI commands to repeaters:
+
+### Endpoint
+
+`POST /api/contacts/{key}/command` - Send a CLI command (assumes already logged in)
+
+### Request/Response
+
+```python
+class CommandRequest(BaseModel):
+    command: str  # CLI command to send
+
+class CommandResponse(BaseModel):
+    command: str           # Echo of sent command
+    response: str          # Response from repeater
+    sender_timestamp: int | None  # Timestamp from response
+```
+
+### Common Commands
+
+```
+get name / set name <value>     # Repeater name
+get tx / set tx <dbm>           # TX power
+get radio / set radio <freq,bw,sf,cr>  # Radio params
+tempradio <freq,bw,sf,cr,mins>  # Temporary radio change
+setperm <pubkey> <0-3>          # ACL: 0=guest, 1=ro, 2=rw, 3=admin
+clock / clock sync              # Get/sync time
+ver                             # Firmware version
+reboot                          # Restart repeater
+```
+
+### CLI Response Filtering
+
+CLI responses have `txt_type=1` (vs `txt_type=0` for normal messages). The event handler
+in `event_handlers.py` skips these to prevent duplicates—the command endpoint returns
+the response directly, so we don't also store/broadcast via WebSocket.
+
+```python
+# In on_contact_message()
+txt_type = payload.get("txt_type", 0)
+if txt_type == 1:
+    return  # Skip CLI responses
+```
+
+### Helper Function
+
+`prepare_repeater_connection()` handles the login dance:
+1. Sync contacts from radio
+2. Remove contact if exists (clears stale auth)
+3. Re-add with flood mode (`out_path_len=-1`)
+4. Send login with password

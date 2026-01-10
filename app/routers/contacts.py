@@ -4,7 +4,16 @@ from fastapi import APIRouter, HTTPException, Query
 from meshcore import EventType
 
 from app.dependencies import require_connected
-from app.models import Contact, TelemetryRequest, TelemetryResponse, NeighborInfo, AclEntry, CONTACT_TYPE_REPEATER
+from app.models import (
+    Contact,
+    TelemetryRequest,
+    TelemetryResponse,
+    NeighborInfo,
+    AclEntry,
+    CommandRequest,
+    CommandResponse,
+    CONTACT_TYPE_REPEATER,
+)
 
 # ACL permission level names
 ACL_PERMISSION_NAMES = {
@@ -18,6 +27,70 @@ from app.repository import ContactRepository
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/contacts", tags=["contacts"])
+
+
+async def prepare_repeater_connection(mc, contact: Contact, password: str) -> None:
+    """Prepare connection to a repeater by removing/re-adding with flood mode and logging in.
+
+    This clears any stale auth state on the radio and establishes a fresh connection.
+
+    Args:
+        mc: MeshCore instance
+        contact: The repeater contact
+        password: Password for login (empty string for no password)
+
+    Raises:
+        HTTPException: If contact cannot be added or login fails
+    """
+    # Sync contacts from radio to ensure our cache is up-to-date
+    logger.info("Syncing contacts from radio before repeater connection")
+    await mc.ensure_contacts()
+
+    # Remove contact if it exists (clears any stale auth state on radio)
+    radio_contact = mc.get_contact_by_key_prefix(contact.public_key[:12])
+    if radio_contact:
+        logger.info("Removing existing contact %s from radio", contact.public_key[:12])
+        await mc.commands.remove_contact(contact.public_key)
+        await mc.commands.get_contacts()
+
+    # Add contact fresh with flood mode (matching test_telemetry.py pattern)
+    logger.info("Adding repeater %s to radio with flood mode", contact.public_key[:12])
+    contact_data = {
+        "public_key": contact.public_key,
+        "adv_name": contact.name or "",
+        "type": contact.type,
+        "flags": contact.flags,
+        "out_path": "",
+        "out_path_len": -1,  # Flood mode
+        "adv_lat": contact.lat or 0.0,
+        "adv_lon": contact.lon or 0.0,
+        "last_advert": contact.last_advert or 0,
+    }
+    add_result = await mc.commands.add_contact(contact_data)
+    if add_result.type == EventType.ERROR:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to add contact to radio: {add_result.payload}"
+        )
+
+    # Refresh and verify
+    await mc.commands.get_contacts()
+    radio_contact = mc.get_contact_by_key_prefix(contact.public_key[:12])
+    if not radio_contact:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to add contact to radio - contact not found after add"
+        )
+
+    # Send login with password
+    logger.info("Sending login to repeater %s", contact.public_key[:12])
+    login_result = await mc.commands.send_login(contact.public_key, password)
+
+    if login_result.type == EventType.ERROR:
+        raise HTTPException(
+            status_code=401,
+            detail=f"Login failed: {login_result.payload}"
+        )
 
 
 @router.get("", response_model=list[Contact])
@@ -167,56 +240,8 @@ async def request_telemetry(public_key: str, request: TelemetryRequest) -> Telem
             detail=f"Contact is not a repeater (type={contact.type}, expected {CONTACT_TYPE_REPEATER})"
         )
 
-    # Sync contacts from radio to ensure our cache is up-to-date
-    logger.info("Syncing contacts from radio before telemetry request")
-    await mc.ensure_contacts()
-
-    # Remove contact if it exists (clears any stale auth state on radio)
-    radio_contact = mc.get_contact_by_key_prefix(contact.public_key[:12])
-    if radio_contact:
-        logger.info("Removing existing contact %s from radio", contact.public_key[:12])
-        await mc.commands.remove_contact(contact.public_key)
-        await mc.commands.get_contacts()
-
-    # Add contact fresh with flood mode (matching test_telemetry.py pattern)
-    logger.info("Adding repeater %s to radio with flood mode", contact.public_key[:12])
-    contact_data = {
-        "public_key": contact.public_key,
-        "adv_name": contact.name or "",
-        "type": contact.type,
-        "flags": contact.flags,
-        "out_path": "",
-        "out_path_len": -1,  # Flood mode
-        "adv_lat": contact.lat or 0.0,
-        "adv_lon": contact.lon or 0.0,
-        "last_advert": contact.last_advert or 0,
-    }
-    add_result = await mc.commands.add_contact(contact_data)
-    if add_result.type == EventType.ERROR:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to add contact to radio: {add_result.payload}"
-        )
-
-    # Refresh and verify
-    await mc.commands.get_contacts()
-    radio_contact = mc.get_contact_by_key_prefix(contact.public_key[:12])
-    if not radio_contact:
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to add contact to radio - contact not found after add"
-        )
-
-    # Send login with password
-    password = request.password
-    logger.info("Sending login to repeater %s", contact.public_key[:12])
-    login_result = await mc.commands.send_login(contact.public_key, password)
-
-    if login_result.type == EventType.ERROR:
-        raise HTTPException(
-            status_code=401,
-            detail=f"Login failed: {login_result.payload}"
-        )
+    # Prepare connection (add/remove dance + login)
+    await prepare_repeater_connection(mc, contact, request.password)
 
     # Request status with retries
     logger.info("Requesting status from repeater %s", contact.public_key[:12])
@@ -323,3 +348,84 @@ async def request_telemetry(public_key: str, request: TelemetryRequest) -> Telem
         neighbors=neighbors,
         acl=acl_entries,
     )
+
+
+@router.post("/{public_key}/command", response_model=CommandResponse)
+async def send_repeater_command(public_key: str, request: CommandRequest) -> CommandResponse:
+    """Send a CLI command to a repeater.
+
+    The contact must be a repeater (type=2). This endpoint assumes the user has already
+    logged in via the telemetry endpoint - it does NOT perform the add/remove dance
+    or login again.
+
+    Common commands:
+    - get name, set name <value>
+    - get tx, set tx <dbm>
+    - get radio, set radio <freq,bw,sf,cr>
+    - tempradio <freq,bw,sf,cr,minutes>
+    - setperm <pubkey> <permission>  (0=guest, 1=read-only, 2=read-write, 3=admin)
+    - clock, clock sync
+    - reboot
+    - ver
+    """
+    mc = require_connected()
+
+    # Get contact from database
+    contact = await ContactRepository.get_by_key_or_prefix(public_key)
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+
+    # Verify it's a repeater
+    if contact.type != CONTACT_TYPE_REPEATER:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Contact is not a repeater (type={contact.type}, expected {CONTACT_TYPE_REPEATER})"
+        )
+
+    # Send the command
+    logger.info("Sending command to repeater %s: %s", contact.public_key[:12], request.command)
+
+    send_result = await mc.commands.send_cmd(contact.public_key, request.command)
+
+    if send_result.type == EventType.ERROR:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to send command: {send_result.payload}"
+        )
+
+    # Wait for response (MESSAGES_WAITING event, then get_msg)
+    try:
+        wait_result = await mc.wait_for_event(EventType.MESSAGES_WAITING, timeout=10.0)
+
+        if wait_result is None:
+            # Timeout - no response received
+            logger.warning("No response from repeater %s for command: %s", contact.public_key[:12], request.command)
+            return CommandResponse(
+                command=request.command,
+                response="(no response - command may have been processed)"
+            )
+
+        response_event = await mc.commands.get_msg()
+
+        if response_event.type == EventType.ERROR:
+            return CommandResponse(
+                command=request.command,
+                response=f"(error: {response_event.payload})"
+            )
+
+        # Extract the response text and timestamp from the payload
+        response_text = response_event.payload.get("text", str(response_event.payload))
+        sender_timestamp = response_event.payload.get("timestamp")
+        logger.info("Received response from %s: %s", contact.public_key[:12], response_text)
+
+        return CommandResponse(
+            command=request.command,
+            response=response_text,
+            sender_timestamp=sender_timestamp,
+        )
+    except Exception as e:
+        logger.error("Error waiting for response: %s", e)
+        return CommandResponse(
+            command=request.command,
+            response=f"(error waiting for response: {e})"
+        )

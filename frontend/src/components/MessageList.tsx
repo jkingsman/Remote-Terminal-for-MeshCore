@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useCallback, useState, type ReactNode } from 'react';
 import type { Contact, Message } from '../types';
+import { CONTACT_TYPE_REPEATER } from '../types';
 import { formatTime, parseSenderFromText } from '../utils/messageParser';
 import { pubkeysMatch } from '../utils/pubkey';
 import { ContactAvatar } from './ContactAvatar';
@@ -207,9 +208,14 @@ export function MessageList({
         </div>
       )}
       {sortedMessages.map((msg, index) => {
-        const { sender, content } = parseSenderFromText(msg.text);
         // For DMs, look up contact; for channel messages, use parsed sender
         const contact = msg.type === 'PRIV' ? getContact(msg.conversation_key) : null;
+        const isRepeater = contact?.type === CONTACT_TYPE_REPEATER;
+
+        // Skip sender parsing for repeater messages (CLI responses often have colons)
+        const { sender, content } = isRepeater
+          ? { sender: null, content: msg.text }
+          : parseSenderFromText(msg.text);
         const displaySender = msg.outgoing
           ? 'You'
           : contact?.name || sender || msg.conversation_key?.slice(0, 8) || 'Unknown';

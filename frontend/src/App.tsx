@@ -61,10 +61,9 @@ function formatDuration(seconds: number): string {
 }
 
 // Format telemetry response as human-readable text
-// Note: Avoid "Word: " pattern at line start - it triggers sender extraction in MessageList
 function formatTelemetry(telemetry: TelemetryResponse): string {
   const lines = [
-    `[Telemetry]`,
+    `Telemetry`,
     `Battery Voltage: ${telemetry.battery_volts.toFixed(3)}V`,
     `Uptime: ${formatDuration(telemetry.uptime_seconds)}`,
     `TX Airtime: ${formatDuration(telemetry.airtime_seconds)}`,
@@ -88,11 +87,11 @@ function formatTelemetry(telemetry: TelemetryResponse): string {
 // Format neighbors list as human-readable text
 function formatNeighbors(neighbors: NeighborInfo[]): string {
   if (neighbors.length === 0) {
-    return '[Neighbors]\nNo neighbors reported';
+    return 'Neighbors\nNo neighbors reported';
   }
   // Sort by SNR descending (highest first)
   const sorted = [...neighbors].sort((a, b) => b.snr - a.snr);
-  const lines = [`[Neighbors] (${sorted.length})`];
+  const lines = [`Neighbors (${sorted.length})`];
   for (const n of sorted) {
     const name = n.name || n.pubkey_prefix;
     const snr = n.snr >= 0 ? `+${n.snr.toFixed(1)}` : n.snr.toFixed(1);
@@ -104,9 +103,9 @@ function formatNeighbors(neighbors: NeighborInfo[]): string {
 // Format ACL list as human-readable text
 function formatAcl(acl: AclEntry[]): string {
   if (acl.length === 0) {
-    return '[ACL]\nNo ACL entries';
+    return 'ACL\nNo ACL entries';
   }
-  const lines = [`[ACL] (${acl.length})`];
+  const lines = [`ACL (${acl.length})`];
   for (const entry of acl) {
     const name = entry.name || entry.pubkey_prefix;
     lines.push(`${name}: ${entry.permission_name}`);
@@ -172,6 +171,8 @@ export function App() {
   const [undecryptedCount, setUndecryptedCount] = useState(0);
   const [showCracker, setShowCracker] = useState(false);
   const [crackerRunning, setCrackerRunning] = useState(false);
+  // Track if we've logged into the current repeater (for CLI command mode)
+  const [repeaterLoggedIn, setRepeaterLoggedIn] = useState(false);
   // Track last message times (persisted in localStorage, used for sorting)
   const [lastMessageTimes, setLastMessageTimes] = useState<ConversationTimes>(getLastMessageTimes);
   // Track unread counts (calculated on load and incremented during session)
@@ -555,6 +556,9 @@ export function App() {
   useEffect(() => {
     activeConversationRef.current = activeConversation;
 
+    // Reset repeater login state when conversation changes
+    setRepeaterLoggedIn(false);
+
     // Mark conversation as read when user views it
     if (activeConversation && activeConversation.type !== 'raw') {
       const key = getStateKey(
@@ -670,6 +674,9 @@ export function App() {
 
         // Add all messages to the list
         setMessages((prev) => [...prev, telemetryMessage, neighborsMessage, aclMessage]);
+
+        // Mark as logged in for CLI command mode
+        setRepeaterLoggedIn(true);
       } catch (err) {
         // Show error as a local message
         const errorMessage: Message = {
@@ -689,6 +696,72 @@ export function App() {
       }
     },
     [activeConversation, activeContactIsRepeater]
+  );
+
+  // Send CLI command to a repeater (after logged in)
+  const handleRepeaterCommand = useCallback(
+    async (command: string) => {
+      if (!activeConversation || activeConversation.type !== 'contact') return;
+      if (!activeContactIsRepeater || !repeaterLoggedIn) return;
+
+      const now = Math.floor(Date.now() / 1000);
+
+      // Show the command as an outgoing message
+      const commandMessage: Message = {
+        id: -Date.now(),
+        type: 'PRIV',
+        conversation_key: activeConversation.id,
+        text: `> ${command}`,
+        sender_timestamp: now,
+        received_at: now,
+        path_len: null,
+        txt_type: 0,
+        signature: null,
+        outgoing: true,
+        acked: true,
+      };
+      setMessages((prev) => [...prev, commandMessage]);
+
+      try {
+        const response = await api.sendRepeaterCommand(activeConversation.id, command);
+
+        // Use the actual timestamp from the repeater if available
+        const responseTimestamp = response.sender_timestamp ?? now;
+
+        // Show the response
+        const responseMessage: Message = {
+          id: -Date.now() - 1,
+          type: 'PRIV',
+          conversation_key: activeConversation.id,
+          text: response.response,
+          sender_timestamp: responseTimestamp,
+          received_at: now,
+          path_len: null,
+          txt_type: 0,
+          signature: null,
+          outgoing: false,
+          acked: true,
+        };
+
+        setMessages((prev) => [...prev, responseMessage]);
+      } catch (err) {
+        const errorMessage: Message = {
+          id: -Date.now() - 1,
+          type: 'PRIV',
+          conversation_key: activeConversation.id,
+          text: `Command failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
+          sender_timestamp: now,
+          received_at: now,
+          path_len: null,
+          txt_type: 0,
+          signature: null,
+          outgoing: false,
+          acked: true,
+        };
+        setMessages((prev) => [...prev, errorMessage]);
+      }
+    },
+    [activeConversation, activeContactIsRepeater, repeaterLoggedIn]
   );
 
   // Config save handler
@@ -983,14 +1056,20 @@ export function App() {
                 />
                 <MessageInput
                   ref={messageInputRef}
-                  onSend={activeContactIsRepeater ? handleTelemetryRequest : handleSendMessage}
+                  onSend={
+                    activeContactIsRepeater
+                      ? (repeaterLoggedIn ? handleRepeaterCommand : handleTelemetryRequest)
+                      : handleSendMessage
+                  }
                   disabled={!health?.radio_connected}
-                  isRepeaterMode={activeContactIsRepeater}
+                  isRepeaterMode={activeContactIsRepeater && !repeaterLoggedIn}
                   placeholder={
                     !health?.radio_connected
                       ? 'Radio not connected'
                       : activeContactIsRepeater
-                        ? `Enter password for ${activeConversation.name} (or . for none)...`
+                        ? (repeaterLoggedIn
+                            ? 'Send CLI command (requires admin login)...'
+                            : `Enter password for ${activeConversation.name} (or . for none)...`)
                         : `Message ${activeConversation.name}...`
                   }
                 />

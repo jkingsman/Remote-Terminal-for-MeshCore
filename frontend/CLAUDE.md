@@ -144,6 +144,9 @@ await api.reconnectRadio();  // Returns { status, message, connected }
 
 // Repeater telemetry
 await api.requestTelemetry(publicKey, password);  // Returns TelemetryResponse
+
+// Repeater CLI commands (after login)
+await api.sendRepeaterCommand(publicKey, 'ver');  // Returns CommandResponse
 ```
 
 ### API Proxy (Development)
@@ -232,6 +235,12 @@ interface TelemetryResponse {
   neighbors: NeighborInfo[];
   acl: AclEntry[];
 }
+
+interface CommandResponse {
+  command: string;
+  response: string;
+  sender_timestamp: number | null;
+}
 ```
 
 ## Component Patterns
@@ -264,24 +273,56 @@ messageInputRef.current?.appendText(`@[${sender}] `);
 
 ### Repeater Mode
 
-When selecting a repeater contact (type=2), MessageInput switches to password mode:
+Repeater contacts (type=2) have a two-phase interaction:
 
+**Phase 1: Login (password mode)**
 - Input type changes to `password`
 - Button shows "Fetch" instead of "Send"
-- Submitting requests telemetry instead of sending a message
-- Enter "." for empty password
+- Enter "." for empty password (converted to empty string)
+- Submitting requests telemetry + logs in
+
+**Phase 2: CLI commands (after login)**
+- Input switches back to normal text
+- Placeholder shows "Enter CLI command..."
+- Commands sent via `/contacts/{key}/command` endpoint
+- Responses displayed as local messages (not persisted to database)
 
 ```typescript
+// State tracking
+const [repeaterLoggedIn, setRepeaterLoggedIn] = useState(false);
+
+// Reset on conversation change
+useEffect(() => {
+  setRepeaterLoggedIn(false);
+}, [activeConversation?.id]);
+
+// Mode switches after successful telemetry
+const isRepeaterMode = activeContactIsRepeater && !repeaterLoggedIn;
+
 <MessageInput
-  onSend={activeContactIsRepeater ? handleTelemetryRequest : handleSendMessage}
-  isRepeaterMode={activeContactIsRepeater}
+  onSend={isRepeaterMode ? handleTelemetryRequest :
+          (repeaterLoggedIn ? handleRepeaterCommand : handleSendMessage)}
+  isRepeaterMode={isRepeaterMode}
+  placeholder={repeaterLoggedIn ? 'Enter CLI command...' : undefined}
 />
 ```
 
 Telemetry response is displayed as three local messages (not persisted):
-1. **[Telemetry]** - Battery voltage, uptime, signal quality, packet stats
-2. **[Neighbors]** - Sorted by SNR (highest first), with resolved names
-3. **[ACL]** - Access control list with permission levels
+1. **Telemetry** - Battery voltage, uptime, signal quality, packet stats
+2. **Neighbors** - Sorted by SNR (highest first), with resolved names
+3. **ACL** - Access control list with permission levels
+
+### Repeater Message Rendering
+
+Repeater CLI responses often contain colons (e.g., `clock: 12:30:00`). To prevent
+incorrect sender parsing, MessageList skips `parseSenderFromText()` for repeater contacts:
+
+```typescript
+const isRepeater = contact?.type === CONTACT_TYPE_REPEATER;
+const { sender, content } = isRepeater
+  ? { sender: null, content: msg.text }  // Preserve full text
+  : parseSenderFromText(msg.text);
+```
 
 ### Unread Count Tracking
 
@@ -432,6 +473,7 @@ npm run test        # Watch mode
 - `contactAvatar.test.ts` - Avatar text extraction, color generation, repeater handling
 - `messageDeduplication.test.ts` - Message deduplication logic
 - `websocket.test.ts` - WebSocket message routing
+- `repeaterMode.test.ts` - Repeater CLI parsing, password "." conversion
 
 ### Test Setup
 

@@ -181,6 +181,7 @@ All endpoints are prefixed with `/api` (e.g., `/api/health`).
 | GET | `/api/contacts` | List contacts |
 | POST | `/api/contacts/sync` | Pull from radio |
 | POST | `/api/contacts/{key}/telemetry` | Request telemetry from repeater |
+| POST | `/api/contacts/{key}/command` | Send CLI command to repeater |
 | GET | `/api/channels` | List channels |
 | POST | `/api/channels` | Create channel |
 | GET | `/api/messages` | List with filters |

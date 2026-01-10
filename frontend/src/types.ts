@@ -149,3 +149,9 @@ export interface TelemetryResponse {
   neighbors: NeighborInfo[];
   acl: AclEntry[];
 }
+
+export interface CommandResponse {
+  command: string;
+  response: string;
+  sender_timestamp: number | null;
+}

@@ -2,6 +2,7 @@ import type {
   AppSettings,
   AppSettingsUpdate,
   Channel,
+  CommandResponse,
   Contact,
   HealthStatus,
   Message,
@@ -85,6 +86,11 @@ export const api = {
     fetchJson<TelemetryResponse>(`/contacts/${publicKey}/telemetry`, {
       method: 'POST',
       body: JSON.stringify({ password }),
+    }),
+  sendRepeaterCommand: (publicKey: string, command: string) =>
+    fetchJson<CommandResponse>(`/contacts/${publicKey}/command`, {
+      method: 'POST',
+      body: JSON.stringify({ command }),
     }),
 
   // Channels

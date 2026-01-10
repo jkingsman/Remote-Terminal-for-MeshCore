@@ -44,6 +44,14 @@ async def on_contact_message(event: "Event") -> None:
     The packet processor cannot decrypt these without the node's private key.
     """
     payload = event.payload
+
+    # Skip CLI command responses (txt_type=1) - these are handled by the command endpoint
+    # and should not be stored in the database or broadcast via WebSocket
+    txt_type = payload.get("txt_type", 0)
+    if txt_type == 1:
+        logger.debug("Skipping CLI response from %s (txt_type=1)", payload.get("pubkey_prefix"))
+        return
+
     logger.debug("Received direct message from %s", payload.get("pubkey_prefix"))
 
     # Get full public key if available, otherwise use prefix

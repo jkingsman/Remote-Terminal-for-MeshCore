@@ -193,3 +193,90 @@ class TestAckEventHandler:
             await on_ack(MockEvent())
 
             mock_repo.mark_acked.assert_not_called()
+
+
+class TestContactMessageCLIFiltering:
+    """Test that CLI responses (txt_type=1) are filtered out.
+
+    This prevents duplicate messages when sending CLI commands to repeaters:
+    the command endpoint returns the response directly, so we must NOT also
+    persist/broadcast it via the normal message handler.
+    """
+
+    @pytest.mark.asyncio
+    async def test_cli_response_skipped_not_stored(self):
+        """CLI responses (txt_type=1) are not stored in database."""
+        from app.event_handlers import on_contact_message
+
+        with patch("app.event_handlers.MessageRepository") as mock_repo, \
+             patch("app.event_handlers.ContactRepository") as mock_contact_repo, \
+             patch("app.event_handlers.broadcast_event") as mock_broadcast:
+
+            class MockEvent:
+                payload = {
+                    "pubkey_prefix": "abc123def456",
+                    "text": "clock: 2024-01-01 12:00:00",
+                    "txt_type": 1,  # CLI response
+                    "sender_timestamp": 1700000000,
+                }
+
+            await on_contact_message(MockEvent())
+
+            # Should NOT store in database
+            mock_repo.create.assert_not_called()
+            # Should NOT broadcast via WebSocket
+            mock_broadcast.assert_not_called()
+            # Should NOT update contact last_contacted
+            mock_contact_repo.update_last_contacted.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_normal_message_still_processed(self):
+        """Normal messages (txt_type=0) are still processed normally."""
+        from app.event_handlers import on_contact_message
+
+        with patch("app.event_handlers.MessageRepository") as mock_repo, \
+             patch("app.event_handlers.ContactRepository") as mock_contact_repo, \
+             patch("app.event_handlers.broadcast_event") as mock_broadcast:
+
+            mock_repo.create = AsyncMock(return_value=42)
+            mock_contact_repo.get_by_key_prefix = AsyncMock(return_value=None)
+
+            class MockEvent:
+                payload = {
+                    "pubkey_prefix": "abc123def456",
+                    "text": "Hello, this is a normal message",
+                    "txt_type": 0,  # Normal message (default)
+                    "sender_timestamp": 1700000000,
+                }
+
+            await on_contact_message(MockEvent())
+
+            # SHOULD store in database
+            mock_repo.create.assert_called_once()
+            # SHOULD broadcast via WebSocket
+            mock_broadcast.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_missing_txt_type_defaults_to_normal(self):
+        """Messages without txt_type field are treated as normal (not filtered)."""
+        from app.event_handlers import on_contact_message
+
+        with patch("app.event_handlers.MessageRepository") as mock_repo, \
+             patch("app.event_handlers.ContactRepository") as mock_contact_repo, \
+             patch("app.event_handlers.broadcast_event") as mock_broadcast:
+
+            mock_repo.create = AsyncMock(return_value=42)
+            mock_contact_repo.get_by_key_prefix = AsyncMock(return_value=None)
+
+            class MockEvent:
+                payload = {
+                    "pubkey_prefix": "abc123def456",
+                    "text": "Message without txt_type field",
+                    "sender_timestamp": 1700000000,
+                    # No txt_type field
+                }
+
+            await on_contact_message(MockEvent())
+
+            # SHOULD still be processed (defaults to txt_type=0)
+            mock_repo.create.assert_called_once()

@@ -44,9 +44,12 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
           setText('');
         } catch (err) {
           console.error('Failed to request telemetry:', err);
+          return;
         } finally {
           setSending(false);
         }
+        // Refocus after React re-enables the input (now in CLI command mode)
+        setTimeout(() => inputRef.current?.focus(), 0);
       } else {
         if (!trimmed || sending || disabled) return;
         setSending(true);
@@ -55,9 +58,12 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
           setText('');
         } catch (err) {
           console.error('Failed to send message:', err);
+          return;
         } finally {
           setSending(false);
         }
+        // Refocus after React re-enables the input
+        setTimeout(() => inputRef.current?.focus(), 0);
       }
     },
     [text, sending, disabled, onSend, isRepeaterMode]

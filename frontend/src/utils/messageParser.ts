@@ -6,8 +6,8 @@ export function parseSenderFromText(text: string): { sender: string | null; cont
   const colonIndex = text.indexOf(': ');
   if (colonIndex > 0 && colonIndex < 50) {
     const potentialSender = text.substring(0, colonIndex);
-    // Check for invalid characters that would indicate it's not a sender
-    if (!/[:\[\]]/.test(potentialSender)) {
+    // Check for colon in potential sender (would indicate it's not a simple name)
+    if (!potentialSender.includes(':')) {
       return {
         sender: potentialSender,
         content: text.substring(colonIndex + 2),

@@ -166,3 +166,15 @@ class TelemetryResponse(BaseModel):
     full_events: int = Field(description="Full event queue count")
     neighbors: list[NeighborInfo] = Field(default_factory=list, description="List of neighbors seen by repeater")
     acl: list[AclEntry] = Field(default_factory=list, description="Access control list")
+
+
+class CommandRequest(BaseModel):
+    """Request to send a CLI command to a repeater."""
+    command: str = Field(min_length=1, description="CLI command to send")
+
+
+class CommandResponse(BaseModel):
+    """Response from a repeater CLI command."""
+    command: str = Field(description="The command that was sent")
+    response: str = Field(description="Response from the repeater")
+    sender_timestamp: int | None = Field(default=None, description="Timestamp from the repeater's response")
