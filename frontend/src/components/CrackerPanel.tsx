@@ -351,6 +351,12 @@ export function CrackerPanel({ packets, channels, onChannelCreate, onRunningChan
 
   return (
     <div className="flex flex-col h-full p-3 gap-3 bg-background border-t border-border">
+      <p className="text-xs text-muted-foreground leading-relaxed">
+        This will attempt to dictionary attack, then brute force GroupText packets as they arrive, testing room names up to the specified length.
+        <strong> Retry failed at n+1</strong> will let the cracker return to the failed queue and pick up messages it couldn't crack, attempting them at one longer length.
+        <strong> Decrypt historical</strong> will run an async job on any room name it finds to see if any historically captured packets will decrypt with that key.
+        <strong> Turbo mode</strong> will push your GPU to the max (target dispatch time of 10s) and may allow accelerated cracking and/or system instability.
+      </p>
       <div className="flex items-center gap-3 flex-wrap">
         <button
           onClick={isRunning ? handleStop : handleStart}
