@@ -115,7 +115,7 @@ async def send_direct_message(request: SendDirectMessageRequest) -> Message:
         sender_timestamp=now,
         received_at=now,
         outgoing=True,
-        acked=False,
+        acked=0,
     )
 
 
@@ -202,5 +202,5 @@ async def send_channel_message(request: SendChannelMessageRequest) -> Message:
         sender_timestamp=now,
         received_at=now,
         outgoing=True,
-        acked=False,
+        acked=0,
     )

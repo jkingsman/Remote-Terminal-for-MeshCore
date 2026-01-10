@@ -9,7 +9,6 @@ This document provides context for AI assistants and developers working on the F
 - **meshcore** - MeshCore radio library (local dependency at `../meshcore_py`)
 - **Pydantic** - Data validation and settings management
 - **PyCryptodome** - AES-128 encryption for packet decryption
-- **PyNaCl** - Ed25519/X25519 key exchange for direct message decryption
 - **UV** - Python package manager
 
 ## Directory Structure
