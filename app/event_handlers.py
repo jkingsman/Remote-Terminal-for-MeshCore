@@ -44,15 +44,18 @@ async def on_contact_message(event: "Event") -> None:
     The packet processor cannot decrypt these without the node's private key.
     """
     payload = event.payload
+    pubkey_prefix = payload.get("pubkey_prefix", "unknown")
+    text_preview = payload.get("text", "")[:50]
+
+    logger.info("[DM] CONTACT_MSG_RECV from %s: %s%s",
+                pubkey_prefix, text_preview, "..." if len(payload.get("text", "")) > 50 else "")
 
     # Skip CLI command responses (txt_type=1) - these are handled by the command endpoint
     # and should not be stored in the database or broadcast via WebSocket
     txt_type = payload.get("txt_type", 0)
     if txt_type == 1:
-        logger.debug("Skipping CLI response from %s (txt_type=1)", payload.get("pubkey_prefix"))
+        logger.info("[DM] Skipping CLI response from %s (txt_type=1)", pubkey_prefix)
         return
-
-    logger.debug("Received direct message from %s", payload.get("pubkey_prefix"))
 
     # Get full public key if available, otherwise use prefix
     sender_pubkey = payload.get("public_key") or payload.get("pubkey_prefix", "")
@@ -109,20 +112,28 @@ async def on_rx_log_data(event: "Event") -> None:
     handles channel messages (GROUP_TEXT) and advertisements (ADVERT).
     """
     payload = event.payload
-    logger.debug("Received RX log data packet")
 
     if "payload" not in payload:
-        logger.warning("RX_LOG_DATA event missing 'payload' field")
+        logger.warning("[RX] RX_LOG_DATA event missing 'payload' field: %s", payload)
         return
 
     raw_hex = payload["payload"]
     raw_bytes = bytes.fromhex(raw_hex)
+    snr = payload.get("snr")
+    rssi = payload.get("rssi")
 
-    await process_raw_packet(
+    logger.info("[RX] RX_LOG_DATA received: %d bytes, SNR=%.1f, RSSI=%s",
+                len(raw_bytes), snr if snr is not None else 0, rssi)
+
+    result = await process_raw_packet(
         raw_bytes=raw_bytes,
-        snr=payload.get("snr"),
-        rssi=payload.get("rssi"),
+        snr=snr,
+        rssi=rssi,
     )
+
+    logger.info("[RX] Processed: type=%s, decrypted=%s, channel=%s, msg_id=%s",
+                result.get("payload_type"), result.get("decrypted"),
+                result.get("channel_name"), result.get("message_id"))
 
 
 async def on_path_update(event: "Event") -> None:
@@ -193,9 +204,15 @@ def register_event_handlers(meshcore) -> None:
     These are handled by the packet processor via RX_LOG_DATA to avoid
     duplicate processing and ensure consistent handling.
     """
+    logger.info("[INIT] Registering event handlers...")
     meshcore.subscribe(EventType.CONTACT_MSG_RECV, on_contact_message)
+    logger.info("[INIT] Subscribed to CONTACT_MSG_RECV (direct messages)")
     meshcore.subscribe(EventType.RX_LOG_DATA, on_rx_log_data)
+    logger.info("[INIT] Subscribed to RX_LOG_DATA (raw packets for channel messages)")
     meshcore.subscribe(EventType.PATH_UPDATE, on_path_update)
+    logger.info("[INIT] Subscribed to PATH_UPDATE")
     meshcore.subscribe(EventType.NEW_CONTACT, on_new_contact)
+    logger.info("[INIT] Subscribed to NEW_CONTACT")
     meshcore.subscribe(EventType.ACK, on_ack)
-    logger.info("Event handlers registered")
+    logger.info("[INIT] Subscribed to ACK")
+    logger.info("[INIT] All event handlers registered successfully")

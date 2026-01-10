@@ -30,25 +30,27 @@ async def lifespan(app: FastAPI):
 
     try:
         await radio_manager.connect()
-        logger.info("Connected to radio")
+        logger.info("[STARTUP] Connected to radio at %s", radio_manager.port)
         if radio_manager.meshcore:
+            logger.info("[STARTUP] Registering event handlers for message reception...")
             register_event_handlers(radio_manager.meshcore)
 
             # Sync contacts/channels from radio to DB and clear radio
-            logger.info("Syncing and offloading radio data...")
+            logger.info("[STARTUP] Syncing and offloading radio data...")
             result = await sync_and_offload_all()
-            logger.info("Sync complete: %s", result)
+            logger.info("[STARTUP] Sync complete: %s", result)
 
             # Start periodic sync
             start_periodic_sync()
 
             # Send advertisement to announce our presence
-            logger.info("Sending startup advertisement...")
+            logger.info("[STARTUP] Sending startup advertisement...")
             advert_result = await radio_manager.meshcore.commands.send_advert(flood=True)
-            logger.info("Advertisement sent: %s", advert_result.type)
+            logger.info("[STARTUP] Advertisement sent: %s", advert_result.type)
 
+            logger.info("[STARTUP] Starting auto message fetching...")
             await radio_manager.meshcore.start_auto_message_fetching()
-            logger.info("Auto message fetching started")
+            logger.info("[STARTUP] Auto message fetching started - ready to receive messages")
     except Exception as e:
         logger.warning("Failed to connect to radio on startup: %s", e)
 
