@@ -1,6 +1,6 @@
 # RemoteTerm for MeshCore
 
-Web interface for MeshCore mesh radio networks. Attach your radio over serial, and then you can:
+Backend server + browser interface for MeshCore mesh radio networks. Attach your radio over serial, and then you can:
 
 * Send and receive DMs and GroupTexts
 * Cache all received packets, decrypting as you gain keys
