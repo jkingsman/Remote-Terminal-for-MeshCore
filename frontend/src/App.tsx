@@ -816,6 +816,7 @@ export function App() {
                   hasOlderMessages={hasOlderMessages}
                   onSenderClick={activeConversation.type === 'channel' ? handleSenderClick : undefined}
                   onLoadOlder={fetchOlderMessages}
+                  radioName={config?.name}
                 />
                 <MessageInput
                   ref={messageInputRef}

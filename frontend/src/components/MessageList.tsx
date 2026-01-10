@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useCallback, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useCallback, useState, type ReactNode } from 'react';
 import type { Contact, Message } from '../types';
 import { formatTime, parseSenderFromText } from '../utils/messageParser';
 import { pubkeysMatch } from '../utils/pubkey';
@@ -13,6 +13,51 @@ interface MessageListProps {
   hasOlderMessages?: boolean;
   onSenderClick?: (sender: string) => void;
   onLoadOlder?: () => void;
+  radioName?: string;
+}
+
+// Helper to render text with highlighted @[Name] mentions
+function renderTextWithMentions(text: string, radioName?: string): ReactNode {
+  if (!radioName) return text;
+
+  const mentionPattern = /@\[([^\]]+)\]/g;
+  const parts: ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let keyIndex = 0;
+
+  while ((match = mentionPattern.exec(text)) !== null) {
+    // Add text before the match
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+
+    const mentionedName = match[1];
+    const isOwnMention = mentionedName === radioName;
+
+    parts.push(
+      <span
+        key={keyIndex++}
+        className={cn(
+          "rounded px-0.5",
+          isOwnMention
+            ? "bg-primary/30 text-primary font-medium"
+            : "bg-muted-foreground/20"
+        )}
+      >
+        @[{mentionedName}]
+      </span>
+    );
+
+    lastIndex = match.index + match[0].length;
+  }
+
+  // Add remaining text after last match
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+
+  return parts.length > 0 ? parts : text;
 }
 
 export function MessageList({
@@ -23,6 +68,7 @@ export function MessageList({
   hasOlderMessages = false,
   onSenderClick,
   onLoadOlder,
+  radioName,
 }: MessageListProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const prevMessagesLengthRef = useRef<number>(0);
@@ -234,7 +280,7 @@ export function MessageList({
               <div className="break-words whitespace-pre-wrap">
                 {content.split('\n').map((line, i, arr) => (
                   <span key={i}>
-                    {line}
+                    {renderTextWithMentions(line, radioName)}
                     {i < arr.length - 1 && <br />}
                   </span>
                 ))}
