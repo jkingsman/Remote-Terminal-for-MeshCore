@@ -12,7 +12,10 @@ from app.database import db
 from app.event_handlers import register_event_handlers
 from app.radio import radio_manager
 from app.radio_sync import (
+    drain_pending_messages,
+    start_message_polling,
     start_periodic_sync,
+    stop_message_polling,
     stop_periodic_sync,
     sync_and_offload_all,
 )
@@ -30,27 +33,33 @@ async def lifespan(app: FastAPI):
 
     try:
         await radio_manager.connect()
-        logger.info("[STARTUP] Connected to radio at %s", radio_manager.port)
+        logger.info("Connected to radio")
         if radio_manager.meshcore:
-            logger.info("[STARTUP] Registering event handlers for message reception...")
             register_event_handlers(radio_manager.meshcore)
 
             # Sync contacts/channels from radio to DB and clear radio
-            logger.info("[STARTUP] Syncing and offloading radio data...")
+            logger.info("Syncing and offloading radio data...")
             result = await sync_and_offload_all()
-            logger.info("[STARTUP] Sync complete: %s", result)
+            logger.info("Sync complete: %s", result)
 
             # Start periodic sync
             start_periodic_sync()
 
             # Send advertisement to announce our presence
-            logger.info("[STARTUP] Sending startup advertisement...")
+            logger.info("Sending startup advertisement...")
             advert_result = await radio_manager.meshcore.commands.send_advert(flood=True)
-            logger.info("[STARTUP] Advertisement sent: %s", advert_result.type)
+            logger.info("Advertisement sent: %s", advert_result.type)
 
-            logger.info("[STARTUP] Starting auto message fetching...")
             await radio_manager.meshcore.start_auto_message_fetching()
-            logger.info("[STARTUP] Auto message fetching started - ready to receive messages")
+            logger.info("Auto message fetching started")
+
+            # Drain any messages that were queued before we connected
+            drained = await drain_pending_messages()
+            if drained > 0:
+                logger.info("Drained %d pending message(s)", drained)
+
+            # Start periodic message polling as fallback for unreliable push events
+            start_message_polling()
     except Exception as e:
         logger.warning("Failed to connect to radio on startup: %s", e)
 
@@ -61,6 +70,7 @@ async def lifespan(app: FastAPI):
 
     logger.info("Shutting down")
     await radio_manager.stop_connection_monitor()
+    stop_message_polling()
     stop_periodic_sync()
     if radio_manager.meshcore:
         await radio_manager.meshcore.stop_auto_message_fetching()

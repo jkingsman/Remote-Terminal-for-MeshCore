@@ -134,7 +134,7 @@ async def process_raw_packet(
     # If packet_id is None, this is a duplicate packet (same data already exists)
     # Skip processing since we've already handled this exact packet
     if packet_id is None:
-        logger.info("[PKT] Duplicate packet detected (same bytes), skipping")
+        logger.debug("Duplicate raw packet detected, skipping")
         return {
             "packet_id": None,
             "timestamp": ts,
@@ -154,9 +154,6 @@ async def process_raw_packet(
     packet_info = parse_packet(raw_bytes)
     payload_type = packet_info.payload_type if packet_info else None
     payload_type_name = payload_type.name if payload_type else "Unknown"
-
-    logger.info("[PKT] New packet id=%d, type=%s, %d bytes",
-                packet_id, payload_type_name, len(raw_bytes))
 
     result = {
         "packet_id": packet_id,
@@ -220,7 +217,6 @@ async def _process_group_text(
     """
     # Try to decrypt with all known channel keys
     channels = await ChannelRepository.get_all()
-    logger.info("[CHAN] Attempting decryption with %d known channel keys", len(channels))
 
     for channel in channels:
         # Convert hex key to bytes for decryption
@@ -234,9 +230,10 @@ async def _process_group_text(
             continue
 
         # Successfully decrypted!
-        logger.info("[CHAN] Decrypted with channel '%s': %s%s",
-                    channel.name, decrypted.message[:50],
-                    "..." if len(decrypted.message) > 50 else "")
+        logger.debug(
+            "Decrypted GroupText for channel %s: %s",
+            channel.name, decrypted.message[:50]
+        )
 
         # Check for repeat detection (our own message echoed back)
         is_repeat = False
@@ -329,7 +326,6 @@ async def _process_group_text(
         }
 
     # Couldn't decrypt with any known key
-    logger.info("[CHAN] No matching channel key found for GROUP_TEXT packet")
     return None
 
 
@@ -345,11 +341,10 @@ async def _process_advertisement(
     """
     advert = try_parse_advertisement(raw_bytes)
     if not advert:
-        logger.info("[ADVERT] Failed to parse advertisement packet")
+        logger.debug("Failed to parse advertisement packet")
         return
 
-    logger.info("[ADVERT] From %s: name='%s', lat=%.4f, lon=%.4f",
-                advert.public_key[:12], advert.name, advert.lat or 0, advert.lon or 0)
+    logger.debug("Parsed advertisement from %s: %s", advert.public_key[:12], advert.name)
 
     # Try to find existing contact
     existing = await ContactRepository.get_by_key(advert.public_key)

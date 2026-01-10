@@ -137,8 +137,11 @@ class RadioManager:
             if not port:
                 raise RuntimeError("No MeshCore radio found. Please specify MESHCORE_SERIAL_PORT.")
 
-        logger.info("[RADIO] Connecting to radio at %s (baud %d)...",
-                    port, settings.serial_baudrate)
+        logger.debug(
+            "Connecting to radio at %s (baud %d)",
+            port,
+            settings.serial_baudrate,
+        )
         self._meshcore = await MeshCore.create_serial(
             port=port,
             baudrate=settings.serial_baudrate,
@@ -147,11 +150,7 @@ class RadioManager:
         )
         self._port = port
         self._last_connected = True
-        logger.info("[RADIO] Serial connection established to %s", port)
-        if self._meshcore.self_info:
-            logger.info("[RADIO] Radio info: name='%s', pubkey=%s...",
-                        self._meshcore.self_info.get("name", "unknown"),
-                        self._meshcore.self_info.get("public_key", "")[:16])
+        logger.debug("Serial connection established")
 
     async def disconnect(self) -> None:
         """Disconnect from the radio."""
