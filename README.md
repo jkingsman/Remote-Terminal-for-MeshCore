@@ -2,118 +2,97 @@
 
 Web interface for MeshCore mesh radio networks. Attach your radio over serial, and then you can:
 
-* Cache all received packets, decrypting as you gain keys
 * Send and receive DMs and GroupTexts
-* Passively monitor as many contacts and channels as you want; radio limitations are irrelevant as all packets get hoovered up, then decrypted serverside
-* Use your radio remotely over your network or away from home over a VPN
-* Look for hashtag room names by brute forcing channel keys of GroupTexts you don't have the keys for yet
+* Cache all received packets, decrypting as you gain keys
+* Monitor unlimited contacts and channels (radio limits don't apply—packets are decrypted server-side)
+* Access your radio remotely over your network or VPN
+* Brute force hashtag room names for GroupTexts you don't have keys for yet
 
-This app is fully trustful, with no endpoint protection, and is intended to be run on a protected, private network. **Do not run this application on the open internet unless you want strangers sending traffic as you!**
+**Warning:** This app has no authentication. Run it on a private network only—do not expose to the internet unless you want strangers sending traffic as you.
 
 ![Screenshot of the application's web interface](screenshot.png)
 
-## This is a personal toolkit, and not optimized for general consumption! This is entirely vibecoded slop and I make no warranty of fitness for any purpose.
+## Disclaimer
 
-For real, this code is bad and totally LLM generated. If you insist on extending it, there are three `CLAUDE.md` fils you should have your LLM read in `./CLAUDE.md`, `./frontend/CLAUDE.md`, and `./app/CLAUDE.md`.
+This is a personal toolkit, not optimized for general consumption. Entirely vibecoded slop—no warranty of fitness for any purpose.
+
+If extending, read the three `CLAUDE.md` files: `./CLAUDE.md`, `./frontend/CLAUDE.md`, and `./app/CLAUDE.md`.
 
 ## Requirements
 
 - Python 3.10+
-- Node.js 18+ (only needed for frontend development)
-- UV (Python package manager): `curl -LsSf https://astral.sh/uv/install.sh | sh`
-- MeshCore-compatible radio connected via USB serial
+- Node.js 18+ (for frontend development only)
+- [UV](https://astral.sh/uv) package manager: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+- MeshCore radio connected via USB serial
+
+**Find your serial port:**
+```bash
+# Linux
+ls /dev/ttyUSB* /dev/ttyACM*
+
+# macOS
+ls /dev/cu.usbserial-* /dev/cu.usbmodem*
+```
 
 ## Quick Start
 
-### Run Backend + Serve Built-In Frontend (recommended)
+**This approach is recommended over Docker due to intermittent serial communications issues I've seen on \*nix systems.**
 
-This is the most reliable way to run this system, as Docker has seen intermittent issues with serial forwarding in my experience. Note that you'll need to replace `/dev/ttyUSB0` with whatever appears when you run `ls /dev/ttyUSB* /dev/ttyACM*` (Linux) or `ls /dev/cu.usbserial-* /dev/cu.usbmodem*` (Mac).
-
+The frontend is pre-built -- just run the backend:
 
 ```bash
-# Clone repo
-https://github.com/jkingsman/Remote-Terminal-for-MeshCore.git
+git clone https://github.com/jkingsman/Remote-Terminal-for-MeshCore.git
 cd Remote-Terminal-for-MeshCore
 
-# Install dependencies; run `curl -LsSf https://astral.sh/uv/install.sh | sh` if you don't have UV installed
 uv sync
-
-# Run with auto rela(auto-detects serial port)
 uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
 
-# Or specify port explicitly
+The server auto-detects the serial port. To specify manually:
+```bash
 MESHCORE_SERIAL_PORT=/dev/ttyUSB0 uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-Backend runs at http://localhost:8000, and will preferentially serve from `./frontend/dist` for the GUI. If you want to do GUI development, see below and use http://localhost:5173 for the GUI.
+Access at http://localhost:8000
 
-See the `HTTPS` section below if you're serving this anywhere but localhost and need the GPU cracker to function.
+> **Note:** WebGPU cracking requires HTTPS when not on localhost. See the HTTPS section under Additional Setup.
 
-**If you just want to run this as-is (all commits push a distribution-ready frontend build), you can just run the backend and access the GUI from there; no need to boot the frontend**
+## Docker
 
-Dev server runs the frontend at http://localhost:5173
-
-### Docker
-
-**Important note: I have seen intermittent issues with certain serial subscription events making it back from the radio with Docker. For now, I highly recommend using the "Backend" method listed above.**
-
-Note that you'll need to replace `/dev/ttyUSB0` with whatever appears when you run `ls /dev/ttyUSB* /dev/ttyACM*` (Linux) or `ls /dev/cu.usbserial-* /dev/cu.usbmodem*` (Mac).
+> **Warning:** Docker has intermittent issues with serial event subscriptions. The native method above is more reliable.
 
 ```bash
-# basic invocation without TLS
 docker run -d \
   --device=/dev/ttyUSB0 \
   -v remoteterm-data:/app/data \
   -p 8000:8000 \
-  jkingsman/remoteterm-meshcore:latest
-
-# optional; if you want roomname discovery to work on any host except localhost: WebGPU requires a cert, even snakeoil, to function
-openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes -subj '/CN=localhost'
-docker run -d \
-  --device=/dev/ttyUSB0 \
-  -v remoteterm-data:/app/data \
-  -v $(pwd)/cert.pem:/app/cert.pem:ro \
-  -v $(pwd)/key.pem:/app/key.pem:ro \
-  -p 8000:8000 \
-  jkingsman/remoteterm-meshcore:latest \
-  uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --ssl-keyfile=/app/key.pem --ssl-certfile=/app/cert.pem
+  jkingsman/remote-terminal-for-meshcore:latest
 ```
 
 ## Development
 
-### Frontend hot reload
+### Backend
+
+```bash
+uv sync
+uv run uvicorn app.main:app --reload
+
+# Or with explicit serial port
+MESHCORE_SERIAL_PORT=/dev/ttyUSB0 uv run uvicorn app.main:app --reload
+```
+
+### Frontend
 
 ```bash
 cd frontend
-
-# Install dependencies
 npm install
-
-# Development server with hot reload (proxies API to localhost:8000)
-npm run dev
+npm run dev      # Dev server at http://localhost:5173 (proxies API to :8000)
+npm run build    # Production build to dist/
 ```
 
-When you're done, write out the frontend so it can be served by FastAPI:
+Run both the backend and `npm run dev` for hot-reloading frontend development.
 
-```bash
-# Production build; writes out to dist/
-npm run build
-```
-
-## Backend hot reload
-
-```bash
-# Install dependencies; run `curl -LsSf https://astral.sh/uv/install.sh | sh` if you don't have UV installed
-uv sync
-
-# Run with auto rela(auto-detects serial port)
-uv run uvicorn app.main:app --reload
-
-# Or specify port explicitly
-MESHCORE_SERIAL_PORT=/dev/cu.usbserial-0001 uv run uvicorn app.main:app --reload
-```
-
-## Environment Variables
+## Configuration
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -121,95 +100,90 @@ MESHCORE_SERIAL_PORT=/dev/cu.usbserial-0001 uv run uvicorn app.main:app --reload
 | `MESHCORE_SERIAL_BAUDRATE` | 115200 | Baud rate |
 | `MESHCORE_LOG_LEVEL` | INFO | DEBUG, INFO, WARNING, ERROR |
 | `MESHCORE_DATABASE_PATH` | data/meshcore.db | SQLite database path |
-| `MESHCORE_MAX_RADIO_CONTACTS` | 200 | Default max recent contacts to keep on radio for DM ACKs |
+| `MESHCORE_MAX_RADIO_CONTACTS` | 200 | Max recent contacts to keep on radio for DM ACKs |
 
-## Other Details...
+## Additional Setup
 
 <details>
-<summary>HTTPS Reminder (Required for WebGPU Cracking)</summary>
+<summary>HTTPS (Required for WebGPU Cracking outside localhost)</summary>
 
-WebGPU requires a secure context. To use the channel key cracker when not serving on `localhost` (which is always permitted GPU access), serve over HTTPS:
+WebGPU requires a secure context. When not on `localhost`, serve over HTTPS:
 
 ```bash
-# Generate self-signed cert
 openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes -subj '/CN=localhost'
-
-# Run with SSL
 uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --ssl-keyfile=key.pem --ssl-certfile=cert.pem
 ```
 
-Accept the browser security warning on first visit. For locally-trusted certs without warnings, use [mkcert](https://github.com/FiloSottile/mkcert).
+For Docker:
+
+```bash
+# generate TLS cert
+openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes -subj '/CN=localhost'
+
+# run with cert
+docker run -d \
+  --device=/dev/ttyUSB0 \
+  -v remoteterm-data:/app/data \
+  -v $(pwd)/cert.pem:/app/cert.pem:ro \
+  -v $(pwd)/key.pem:/app/key.pem:ro \
+  -p 8000:8000 \
+  jkingsman/remote-terminal-for-meshcore:latest \
+  uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --ssl-keyfile=/app/key.pem --ssl-certfile=/app/cert.pem
+```
+
+Accept the browser warning, or use [mkcert](https://github.com/FiloSottile/mkcert) for locally-trusted certs.
 </details>
 
 <details>
 <summary>Systemd Service (Linux)</summary>
 
-To run as a system service:
-
 ```bash
-# 1. Create service user (with home directory for uv cache)
+# Create service user
 sudo useradd -r -m -s /bin/false remoteterm
 
-# 2. Install to /opt/remoteterm
+# Install to /opt/remoteterm
 sudo mkdir -p /opt/remoteterm
 sudo cp -r . /opt/remoteterm/
 sudo chown -R remoteterm:remoteterm /opt/remoteterm
 
-# 3. Create virtualenv and install deps (may need to install uv for the user with curl -LsSf https://astral.sh/uv/install.sh | sudo -u remoteterm sh)
+# Install dependencies
 cd /opt/remoteterm
 sudo -u remoteterm uv venv
 sudo -u remoteterm uv sync
 
-# 4. Build frontend
+# Build frontend (optional—already built in repo)
 cd /opt/remoteterm/frontend
 sudo -u remoteterm npm install
 sudo -u remoteterm npm run build
 
-# 5. Install and start service
+# Install and start service
 sudo cp /opt/remoteterm/remoteterm.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable remoteterm
-sudo systemctl start remoteterm
+sudo systemctl enable --now remoteterm
 
 # Check status
 sudo systemctl status remoteterm
 sudo journalctl -u remoteterm -f
 ```
 
-Edit `/etc/systemd/system/remoteterm.service` to set `MESHCORE_SERIAL_PORT` if auto-detection doesn't work.
-
+Edit `/etc/systemd/system/remoteterm.service` to set `MESHCORE_SERIAL_PORT` if needed.
 </details>
 
 <details>
 <summary>Testing</summary>
 
-### Backend (pytest)
-
+**Backend:**
 ```bash
-# Install test dependencies
-uv sync --extra test
-
-# Run all tests
 PYTHONPATH=. uv run pytest tests/ -v
-
-# Run specific test file
-PYTHONPATH=. uv run pytest tests/test_decoder.py -v
 ```
 
-### Frontend (Vitest)
-
+**Frontend:**
 ```bash
 cd frontend
-npm install
-
-# Run tests once
 npm run test:run
-
-# Run tests in watch mode
-npm test
 ```
 </details>
 
-## API Docs
+## API Documentation
 
-With the backend running, visit http://localhost:8000/docs for interactive API documentation.
+With the backend running: http://localhost:8000/docs
