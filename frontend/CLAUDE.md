@@ -560,7 +560,7 @@ The `CrackerPanel` component provides WebGPU-accelerated brute-forcing of channe
 
 ### Features
 
-- **Dictionary attack first**: Uses `words_alpha.txt` wordlist
+- **Dictionary attack first**: Uses `words.txt` wordlist
 - **GPU bruteforce**: Falls back to character-by-character search
 - **Queue management**: Automatically processes new packets as they arrive
 - **Auto-channel creation**: Cracked channels are automatically added to the channel list
