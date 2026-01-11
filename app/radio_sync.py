@@ -12,6 +12,7 @@ don't work reliably.
 import asyncio
 import logging
 import time
+from contextlib import asynccontextmanager
 
 from meshcore import EventType
 
@@ -27,6 +28,20 @@ _message_poll_task: asyncio.Task | None = None
 
 # Message poll interval in seconds
 MESSAGE_POLL_INTERVAL = 5
+
+# Flag to pause polling during repeater operations
+_polling_paused: bool = False
+
+
+@asynccontextmanager
+async def pause_polling():
+    """Context manager to pause message polling during repeater operations."""
+    global _polling_paused
+    _polling_paused = True
+    try:
+        yield
+    finally:
+        _polling_paused = False
 
 # Background task handle
 _sync_task: asyncio.Task | None = None
@@ -276,7 +291,7 @@ async def _message_poll_loop():
         try:
             await asyncio.sleep(MESSAGE_POLL_INTERVAL)
 
-            if radio_manager.is_connected:
+            if radio_manager.is_connected and not _polling_paused:
                 await poll_for_messages()
 
         except asyncio.CancelledError:

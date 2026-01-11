@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { api } from './api';
 import { useWebSocket } from './useWebSocket';
+import { useRepeaterMode, useUnreadCounts, useConversationMessages } from './hooks';
 import { StatusBar } from './components/StatusBar';
 import { Sidebar } from './components/Sidebar';
 import { MessageList } from './components/MessageList';
@@ -11,18 +12,11 @@ import { RawPacketList } from './components/RawPacketList';
 import { CrackerPanel } from './components/CrackerPanel';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from './components/ui/sheet';
 import { Toaster, toast } from './components/ui/sonner';
-import {
-  getLastMessageTimes,
-  getLastReadTimes,
-  setLastMessageTime,
-  setLastReadTime,
-  getStateKey,
-  type ConversationTimes,
-} from './utils/conversationState';
+import { getStateKey } from './utils/conversationState';
 import { pubkeysMatch, getContactDisplayName } from './utils/pubkey';
+import { parseHashConversation, updateUrlHash } from './utils/urlHash';
 import { cn } from '@/lib/utils';
 import type {
-  AclEntry,
   AppSettings,
   AppSettingsUpdate,
   Contact,
@@ -30,156 +24,60 @@ import type {
   Conversation,
   HealthStatus,
   Message,
-  NeighborInfo,
   RawPacket,
   RadioConfig,
   RadioConfigUpdate,
-  TelemetryResponse,
 } from './types';
-import { CONTACT_TYPE_REPEATER } from './types';
 
-const MAX_RAW_PACKETS = 500; // Limit stored packets to prevent memory issues
-
-// Format seconds into human-readable duration (e.g., 1d17h2m, 1h5m, 3m)
-function formatDuration(seconds: number): string {
-  if (seconds < 60) return `${seconds}s`;
-
-  const days = Math.floor(seconds / 86400);
-  const hours = Math.floor((seconds % 86400) / 3600);
-  const mins = Math.floor((seconds % 3600) / 60);
-
-  if (days > 0) {
-    if (hours > 0 && mins > 0) return `${days}d${hours}h${mins}m`;
-    if (hours > 0) return `${days}d${hours}h`;
-    if (mins > 0) return `${days}d${mins}m`;
-    return `${days}d`;
-  }
-  if (hours > 0) {
-    return mins > 0 ? `${hours}h${mins}m` : `${hours}h`;
-  }
-  return `${mins}m`;
-}
-
-// Format telemetry response as human-readable text
-function formatTelemetry(telemetry: TelemetryResponse): string {
-  const lines = [
-    `Telemetry`,
-    `Battery Voltage: ${telemetry.battery_volts.toFixed(3)}V`,
-    `Uptime: ${formatDuration(telemetry.uptime_seconds)}`,
-    `TX Airtime: ${formatDuration(telemetry.airtime_seconds)}`,
-    `RX Airtime: ${formatDuration(telemetry.rx_airtime_seconds)}`,
-    '',
-    `Noise Floor: ${telemetry.noise_floor_dbm} dBm`,
-    `Last RSSI: ${telemetry.last_rssi_dbm} dBm`,
-    `Last SNR: ${telemetry.last_snr_db.toFixed(1)} dB`,
-    '',
-    `Packets: ${telemetry.packets_received.toLocaleString()} rx / ${telemetry.packets_sent.toLocaleString()} tx`,
-    `Flood: ${telemetry.recv_flood.toLocaleString()} rx / ${telemetry.sent_flood.toLocaleString()} tx`,
-    `Direct: ${telemetry.recv_direct.toLocaleString()} rx / ${telemetry.sent_direct.toLocaleString()} tx`,
-    `Duplicates: ${telemetry.flood_dups.toLocaleString()} flood / ${telemetry.direct_dups.toLocaleString()} direct`,
-    '',
-    `TX Queue: ${telemetry.tx_queue_len}`,
-    `Debug Flags: ${telemetry.full_events}`,
-  ];
-  return lines.join('\n');
-}
-
-// Format neighbors list as human-readable text
-function formatNeighbors(neighbors: NeighborInfo[]): string {
-  if (neighbors.length === 0) {
-    return 'Neighbors\nNo neighbors reported';
-  }
-  // Sort by SNR descending (highest first)
-  const sorted = [...neighbors].sort((a, b) => b.snr - a.snr);
-  const lines = [`Neighbors (${sorted.length})`];
-  for (const n of sorted) {
-    const name = n.name || n.pubkey_prefix;
-    const snr = n.snr >= 0 ? `+${n.snr.toFixed(1)}` : n.snr.toFixed(1);
-    lines.push(`${name}, ${snr} dB [${formatDuration(n.last_heard_seconds)} ago]`);
-  }
-  return lines.join('\n');
-}
-
-// Format ACL list as human-readable text
-function formatAcl(acl: AclEntry[]): string {
-  if (acl.length === 0) {
-    return 'ACL\nNo ACL entries';
-  }
-  const lines = [`ACL (${acl.length})`];
-  for (const entry of acl) {
-    const name = entry.name || entry.pubkey_prefix;
-    lines.push(`${name}: ${entry.permission_name}`);
-  }
-  return lines.join('\n');
-}
-
-// Generate a key for deduplicating messages by content
-function getMessageContentKey(msg: Message): string {
-  return `${msg.type}-${msg.conversation_key}-${msg.text}-${msg.sender_timestamp}`;
-}
-
-// Parse URL hash to get conversation (e.g., #channel/Public or #contact/JohnDoe or #raw)
-function parseHashConversation(): { type: 'channel' | 'contact' | 'raw'; name: string } | null {
-  const hash = window.location.hash.slice(1); // Remove leading #
-  if (!hash) return null;
-
-  if (hash === 'raw') {
-    return { type: 'raw', name: 'raw' };
-  }
-
-  const slashIndex = hash.indexOf('/');
-  if (slashIndex === -1) return null;
-
-  const type = hash.slice(0, slashIndex);
-  const name = decodeURIComponent(hash.slice(slashIndex + 1));
-
-  if ((type === 'channel' || type === 'contact') && name) {
-    return { type, name };
-  }
-  return null;
-}
-
-// Generate URL hash from conversation
-function getConversationHash(conv: Conversation | null): string {
-  if (!conv) return '';
-  if (conv.type === 'raw') return '#raw';
-  // Strip leading # from channel names for cleaner URLs
-  const name = conv.type === 'channel' && conv.name.startsWith('#')
-    ? conv.name.slice(1)
-    : conv.name;
-  return `#${conv.type}/${encodeURIComponent(name)}`;
-}
+const MAX_RAW_PACKETS = 500;
 
 export function App() {
   const messageInputRef = useRef<MessageInputHandle>(null);
   const activeConversationRef = useRef<Conversation | null>(null);
-  const seenMessageContent = useRef<Set<string>>(new Set());
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [config, setConfig] = useState<RadioConfig | null>(null);
   const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [channels, setChannels] = useState<Channel[]>([]);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [hasOlderMessages, setHasOlderMessages] = useState(false);
-  const [loadingOlder, setLoadingOlder] = useState(false);
   const [rawPackets, setRawPackets] = useState<RawPacket[]>([]);
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
-  const [messagesLoading, setMessagesLoading] = useState(false);
   const [showNewMessage, setShowNewMessage] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [undecryptedCount, setUndecryptedCount] = useState(0);
   const [showCracker, setShowCracker] = useState(false);
   const [crackerRunning, setCrackerRunning] = useState(false);
-  // Track if we've logged into the current repeater (for CLI command mode)
-  const [repeaterLoggedIn, setRepeaterLoggedIn] = useState(false);
-  // Track last message times (persisted in localStorage, used for sorting)
-  const [lastMessageTimes, setLastMessageTimes] = useState<ConversationTimes>(getLastMessageTimes);
-  // Track unread counts (calculated on load and incremented during session)
-  const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
 
   // Track previous health status to detect changes
   const prevHealthRef = useRef<HealthStatus | null>(null);
+
+  // Custom hooks for extracted functionality
+  const {
+    messages,
+    messagesLoading,
+    loadingOlder,
+    hasOlderMessages,
+    setMessages,
+    fetchMessages,
+    fetchOlderMessages,
+    addMessageIfNew,
+    updateMessageAck,
+  } = useConversationMessages(activeConversation);
+
+  const {
+    unreadCounts,
+    lastMessageTimes,
+    incrementUnread,
+    markAllRead,
+    trackNewMessage,
+  } = useUnreadCounts(channels, contacts, activeConversation);
+
+  const {
+    repeaterLoggedIn,
+    activeContactIsRepeater,
+    handleTelemetryRequest,
+    handleRepeaterCommand,
+  } = useRepeaterMode(activeConversation, contacts, setMessages);
 
   // WebSocket handlers - memoized to prevent reconnection loops
   const wsHandlers = useMemo(() => ({
@@ -211,27 +109,6 @@ export function App() {
     onMessage: (msg: Message) => {
       const activeConv = activeConversationRef.current;
 
-      // Skip duplicate messages (same content + timestamp)
-      const contentKey = getMessageContentKey(msg);
-      if (seenMessageContent.current.has(contentKey)) {
-        console.debug('Duplicate message content ignored:', contentKey.slice(0, 50));
-        return;
-      }
-      seenMessageContent.current.add(contentKey);
-      // Limit set size to prevent memory issues (keep last 1000)
-      if (seenMessageContent.current.size > 1000) {
-        const entries = Array.from(seenMessageContent.current);
-        seenMessageContent.current = new Set(entries.slice(-500));
-      }
-
-      // Determine conversation key for this message
-      let conversationKey: string | null = null;
-      if (msg.type === 'CHAN' && msg.conversation_key) {
-        conversationKey = getStateKey('channel', msg.conversation_key);
-      } else if (msg.type === 'PRIV' && msg.conversation_key) {
-        conversationKey = getStateKey('contact', msg.conversation_key);
-      }
-
       // Check if message belongs to the active conversation
       const isForActiveConversation = (() => {
         if (!activeConv) return false;
@@ -239,7 +116,6 @@ export function App() {
           return msg.conversation_key === activeConv.id;
         }
         if (msg.type === 'PRIV' && activeConv.type === 'contact') {
-          // Match by public key or prefix (either could be full key or prefix)
           return msg.conversation_key && pubkeysMatch(activeConv.id, msg.conversation_key);
         }
         return false;
@@ -247,37 +123,31 @@ export function App() {
 
       // Only add to message list if it's for the active conversation
       if (isForActiveConversation) {
-        setMessages((prev) => {
-          if (prev.some((m) => m.id === msg.id)) {
-            return prev;
-          }
-          return [...prev, msg];
-        });
+        addMessageIfNew(msg);
       }
 
-      // Track last message time for sorting and unread detection
-      if (conversationKey) {
-        const timestamp = msg.received_at || Math.floor(Date.now() / 1000);
-        const updated = setLastMessageTime(conversationKey, timestamp);
-        setLastMessageTimes(updated);
+      // Track for unread counts and sorting
+      trackNewMessage(msg);
 
-        // Count unread messages during this session (for non-active, incoming messages)
-        if (!msg.outgoing && !isForActiveConversation) {
-          setUnreadCounts((prev) => ({
-            ...prev,
-            [conversationKey]: (prev[conversationKey] || 0) + 1,
-          }));
+      // Count unread for non-active, incoming messages
+      if (!msg.outgoing && !isForActiveConversation) {
+        let stateKey: string | null = null;
+        if (msg.type === 'CHAN' && msg.conversation_key) {
+          stateKey = getStateKey('channel', msg.conversation_key);
+        } else if (msg.type === 'PRIV' && msg.conversation_key) {
+          stateKey = getStateKey('contact', msg.conversation_key);
+        }
+        if (stateKey) {
+          incrementUnread(stateKey);
         }
       }
     },
     onContact: (contact: Contact) => {
-      // Update or add contact, preserving existing non-null values
       setContacts((prev) => {
         const idx = prev.findIndex((c) => c.public_key === contact.public_key);
         if (idx >= 0) {
           const updated = [...prev];
           const existing = prev[idx];
-          // Merge: prefer new non-null values, but keep existing values if new is null
           updated[idx] = {
             ...existing,
             ...contact,
@@ -293,11 +163,9 @@ export function App() {
     },
     onRawPacket: (packet: RawPacket) => {
       setRawPackets((prev) => {
-        // Check if packet already exists
         if (prev.some((p) => p.id === packet.id)) {
           return prev;
         }
-        // Limit to MAX_RAW_PACKETS, removing oldest
         const updated = [...prev, packet];
         if (updated.length > MAX_RAW_PACKETS) {
           return updated.slice(-MAX_RAW_PACKETS);
@@ -306,18 +174,9 @@ export function App() {
       });
     },
     onMessageAcked: (messageId: number, ackCount: number) => {
-      // Update message acked count
-      setMessages((prev) => {
-        const idx = prev.findIndex((m) => m.id === messageId);
-        if (idx >= 0) {
-          const updated = [...prev];
-          updated[idx] = { ...prev[idx], acked: ackCount };
-          return updated;
-        }
-        return prev;
-      });
+      updateMessageAck(messageId, ackCount);
     },
-  }), []);
+  }), [addMessageIfNew, trackNewMessage, incrementUnread, updateMessageAck]);
 
   // Connect to WebSocket
   useWebSocket(wsHandlers);
@@ -352,64 +211,7 @@ export function App() {
     }
   }, []);
 
-  const MESSAGE_PAGE_SIZE = 200;
-
-  // Fetch messages for active conversation
-  const fetchMessages = useCallback(async (showLoading = false) => {
-    if (!activeConversation) {
-      setMessages([]);
-      setHasOlderMessages(false);
-      return;
-    }
-
-    if (showLoading) {
-      setMessagesLoading(true);
-    }
-    try {
-      const data = await api.getMessages({
-        type: activeConversation.type === 'channel' ? 'CHAN' : 'PRIV',
-        conversation_key: activeConversation.id,
-        limit: MESSAGE_PAGE_SIZE,
-      });
-      setMessages(data);
-      // If we got a full page, there might be more
-      setHasOlderMessages(data.length >= MESSAGE_PAGE_SIZE);
-    } catch (err) {
-      console.error('Failed to fetch messages:', err);
-    } finally {
-      if (showLoading) {
-        setMessagesLoading(false);
-      }
-    }
-  }, [activeConversation]);
-
-  // Fetch older messages (pagination)
-  const fetchOlderMessages = useCallback(async () => {
-    if (!activeConversation || loadingOlder || !hasOlderMessages) return;
-
-    setLoadingOlder(true);
-    try {
-      const data = await api.getMessages({
-        type: activeConversation.type === 'channel' ? 'CHAN' : 'PRIV',
-        conversation_key: activeConversation.id,
-        limit: MESSAGE_PAGE_SIZE,
-        offset: messages.length,
-      });
-
-      if (data.length > 0) {
-        // Prepend older messages (they come sorted DESC, so older are at the end)
-        setMessages(prev => [...prev, ...data]);
-      }
-      // If we got less than a full page, no more messages
-      setHasOlderMessages(data.length >= MESSAGE_PAGE_SIZE);
-    } catch (err) {
-      console.error('Failed to fetch older messages:', err);
-    } finally {
-      setLoadingOlder(false);
-    }
-  }, [activeConversation, loadingOlder, hasOlderMessages, messages.length]);
-
-  // Initial fetch for config and settings (WebSocket handles health/contacts/channels)
+  // Initial fetch for config and settings
   useEffect(() => {
     fetchConfig();
     fetchAppSettings();
@@ -425,7 +227,6 @@ export function App() {
       return { type: 'raw', id: 'raw', name: 'Raw Packet Feed' };
     }
     if (hashConv.type === 'channel') {
-      // Match with or without leading # (URL strips it for cleaner URLs)
       const channel = channels.find(c => c.name === hashConv.name || c.name === `#${hashConv.name}`);
       if (channel) {
         return { type: 'channel', id: channel.key, name: channel.name };
@@ -450,7 +251,6 @@ export function App() {
     if (hasSetDefaultConversation.current || activeConversation) return;
     if (channels.length === 0 && contacts.length === 0) return;
 
-    // Try to restore from URL hash first
     const conv = resolveHashToConversation();
     if (conv) {
       setActiveConversation(conv);
@@ -458,7 +258,6 @@ export function App() {
       return;
     }
 
-    // Fall back to Public channel
     const publicChannel = channels.find(c => c.name === 'Public');
     if (publicChannel) {
       setActiveConversation({
@@ -470,136 +269,13 @@ export function App() {
     }
   }, [channels, contacts, activeConversation, resolveHashToConversation]);
 
-  // Fetch messages and count unreads for all conversations on load (single bulk request)
-  const fetchedChannels = useRef<Set<string>>(new Set());
-  const fetchedContacts = useRef<Set<string>>(new Set());
-
-  useEffect(() => {
-    // Find channels and contacts we haven't fetched yet
-    const newChannels = channels.filter(c => !fetchedChannels.current.has(c.key));
-    const newContacts = contacts.filter(c => c.public_key && !fetchedContacts.current.has(c.public_key));
-
-    if (newChannels.length === 0 && newContacts.length === 0) return;
-
-    // Mark as fetched before starting (to avoid duplicate fetches if effect re-runs)
-    newChannels.forEach(c => fetchedChannels.current.add(c.key));
-    newContacts.forEach(c => fetchedContacts.current.add(c.public_key));
-
-    const fetchAndCountUnreads = async () => {
-      // Build list of conversations to fetch
-      const conversations: Array<{ type: 'PRIV' | 'CHAN'; conversation_key: string }> = [
-        ...newChannels.map(c => ({ type: 'CHAN' as const, conversation_key: c.key })),
-        ...newContacts.map(c => ({ type: 'PRIV' as const, conversation_key: c.public_key })),
-      ];
-
-      if (conversations.length === 0) return;
-
-      try {
-        // Single bulk request for all conversations
-        const bulkMessages = await api.getMessagesBulk(conversations, 100);
-
-        // Read lastReadTimes fresh from localStorage for accurate comparison
-        const currentReadTimes = getLastReadTimes();
-        const newUnreadCounts: Record<string, number> = {};
-        const newLastMessageTimes: Record<string, number> = {};
-
-        // Process channel messages
-        for (const channel of newChannels) {
-          const msgs = bulkMessages[`CHAN:${channel.key}`] || [];
-          if (msgs.length > 0) {
-            const key = getStateKey('channel', channel.key);
-            const lastRead = currentReadTimes[key] || 0;
-
-            const unreadCount = msgs.filter(m => !m.outgoing && m.received_at > lastRead).length;
-            if (unreadCount > 0) {
-              newUnreadCounts[key] = unreadCount;
-            }
-
-            const latestTime = Math.max(...msgs.map(m => m.received_at));
-            newLastMessageTimes[key] = latestTime;
-            setLastMessageTime(key, latestTime);
-          }
-        }
-
-        // Process contact messages
-        for (const contact of newContacts) {
-          const msgs = bulkMessages[`PRIV:${contact.public_key}`] || [];
-          if (msgs.length > 0) {
-            const key = getStateKey('contact', contact.public_key);
-            const lastRead = currentReadTimes[key] || 0;
-
-            const unreadCount = msgs.filter(m => !m.outgoing && m.received_at > lastRead).length;
-            if (unreadCount > 0) {
-              newUnreadCounts[key] = unreadCount;
-            }
-
-            const latestTime = Math.max(...msgs.map(m => m.received_at));
-            newLastMessageTimes[key] = latestTime;
-            setLastMessageTime(key, latestTime);
-          }
-        }
-
-        // Update state with all the counts and times
-        if (Object.keys(newUnreadCounts).length > 0) {
-          setUnreadCounts(prev => ({ ...prev, ...newUnreadCounts }));
-        }
-        setLastMessageTimes(getLastMessageTimes());
-      } catch (err) {
-        console.error('Failed to fetch messages bulk:', err);
-      }
-    };
-
-    fetchAndCountUnreads();
-  }, [channels, contacts]);
-
-  // Keep ref in sync with state and mark conversation as read when viewed
+  // Keep ref in sync and update URL hash
   useEffect(() => {
     activeConversationRef.current = activeConversation;
-
-    // Reset repeater login state when conversation changes
-    setRepeaterLoggedIn(false);
-
-    // Mark conversation as read when user views it
-    if (activeConversation && activeConversation.type !== 'raw') {
-      const key = getStateKey(
-        activeConversation.type as 'channel' | 'contact',
-        activeConversation.id
-      );
-      // Update localStorage-based read time
-      const now = Math.floor(Date.now() / 1000);
-      setLastReadTime(key, now);
-
-      // Clear unread count for this conversation
-      setUnreadCounts((prev) => {
-        if (prev[key]) {
-          const next = { ...prev };
-          delete next[key];
-          return next;
-        }
-        return prev;
-      });
-    }
-
-    // Update URL hash (replaceState doesn't add to history)
     if (activeConversation) {
-      const newHash = getConversationHash(activeConversation);
-      if (newHash !== window.location.hash) {
-        window.history.replaceState(null, '', newHash);
-      }
+      updateUrlHash(activeConversation);
     }
   }, [activeConversation]);
-
-  // Fetch messages when conversation changes
-  useEffect(() => {
-    fetchMessages(true);
-  }, [fetchMessages]);
-
-  // Check if active conversation is a repeater
-  const activeContactIsRepeater = useMemo(() => {
-    if (!activeConversation || activeConversation.type !== 'contact') return false;
-    const contact = contacts.find(c => c.public_key === activeConversation.id);
-    return contact?.type === CONTACT_TYPE_REPEATER;
-  }, [activeConversation, contacts]);
 
   // Send message handler
   const handleSendMessage = useCallback(
@@ -611,157 +287,9 @@ export function App() {
       } else {
         await api.sendDirectMessage(activeConversation.id, text);
       }
-      // Message will arrive via WebSocket, but fetch to be safe
       await fetchMessages();
     },
     [activeConversation, fetchMessages]
-  );
-
-  // Request telemetry from a repeater
-  const handleTelemetryRequest = useCallback(
-    async (password: string) => {
-      if (!activeConversation || activeConversation.type !== 'contact') return;
-      if (!activeContactIsRepeater) return;
-
-      try {
-        const telemetry = await api.requestTelemetry(activeConversation.id, password);
-        const now = Math.floor(Date.now() / 1000);
-
-        // Create a local message to display the telemetry (not persisted to database)
-        const telemetryMessage: Message = {
-          id: -Date.now(), // Negative ID to avoid collision with real messages
-          type: 'PRIV',
-          conversation_key: activeConversation.id,
-          text: formatTelemetry(telemetry),
-          sender_timestamp: now,
-          received_at: now,
-          path_len: null,
-          txt_type: 0,
-          signature: null,
-          outgoing: false, // Show as incoming (from the repeater)
-          acked: 1, // Mark as acked since it's a response
-        };
-
-        // Create a second message for neighbors
-        const neighborsMessage: Message = {
-          id: -Date.now() - 1, // Different ID
-          type: 'PRIV',
-          conversation_key: activeConversation.id,
-          text: formatNeighbors(telemetry.neighbors),
-          sender_timestamp: now,
-          received_at: now,
-          path_len: null,
-          txt_type: 0,
-          signature: null,
-          outgoing: false,
-          acked: 1,
-        };
-
-        // Create a third message for ACL
-        const aclMessage: Message = {
-          id: -Date.now() - 2, // Different ID
-          type: 'PRIV',
-          conversation_key: activeConversation.id,
-          text: formatAcl(telemetry.acl),
-          sender_timestamp: now,
-          received_at: now,
-          path_len: null,
-          txt_type: 0,
-          signature: null,
-          outgoing: false,
-          acked: 1,
-        };
-
-        // Add all messages to the list
-        setMessages((prev) => [...prev, telemetryMessage, neighborsMessage, aclMessage]);
-
-        // Mark as logged in for CLI command mode
-        setRepeaterLoggedIn(true);
-      } catch (err) {
-        // Show error as a local message
-        const errorMessage: Message = {
-          id: -Date.now(),
-          type: 'PRIV',
-          conversation_key: activeConversation.id,
-          text: `Telemetry request failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
-          sender_timestamp: Math.floor(Date.now() / 1000),
-          received_at: Math.floor(Date.now() / 1000),
-          path_len: null,
-          txt_type: 0,
-          signature: null,
-          outgoing: false,
-          acked: 1,
-        };
-        setMessages((prev) => [...prev, errorMessage]);
-      }
-    },
-    [activeConversation, activeContactIsRepeater]
-  );
-
-  // Send CLI command to a repeater (after logged in)
-  const handleRepeaterCommand = useCallback(
-    async (command: string) => {
-      if (!activeConversation || activeConversation.type !== 'contact') return;
-      if (!activeContactIsRepeater || !repeaterLoggedIn) return;
-
-      const now = Math.floor(Date.now() / 1000);
-
-      // Show the command as an outgoing message
-      const commandMessage: Message = {
-        id: -Date.now(),
-        type: 'PRIV',
-        conversation_key: activeConversation.id,
-        text: `> ${command}`,
-        sender_timestamp: now,
-        received_at: now,
-        path_len: null,
-        txt_type: 0,
-        signature: null,
-        outgoing: true,
-        acked: 1,
-      };
-      setMessages((prev) => [...prev, commandMessage]);
-
-      try {
-        const response = await api.sendRepeaterCommand(activeConversation.id, command);
-
-        // Use the actual timestamp from the repeater if available
-        const responseTimestamp = response.sender_timestamp ?? now;
-
-        // Show the response
-        const responseMessage: Message = {
-          id: -Date.now() - 1,
-          type: 'PRIV',
-          conversation_key: activeConversation.id,
-          text: response.response,
-          sender_timestamp: responseTimestamp,
-          received_at: now,
-          path_len: null,
-          txt_type: 0,
-          signature: null,
-          outgoing: false,
-          acked: 1,
-        };
-
-        setMessages((prev) => [...prev, responseMessage]);
-      } catch (err) {
-        const errorMessage: Message = {
-          id: -Date.now() - 1,
-          type: 'PRIV',
-          conversation_key: activeConversation.id,
-          text: `Command failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
-          sender_timestamp: now,
-          received_at: now,
-          path_len: null,
-          txt_type: 0,
-          signature: null,
-          outgoing: false,
-          acked: 1,
-        };
-        setMessages((prev) => [...prev, errorMessage]);
-      }
-    },
-    [activeConversation, activeContactIsRepeater, repeaterLoggedIn]
   );
 
   // Config save handler
@@ -785,12 +313,9 @@ export function App() {
   // Reboot radio handler
   const handleReboot = useCallback(async () => {
     await api.rebootRadio();
-    // Immediately show disconnected state
     setHealth((prev) =>
       prev ? { ...prev, radio_connected: false } : prev
     );
-    // Health updates will come via WebSocket when reconnected
-    // But also poll as backup
     const pollUntilReconnected = async () => {
       for (let i = 0; i < 30; i++) {
         await new Promise((r) => setTimeout(r, 1000));
@@ -828,28 +353,6 @@ export function App() {
     setActiveConversation(conv);
     setSidebarOpen(false);
   }, []);
-
-  // Mark all conversations as read
-  const handleMarkAllRead = useCallback(() => {
-    const now = Math.floor(Date.now() / 1000);
-
-    // Update localStorage for all channels
-    for (const channel of channels) {
-      const key = getStateKey('channel', channel.key);
-      setLastReadTime(key, now);
-    }
-
-    // Update localStorage for all contacts
-    for (const contact of contacts) {
-      if (contact.public_key) {
-        const key = getStateKey('contact', contact.public_key);
-        setLastReadTime(key, now);
-      }
-    }
-
-    // Clear all unread counts
-    setUnreadCounts({});
-  }, [channels, contacts]);
 
   // Delete channel handler
   const handleDeleteChannel = useCallback(async (key: string) => {
@@ -893,7 +396,6 @@ export function App() {
       };
       setContacts((prev) => [...prev, newContact]);
 
-      // Open the new contact
       setActiveConversation({
         type: 'contact',
         id: publicKey,
@@ -911,11 +413,9 @@ export function App() {
   const handleCreateChannel = useCallback(
     async (name: string, key: string, tryHistorical: boolean) => {
       const created = await api.createChannel(name, key);
-      // Channel will be broadcast via WebSocket, but fetch to be safe
       const data = await api.getChannels();
       setChannels(data);
 
-      // Open the new channel (use created.key as the id)
       setActiveConversation({
         type: 'channel',
         id: created.key,
@@ -942,7 +442,6 @@ export function App() {
       const data = await api.getChannels();
       setChannels(data);
 
-      // Open the new channel (use created.key as the id)
       setActiveConversation({
         type: 'channel',
         id: created.key,
@@ -976,7 +475,7 @@ export function App() {
       showCracker={showCracker}
       crackerRunning={crackerRunning}
       onToggleCracker={() => setShowCracker((prev) => !prev)}
-      onMarkAllRead={handleMarkAllRead}
+      onMarkAllRead={markAllRead}
     />
   );
 

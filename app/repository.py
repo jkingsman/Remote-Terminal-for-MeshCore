@@ -15,7 +15,7 @@ class ContactRepository:
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(public_key) DO UPDATE SET
                 name = COALESCE(excluded.name, contacts.name),
-                type = excluded.type,
+                type = CASE WHEN excluded.type = 0 THEN contacts.type ELSE excluded.type END,
                 flags = excluded.flags,
                 last_path = COALESCE(excluded.last_path, contacts.last_path),
                 last_path_len = excluded.last_path_len,

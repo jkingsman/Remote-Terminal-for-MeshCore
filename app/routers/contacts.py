@@ -23,6 +23,7 @@ ACL_PERMISSION_NAMES = {
     3: "Admin",
 }
 from app.radio import radio_manager
+from app.radio_sync import pause_polling
 from app.repository import ContactRepository
 
 logger = logging.getLogger(__name__)
@@ -382,50 +383,52 @@ async def send_repeater_command(public_key: str, request: CommandRequest) -> Com
             detail=f"Contact is not a repeater (type={contact.type}, expected {CONTACT_TYPE_REPEATER})"
         )
 
-    # Send the command
-    logger.info("Sending command to repeater %s: %s", contact.public_key[:12], request.command)
+    # Pause message polling to prevent it from stealing our response
+    async with pause_polling():
+        # Send the command
+        logger.info("Sending command to repeater %s: %s", contact.public_key[:12], request.command)
 
-    send_result = await mc.commands.send_cmd(contact.public_key, request.command)
+        send_result = await mc.commands.send_cmd(contact.public_key, request.command)
 
-    if send_result.type == EventType.ERROR:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to send command: {send_result.payload}"
-        )
-
-    # Wait for response (MESSAGES_WAITING event, then get_msg)
-    try:
-        wait_result = await mc.wait_for_event(EventType.MESSAGES_WAITING, timeout=10.0)
-
-        if wait_result is None:
-            # Timeout - no response received
-            logger.warning("No response from repeater %s for command: %s", contact.public_key[:12], request.command)
-            return CommandResponse(
-                command=request.command,
-                response="(no response - command may have been processed)"
+        if send_result.type == EventType.ERROR:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to send command: {send_result.payload}"
             )
 
-        response_event = await mc.commands.get_msg()
+        # Wait for response (MESSAGES_WAITING event, then get_msg)
+        try:
+            wait_result = await mc.wait_for_event(EventType.MESSAGES_WAITING, timeout=10.0)
 
-        if response_event.type == EventType.ERROR:
+            if wait_result is None:
+                # Timeout - no response received
+                logger.warning("No response from repeater %s for command: %s", contact.public_key[:12], request.command)
+                return CommandResponse(
+                    command=request.command,
+                    response="(no response - command may have been processed)"
+                )
+
+            response_event = await mc.commands.get_msg()
+
+            if response_event.type == EventType.ERROR:
+                return CommandResponse(
+                    command=request.command,
+                    response=f"(error: {response_event.payload})"
+                )
+
+            # Extract the response text and timestamp from the payload
+            response_text = response_event.payload.get("text", str(response_event.payload))
+            sender_timestamp = response_event.payload.get("timestamp")
+            logger.info("Received response from %s: %s", contact.public_key[:12], response_text)
+
             return CommandResponse(
                 command=request.command,
-                response=f"(error: {response_event.payload})"
+                response=response_text,
+                sender_timestamp=sender_timestamp,
             )
-
-        # Extract the response text and timestamp from the payload
-        response_text = response_event.payload.get("text", str(response_event.payload))
-        sender_timestamp = response_event.payload.get("timestamp")
-        logger.info("Received response from %s: %s", contact.public_key[:12], response_text)
-
-        return CommandResponse(
-            command=request.command,
-            response=response_text,
-            sender_timestamp=sender_timestamp,
-        )
-    except Exception as e:
-        logger.error("Error waiting for response: %s", e)
-        return CommandResponse(
-            command=request.command,
-            response=f"(error waiting for response: {e})"
-        )
+        except Exception as e:
+            logger.error("Error waiting for response: %s", e)
+            return CommandResponse(
+                command=request.command,
+                response=f"(error waiting for response: {e})"
+            )
