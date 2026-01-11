@@ -507,7 +507,7 @@ export function App() {
           </SheetContent>
         </Sheet>
 
-        <div className="flex-1 flex flex-col bg-background">
+        <div className="flex-1 flex flex-col bg-background min-w-0">
           {activeConversation ? (
             activeConversation.type === 'raw' ? (
               <>
@@ -518,19 +518,19 @@ export function App() {
               </>
             ) : (
               <>
-                <div className="flex justify-between items-center px-4 py-3 border-b border-border font-medium">
-                  <span className="flex flex-col sm:flex-row sm:items-center sm:gap-2">
-                    <span>
+                <div className="flex justify-between items-center px-4 py-3 border-b border-border font-medium gap-2">
+                  <span className="flex flex-col sm:flex-row sm:items-center sm:gap-2 min-w-0 flex-1">
+                    <span className="truncate">
                       {activeConversation.type === 'channel' && !activeConversation.name.startsWith('#') ? '#' : ''}
                       {activeConversation.name}
                     </span>
-                    <span className="font-normal text-xs text-muted-foreground font-mono">
+                    <span className="font-normal text-xs text-muted-foreground font-mono truncate">
                       {activeConversation.id}
                     </span>
                   </span>
                   {!(activeConversation.type === 'channel' && activeConversation.name === 'Public') && (
                     <button
-                      className="py-1 px-3 bg-destructive/20 border border-destructive/30 text-destructive rounded text-xs cursor-pointer hover:bg-destructive/30"
+                      className="py-1 px-3 bg-destructive/20 border border-destructive/30 text-destructive rounded text-xs cursor-pointer hover:bg-destructive/30 flex-shrink-0"
                       onClick={() => {
                         if (activeConversation.type === 'channel') {
                           handleDeleteChannel(activeConversation.id);

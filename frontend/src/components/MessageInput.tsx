@@ -94,9 +94,9 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(
         onKeyDown={handleKeyDown}
         placeholder={placeholder || (isRepeaterMode ? 'Enter password (or . for none)...' : 'Type a message...')}
         disabled={disabled || sending}
-        className="flex-1"
+        className="flex-1 min-w-0"
       />
-      <Button type="submit" disabled={disabled || sending || !canSubmit}>
+      <Button type="submit" disabled={disabled || sending || !canSubmit} className="flex-shrink-0">
         {sending
           ? (isRepeaterMode ? 'Fetching...' : 'Sending...')
           : (isRepeaterMode ? 'Fetch' : 'Send')}
