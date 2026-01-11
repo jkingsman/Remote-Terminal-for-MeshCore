@@ -30,31 +30,31 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/contacts", tags=["contacts"])
 
 
-async def prepare_repeater_connection(mc, contact: Contact, password: str) -> None:
-    """Prepare connection to a repeater by removing/re-adding with flood mode and logging in.
+async def ensure_repeater_on_radio(mc, contact: Contact) -> None:
+    """Ensure a repeater contact is on the radio with flood mode.
 
-    This clears any stale auth state on the radio and establishes a fresh connection.
+    This syncs contacts, removes any existing entry (to clear stale state),
+    and re-adds with flood mode. Does NOT perform login.
 
     Args:
         mc: MeshCore instance
         contact: The repeater contact
-        password: Password for login (empty string for no password)
 
     Raises:
-        HTTPException: If contact cannot be added or login fails
+        HTTPException: If contact cannot be added
     """
     # Sync contacts from radio to ensure our cache is up-to-date
-    logger.info("Syncing contacts from radio before repeater connection")
+    logger.info("Syncing contacts from radio before repeater operation")
     await mc.ensure_contacts()
 
-    # Remove contact if it exists (clears any stale auth state on radio)
+    # Remove contact if it exists (clears any stale state on radio)
     radio_contact = mc.get_contact_by_key_prefix(contact.public_key[:12])
     if radio_contact:
         logger.info("Removing existing contact %s from radio", contact.public_key[:12])
         await mc.commands.remove_contact(contact.public_key)
         await mc.commands.get_contacts()
 
-    # Add contact fresh with flood mode (matching test_telemetry.py pattern)
+    # Add contact fresh with flood mode
     logger.info("Adding repeater %s to radio with flood mode", contact.public_key[:12])
     contact_data = {
         "public_key": contact.public_key,
@@ -82,6 +82,22 @@ async def prepare_repeater_connection(mc, contact: Contact, password: str) -> No
             status_code=500,
             detail="Failed to add contact to radio - contact not found after add"
         )
+
+
+async def prepare_repeater_connection(mc, contact: Contact, password: str) -> None:
+    """Prepare connection to a repeater by adding to radio and logging in.
+
+    This ensures the contact is on the radio and performs a fresh login.
+
+    Args:
+        mc: MeshCore instance
+        contact: The repeater contact
+        password: Password for login (empty string for no password)
+
+    Raises:
+        HTTPException: If contact cannot be added or login fails
+    """
+    await ensure_repeater_on_radio(mc, contact)
 
     # Send login with password
     logger.info("Sending login to repeater %s", contact.public_key[:12])
@@ -355,9 +371,9 @@ async def request_telemetry(public_key: str, request: TelemetryRequest) -> Telem
 async def send_repeater_command(public_key: str, request: CommandRequest) -> CommandResponse:
     """Send a CLI command to a repeater.
 
-    The contact must be a repeater (type=2). This endpoint assumes the user has already
-    logged in via the telemetry endpoint - it does NOT perform the add/remove dance
-    or login again.
+    The contact must be a repeater (type=2). The user must have already logged in
+    via the telemetry endpoint. This endpoint ensures the contact is on the radio
+    before sending commands (the repeater remembers ACL permissions after login).
 
     Common commands:
     - get name, set name <value>
@@ -385,6 +401,9 @@ async def send_repeater_command(public_key: str, request: CommandRequest) -> Com
 
     # Pause message polling to prevent it from stealing our response
     async with pause_polling():
+        # Ensure the repeater contact is on the radio (fixes error_code 2 / ERR_CODE_NOT_FOUND)
+        await ensure_repeater_on_radio(mc, contact)
+
         # Send the command
         logger.info("Sending command to repeater %s: %s", contact.public_key[:12], request.command)
 
