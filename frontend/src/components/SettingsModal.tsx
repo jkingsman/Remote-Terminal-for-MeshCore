@@ -1023,9 +1023,10 @@ export function SettingsModal({
                   <strong>Limits:</strong> 10 second timeout per bot.
                 </p>
                 <p>
-                  <strong>Note:</strong> Bots only respond to incoming messages, not your own. For
+                  <strong>Note:</strong> Bots respond to all messages, including your own. For
                   channel messages, <code>sender_key</code> is <code>None</code>. Multiple enabled
-                  bots run serially.
+                  bots run serially, with a two-second delay between messages to prevent repeater
+                  collision.
                 </p>
               </div>
 
