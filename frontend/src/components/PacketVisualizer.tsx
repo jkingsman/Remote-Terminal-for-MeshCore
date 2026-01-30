@@ -470,6 +470,7 @@ function useVisualizerData({
     return () => {
       sim.stop();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-time init; dimensions/charge handled by the effect below
   }, []);
 
   // Update simulation forces when dimensions/charge change
@@ -516,6 +517,7 @@ function useVisualizerData({
       });
       syncSimulation();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- syncSimulation is stable (no deps), defined below
   }, [config, dimensions]);
 
   // Reset on option changes

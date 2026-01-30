@@ -518,29 +518,35 @@ export function App() {
   }, []);
 
   // Toggle favorite status for a conversation (via API) with optimistic update
-  const handleToggleFavorite = useCallback(
-    async (type: 'channel' | 'contact', id: string) => {
-      // Compute optimistic new state
-      const wasFavorited = isFavorite(favorites, type, id);
+  const handleToggleFavorite = useCallback(async (type: 'channel' | 'contact', id: string) => {
+    // Read current favorites inside the callback to avoid a dependency on the
+    // derived `favorites` array (which creates a new reference every render).
+    setAppSettings((prev) => {
+      if (!prev) return prev;
+      const currentFavorites = prev.favorites ?? [];
+      const wasFavorited = isFavorite(currentFavorites, type, id);
       const optimisticFavorites = wasFavorited
-        ? favorites.filter((f) => !(f.type === type && f.id === id))
-        : [...favorites, { type, id }];
+        ? currentFavorites.filter((f) => !(f.type === type && f.id === id))
+        : [...currentFavorites, { type, id }];
+      return { ...prev, favorites: optimisticFavorites };
+    });
 
-      // Optimistic update
-      setAppSettings((prev) => (prev ? { ...prev, favorites: optimisticFavorites } : prev));
-
+    try {
+      const updatedSettings = await api.toggleFavorite(type, id);
+      setAppSettings(updatedSettings);
+    } catch (err) {
+      console.error('Failed to toggle favorite:', err);
+      // Revert: re-fetch would be safest, but restoring from server state on next sync
+      // is acceptable. For now, just refetch settings.
       try {
-        const updatedSettings = await api.toggleFavorite(type, id);
-        setAppSettings(updatedSettings);
-      } catch (err) {
-        console.error('Failed to toggle favorite:', err);
-        // Revert on error
-        setAppSettings((prev) => (prev ? { ...prev, favorites } : prev));
-        toast.error('Failed to update favorite');
+        const settings = await api.getSettings();
+        setAppSettings(settings);
+      } catch {
+        // If refetch also fails, leave optimistic state
       }
-    },
-    [favorites]
-  );
+      toast.error('Failed to update favorite');
+    }
+  }, []);
 
   // Delete channel handler
   const handleDeleteChannel = useCallback(async (key: string) => {
