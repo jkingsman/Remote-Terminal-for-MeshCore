@@ -19,10 +19,45 @@ interface MessageListProps {
   config?: RadioConfig | null;
 }
 
-// Helper to render text with highlighted @[Name] mentions
-function renderTextWithMentions(text: string, radioName?: string): ReactNode {
-  if (!radioName) return text;
+// URL regex for linkifying plain text
+const URL_PATTERN =
+  /https?:\/\/(www\.)?[-a-zA-Z0-9@:%._+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_+.~#?&//=]*)/g;
 
+// Helper to convert URLs in a plain text string into clickable links
+function linkifyText(text: string, keyPrefix: string): ReactNode[] {
+  const parts: ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let keyIndex = 0;
+
+  URL_PATTERN.lastIndex = 0;
+  while ((match = URL_PATTERN.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+    parts.push(
+      <a
+        key={`${keyPrefix}-link-${keyIndex++}`}
+        href={match[0]}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-primary underline hover:text-primary/80"
+      >
+        {match[0]}
+      </a>
+    );
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex === 0) return [text];
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+  return parts;
+}
+
+// Helper to render text with highlighted @[Name] mentions and clickable URLs
+function renderTextWithMentions(text: string, radioName?: string): ReactNode {
   const mentionPattern = /@\[([^\]]+)\]/g;
   const parts: ReactNode[] = [];
   let lastIndex = 0;
@@ -30,17 +65,17 @@ function renderTextWithMentions(text: string, radioName?: string): ReactNode {
   let keyIndex = 0;
 
   while ((match = mentionPattern.exec(text)) !== null) {
-    // Add text before the match
+    // Add text before the match (with linkification)
     if (match.index > lastIndex) {
-      parts.push(text.slice(lastIndex, match.index));
+      parts.push(...linkifyText(text.slice(lastIndex, match.index), `pre-${keyIndex}`));
     }
 
     const mentionedName = match[1];
-    const isOwnMention = mentionedName === radioName;
+    const isOwnMention = radioName ? mentionedName === radioName : false;
 
     parts.push(
       <span
-        key={keyIndex++}
+        key={`mention-${keyIndex++}`}
         className={cn(
           'rounded px-0.5',
           isOwnMention ? 'bg-primary/30 text-primary font-medium' : 'bg-muted-foreground/20'
@@ -53,9 +88,9 @@ function renderTextWithMentions(text: string, radioName?: string): ReactNode {
     lastIndex = match.index + match[0].length;
   }
 
-  // Add remaining text after last match
+  // Add remaining text after last match (with linkification)
   if (lastIndex < text.length) {
-    parts.push(text.slice(lastIndex));
+    parts.push(...linkifyText(text.slice(lastIndex), `post-${keyIndex}`));
   }
 
   return parts.length > 0 ? parts : text;
