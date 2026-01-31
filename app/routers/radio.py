@@ -104,6 +104,11 @@ async def update_radio_config(update: RadioConfigUpdate) -> RadioConfigResponse:
     # Sync time with system clock
     await sync_radio_time()
 
+    # Re-fetch self_info so the response reflects the changes we just made.
+    # Commands like set_name() write to flash but don't update the cached
+    # self_info — send_appstart() triggers a fresh SELF_INFO from the radio.
+    await mc.commands.send_appstart()
+
     return await get_radio_config()
 
 
