@@ -9,6 +9,7 @@ wheels/
 .venv
 frontend/node_modules/
 frontend/test-results/
+frontend/dist/
 
 # reference librarys
 references/

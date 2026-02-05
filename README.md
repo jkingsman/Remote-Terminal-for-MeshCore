@@ -57,13 +57,17 @@ usbipd bind --busid 3-8
 
 **This approach is recommended over Docker due to intermittent serial communications issues I've seen on \*nix systems.**
 
-The frontend is pre-built -- just run the backend:
+Build the frontend once, then run the backend:
 
 ```bash
 git clone https://github.com/jkingsman/Remote-Terminal-for-MeshCore.git
 cd Remote-Terminal-for-MeshCore
 
 uv sync
+cd frontend
+npm install
+npm run build
+cd ..
 uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
@@ -87,6 +91,18 @@ docker run -d \
   -p 8000:8000 \
   jkingsman/remote-terminal-for-meshcore:latest
 ```
+
+## Release Bundle (No npm needed)
+
+Each GitHub Release includes a Linux bundle with the backend, a prebuilt frontend, and a local Python virtual environment.
+
+```bash
+tar -xzf remoteterm-linux-x64.tar.gz
+cd remoteterm
+./run.sh
+```
+
+The server runs at http://localhost:8000
 
 ## Development
 
@@ -193,7 +209,7 @@ cd /opt/remoteterm
 sudo -u remoteterm uv venv
 sudo -u remoteterm uv sync
 
-# Build frontend (optional -- already built in repo and served by backend)
+# Build frontend
 cd /opt/remoteterm/frontend
 sudo -u remoteterm npm install
 sudo -u remoteterm npm run build
