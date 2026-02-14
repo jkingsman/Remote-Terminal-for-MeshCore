@@ -161,6 +161,15 @@ TEMP_RADIO_SLOT = 0
 EXPERIMENTAL_CHANNEL_DOUBLE_SEND_DELAY_SECONDS = 3
 
 
+def _strip_channel_sender_prefix(stored_text: str, radio_name: str) -> str:
+    """Best-effort conversion from stored channel text ('name: msg') to payload text."""
+    if radio_name:
+        prefix = f"{radio_name}: "
+        if stored_text.startswith(prefix):
+            return stored_text[len(prefix) :]
+    return stored_text
+
+
 @router.post("/channel", response_model=Message)
 async def send_channel_message(request: SendChannelMessageRequest) -> Message:
     """Send a message to a channel."""
@@ -306,3 +315,132 @@ async def send_channel_message(request: SendChannelMessageRequest) -> Message:
     )
 
     return message
+
+
+@router.post("/{message_id}/resend")
+async def resend_message(message_id: int) -> dict:
+    """Re-send an existing outgoing message without creating a duplicate DB row."""
+    mc = require_connected()
+
+    from app.repository import AppSettingsRepository, ChannelRepository, ContactRepository
+
+    message = await MessageRepository.get_by_id(message_id)
+    if not message:
+        raise HTTPException(status_code=404, detail=f"Message {message_id} not found")
+    if not message.outgoing:
+        raise HTTPException(status_code=400, detail="Only outgoing messages can be re-sent")
+
+    original_timestamp = int(message.sender_timestamp or message.received_at)
+    resend_timestamp = int(time.time())
+    if resend_timestamp <= original_timestamp:
+        resend_timestamp = original_timestamp + 1
+
+    if message.type == "PRIV":
+        try:
+            db_contact = await ContactRepository.get_by_key_or_prefix(message.conversation_key)
+        except AmbiguousPublicKeyPrefixError as err:
+            sample = ", ".join(key[:12] for key in err.matches[:2])
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Ambiguous destination key prefix '{err.prefix}'. "
+                    f"Use a full 64-character public key. Matching contacts: {sample}"
+                ),
+            ) from err
+        if not db_contact:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Contact not found in database: {message.conversation_key}",
+            )
+
+        contact_data = db_contact.to_radio_dict()
+        # Retimestamp first so any immediate echo/duplicate maps to this same message row.
+        await MessageRepository.update_sender_timestamp(message_id, resend_timestamp)
+
+        async with radio_manager.radio_operation("resend_direct_message"):
+            add_result = await mc.commands.add_contact(contact_data)
+            if add_result.type == EventType.ERROR:
+                logger.warning("Failed to add contact to radio: %s", add_result.payload)
+
+            contact = mc.get_contact_by_key_prefix(db_contact.public_key[:12]) or contact_data
+            result = await mc.commands.send_msg(
+                dst=contact,
+                msg=message.text,
+                timestamp=resend_timestamp,
+            )
+
+        if result.type == EventType.ERROR:
+            await MessageRepository.update_sender_timestamp(message_id, original_timestamp)
+            raise HTTPException(status_code=500, detail=f"Failed to send message: {result.payload}")
+
+        await ContactRepository.update_last_contacted(db_contact.public_key.lower(), int(time.time()))
+
+        expected_ack = result.payload.get("expected_ack")
+        suggested_timeout: int = result.payload.get("suggested_timeout", 10000)
+        if expected_ack:
+            ack_code = expected_ack.hex() if isinstance(expected_ack, bytes) else expected_ack
+            track_pending_ack(ack_code, message_id, suggested_timeout)
+            logger.debug("Tracking ACK %s for re-sent message %d", ack_code, message_id)
+
+        return {"status": "ok", "message_id": message_id}
+
+    if message.type == "CHAN":
+        db_channel = await ChannelRepository.get_by_key(message.conversation_key)
+        if not db_channel:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Channel {message.conversation_key} not found in database",
+            )
+        app_settings = await AppSettingsRepository.get()
+
+        try:
+            key_bytes = bytes.fromhex(message.conversation_key)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid channel key format: {message.conversation_key}",
+            ) from None
+
+        timestamp_bytes = resend_timestamp.to_bytes(4, "little")
+        radio_name = mc.self_info.get("name", "") if mc.self_info else ""
+        payload_text = _strip_channel_sender_prefix(message.text, radio_name)
+
+        await MessageRepository.update_sender_timestamp(message_id, resend_timestamp)
+
+        async with radio_manager.radio_operation("resend_channel_message"):
+            set_result = await mc.commands.set_channel(
+                channel_idx=TEMP_RADIO_SLOT,
+                channel_name=db_channel.name,
+                channel_secret=key_bytes,
+            )
+            if set_result.type == EventType.ERROR:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to configure channel on radio before sending message",
+                )
+
+            result = await mc.commands.send_chan_msg(
+                chan=TEMP_RADIO_SLOT,
+                msg=payload_text,
+                timestamp=timestamp_bytes,
+            )
+            if result.type == EventType.ERROR:
+                await MessageRepository.update_sender_timestamp(message_id, original_timestamp)
+                raise HTTPException(status_code=500, detail=f"Failed to send message: {result.payload}")
+
+            if app_settings.experimental_channel_double_send:
+                await asyncio.sleep(EXPERIMENTAL_CHANNEL_DOUBLE_SEND_DELAY_SECONDS)
+                duplicate_result = await mc.commands.send_chan_msg(
+                    chan=TEMP_RADIO_SLOT,
+                    msg=payload_text,
+                    timestamp=timestamp_bytes,
+                )
+                if duplicate_result.type == EventType.ERROR:
+                    logger.warning(
+                        "Experimental duplicate channel resend failed: %s",
+                        duplicate_result.payload,
+                    )
+
+        return {"status": "ok", "message_id": message_id}
+
+    raise HTTPException(status_code=400, detail=f"Unsupported message type: {message.type}")

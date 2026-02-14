@@ -496,6 +496,38 @@ class MessageRepository:
         ]
 
     @staticmethod
+    async def get_by_id(message_id: int) -> Message | None:
+        """Get a single message by ID."""
+        cursor = await db.conn.execute("SELECT * FROM messages WHERE id = ?", (message_id,))
+        row = await cursor.fetchone()
+        if not row:
+            return None
+
+        return Message(
+            id=row["id"],
+            type=row["type"],
+            conversation_key=row["conversation_key"],
+            text=row["text"],
+            sender_timestamp=row["sender_timestamp"],
+            received_at=row["received_at"],
+            paths=MessageRepository._parse_paths(row["paths"]),
+            txt_type=row["txt_type"],
+            signature=row["signature"],
+            outgoing=bool(row["outgoing"]),
+            acked=row["acked"],
+        )
+
+    @staticmethod
+    async def update_sender_timestamp(message_id: int, sender_timestamp: int) -> bool:
+        """Update sender_timestamp for an existing message."""
+        cursor = await db.conn.execute(
+            "UPDATE messages SET sender_timestamp = ? WHERE id = ?",
+            (sender_timestamp, message_id),
+        )
+        await db.conn.commit()
+        return cursor.rowcount > 0
+
+    @staticmethod
     async def increment_ack_count(message_id: int) -> int:
         """Increment ack count and return the new value."""
         await db.conn.execute("UPDATE messages SET acked = acked + 1 WHERE id = ?", (message_id,))

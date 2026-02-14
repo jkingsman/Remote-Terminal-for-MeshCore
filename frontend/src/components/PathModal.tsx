@@ -28,9 +28,20 @@ interface PathModalProps {
   senderInfo: SenderInfo;
   contacts: Contact[];
   config: RadioConfig | null;
+  onSendAgain?: () => void;
+  canSendAgain?: boolean;
 }
 
-export function PathModal({ open, onClose, paths, senderInfo, contacts, config }: PathModalProps) {
+export function PathModal({
+  open,
+  onClose,
+  paths,
+  senderInfo,
+  contacts,
+  config,
+  onSendAgain,
+  canSendAgain = false,
+}: PathModalProps) {
   // Resolve all paths
   const resolvedPaths = paths.map((p) => ({
     ...p,
@@ -116,6 +127,11 @@ export function PathModal({ open, onClose, paths, senderInfo, contacts, config }
         </div>
 
         <DialogFooter>
+          {canSendAgain && onSendAgain && (
+            <Button variant="outline" onClick={onSendAgain}>
+              Send Again
+            </Button>
+          )}
           <Button onClick={onClose}>Close</Button>
         </DialogFooter>
       </DialogContent>

@@ -16,8 +16,9 @@ from app.repository import (
     AppSettingsRepository,
     ChannelRepository,
     ContactRepository,
+    MessageRepository,
 )
-from app.routers.messages import send_channel_message, send_direct_message
+from app.routers.messages import resend_message, send_channel_message, send_direct_message
 
 
 @pytest.fixture
@@ -296,3 +297,92 @@ class TestOutgoingChannelBotTrigger:
         # Fresh message has acked=0
         assert message.id is not None
         assert message.acked == 0
+
+
+class TestResendMessage:
+    """Test re-sending existing outgoing messages without creating duplicates."""
+
+    @pytest.mark.asyncio
+    async def test_resend_direct_uses_original_timestamp_and_tracks_ack(self, test_db):
+        mc = _make_mc()
+        pub_key = "ab" * 32
+        await _insert_contact(pub_key, "Alice")
+        message_id = await MessageRepository.create(
+            msg_type="PRIV",
+            text="retry me",
+            conversation_key=pub_key,
+            sender_timestamp=1700000000,
+            received_at=1700000000,
+            outgoing=True,
+        )
+        assert message_id is not None
+
+        ack_payload = {"expected_ack": b"\x12\x34", "suggested_timeout": 9000}
+        mc.commands.send_msg = AsyncMock(return_value=_make_radio_result(ack_payload))
+
+        with (
+            patch("app.routers.messages.require_connected", return_value=mc),
+            patch("app.routers.messages.track_pending_ack") as mock_track_ack,
+            patch("app.routers.messages.time.time", return_value=1700001234),
+        ):
+            result = await resend_message(message_id)
+
+        assert result == {"status": "ok", "message_id": message_id}
+        send_kwargs = mc.commands.send_msg.await_args.kwargs
+        assert send_kwargs["msg"] == "retry me"
+        assert send_kwargs["timestamp"] == 1700001234
+        mock_track_ack.assert_called_once_with("1234", message_id, 9000)
+        updated = await MessageRepository.get_by_id(message_id)
+        assert updated is not None
+        assert updated.sender_timestamp == 1700001234
+
+    @pytest.mark.asyncio
+    async def test_resend_channel_uses_original_timestamp_bytes(self, test_db):
+        mc = _make_mc(name="MyNode")
+        chan_key = "aa" * 16
+        await ChannelRepository.upsert(key=chan_key, name="#general")
+        message_id = await MessageRepository.create(
+            msg_type="CHAN",
+            text="MyNode: hello again",
+            conversation_key=chan_key.upper(),
+            sender_timestamp=1700000001,
+            received_at=1700000001,
+            outgoing=True,
+        )
+        assert message_id is not None
+
+        with (
+            patch("app.routers.messages.require_connected", return_value=mc),
+            patch("app.routers.messages.asyncio.sleep", new=AsyncMock()),
+            patch("app.routers.messages.time.time", return_value=1700002234),
+        ):
+            result = await resend_message(message_id)
+
+        assert result == {"status": "ok", "message_id": message_id}
+        send_kwargs = mc.commands.send_chan_msg.await_args.kwargs
+        assert send_kwargs["msg"] == "hello again"
+        assert send_kwargs["timestamp"] == (1700002234).to_bytes(4, "little")
+        updated = await MessageRepository.get_by_id(message_id)
+        assert updated is not None
+        assert updated.sender_timestamp == 1700002234
+
+    @pytest.mark.asyncio
+    async def test_resend_rejects_non_outgoing_messages(self, test_db):
+        chan_key = "bb" * 16
+        await ChannelRepository.upsert(key=chan_key, name="#general")
+        message_id = await MessageRepository.create(
+            msg_type="CHAN",
+            text="incoming",
+            conversation_key=chan_key.upper(),
+            sender_timestamp=1700000002,
+            received_at=1700000002,
+            outgoing=False,
+        )
+        assert message_id is not None
+
+        with patch("app.routers.messages.require_connected", return_value=_make_mc()):
+            with pytest.raises(HTTPException) as exc_info:
+                await resend_message(message_id)
+
+        assert exc_info.value.status_code == 400
+        assert "outgoing" in exc_info.value.detail.lower()

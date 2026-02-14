@@ -592,6 +592,18 @@ export function App() {
     [activeConversation, addMessageIfNew]
   );
 
+  const handleResendMessage = useCallback(async (messageId: number) => {
+    try {
+      await api.resendMessage(messageId);
+      toast.success('Message sent again');
+    } catch (err) {
+      console.error('Failed to resend message:', err);
+      toast.error('Failed to resend message', {
+        description: err instanceof Error ? err.message : 'Check radio connection',
+      });
+    }
+  }, []);
+
   // Config save handler
   const handleSaveConfig = useCallback(
     async (update: RadioConfigUpdate) => {
@@ -1184,6 +1196,7 @@ export function App() {
                     onLoadOlder={fetchOlderMessages}
                     radioName={config?.name}
                     config={config}
+                    onResendMessage={handleResendMessage}
                   />
                   <MessageInput
                     ref={messageInputRef}

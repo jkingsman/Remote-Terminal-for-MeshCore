@@ -25,6 +25,7 @@ interface MessageListProps {
   onLoadOlder?: () => void;
   radioName?: string;
   config?: RadioConfig | null;
+  onResendMessage?: (messageId: number) => void;
 }
 
 // URL regex for linkifying plain text
@@ -144,14 +145,18 @@ export function MessageList({
   onLoadOlder,
   radioName,
   config,
+  onResendMessage,
 }: MessageListProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const prevMessagesLengthRef = useRef<number>(0);
   const isInitialLoadRef = useRef<boolean>(true);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const [resendPromptMessageId, setResendPromptMessageId] = useState<number | null>(null);
   const [selectedPath, setSelectedPath] = useState<{
     paths: MessagePath[];
     senderInfo: SenderInfo;
+    messageId?: number;
+    canSendAgain?: boolean;
   } | null>(null);
 
   // Capture scroll state in the scroll handler BEFORE any state updates
@@ -304,6 +309,23 @@ export function MessageList({
     };
   };
 
+  const openResendPrompt = useCallback((messageId: number) => {
+    setResendPromptMessageId(messageId);
+  }, []);
+
+  const handleResendConfirm = useCallback(
+    (messageId: number) => {
+      if (!onResendMessage) return;
+      onResendMessage(messageId);
+      setResendPromptMessageId(null);
+    },
+    [onResendMessage]
+  );
+
+  const clearResendPrompt = useCallback(() => {
+    setResendPromptMessageId(null);
+  }, []);
+
   if (loading) {
     return (
       <div className="flex-1 overflow-y-auto p-5 text-center text-muted-foreground">
@@ -385,6 +407,8 @@ export function MessageList({
             }
           }
 
+          const showResendPrompt = resendPromptMessageId === msg.id;
+
           return (
             <div
               key={msg.id}
@@ -464,30 +488,77 @@ export function MessageList({
                     </>
                   )}
                   {msg.outgoing &&
-                    (msg.acked > 0 ? (
-                      msg.paths && msg.paths.length > 0 ? (
-                        <span
-                          className="cursor-pointer hover:text-primary"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedPath({
-                              paths: msg.paths!,
-                              senderInfo: {
-                                name: config?.name || 'Unknown',
-                                publicKeyOrPrefix: config?.public_key || '',
-                                lat: config?.lat ?? null,
-                                lon: config?.lon ?? null,
-                              },
-                            });
-                          }}
-                          title="View echo paths"
-                        >{` ✓${msg.acked > 1 ? msg.acked : ''}`}</span>
-                      ) : (
-                        ` ✓${msg.acked > 1 ? msg.acked : ''}`
-                      )
-                    ) : (
-                      <span title="No repeats heard yet"> ?</span>
-                    ))}
+                    (() => {
+                      const pathCount = msg.paths?.length ?? 0;
+                      const canSendAgain = pathCount <= 1;
+
+                      if (msg.acked > 0) {
+                        if (msg.paths && msg.paths.length > 0) {
+                          return (
+                            <span
+                              className="cursor-pointer hover:text-primary"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedPath({
+                                  paths: msg.paths!,
+                                  senderInfo: {
+                                    name: config?.name || 'Unknown',
+                                    publicKeyOrPrefix: config?.public_key || '',
+                                    lat: config?.lat ?? null,
+                                    lon: config?.lon ?? null,
+                                  },
+                                  messageId: msg.id,
+                                  canSendAgain,
+                                });
+                              }}
+                              title="View echo paths"
+                            >{` ✓${msg.acked > 1 ? msg.acked : ''}`}</span>
+                          );
+                        }
+
+                        return ` ✓${msg.acked > 1 ? msg.acked : ''}`;
+                      }
+
+                      if (canSendAgain && onResendMessage) {
+                        return (
+                          <span
+                            className="cursor-pointer hover:text-primary"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openResendPrompt(msg.id);
+                            }}
+                            title="No repeats heard yet. Try sending again"
+                          >
+                            {' ?'}
+                          </span>
+                        );
+                      }
+
+                      return <span title="No repeats heard yet"> ?</span>;
+                    })()}
+                  {showResendPrompt && (
+                    <span className="ml-2 inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+                      <span>Send again?</span>
+                      <button
+                        className="px-1.5 py-0.5 rounded border border-border hover:bg-accent hover:text-foreground"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleResendConfirm(msg.id);
+                        }}
+                      >
+                        Yes
+                      </button>
+                      <button
+                        className="px-1.5 py-0.5 rounded border border-border hover:bg-accent hover:text-foreground"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          clearResendPrompt();
+                        }}
+                      >
+                        No
+                      </button>
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
@@ -520,16 +591,31 @@ export function MessageList({
       )}
 
       {/* Path modal */}
-      {selectedPath && (
-        <PathModal
-          open={true}
-          onClose={() => setSelectedPath(null)}
-          paths={selectedPath.paths}
-          senderInfo={selectedPath.senderInfo}
-          contacts={contacts}
-          config={config ?? null}
-        />
-      )}
+      {selectedPath && (() => {
+        const resendMessageId = selectedPath.messageId;
+        const canSendAgainFromModal =
+          resendMessageId !== undefined && Boolean(selectedPath.canSendAgain && onResendMessage);
+
+        return (
+          <PathModal
+            open={true}
+            onClose={() => setSelectedPath(null)}
+            paths={selectedPath.paths}
+            senderInfo={selectedPath.senderInfo}
+            contacts={contacts}
+            config={config ?? null}
+            canSendAgain={canSendAgainFromModal}
+            onSendAgain={
+              canSendAgainFromModal
+                ? () => {
+                    setSelectedPath(null);
+                    handleResendConfirm(resendMessageId);
+                  }
+                : undefined
+            }
+          />
+        );
+      })()}
     </div>
   );
 }
