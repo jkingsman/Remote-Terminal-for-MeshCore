@@ -57,6 +57,7 @@ usbipd bind --busid 3-8 # (or whatever the right ID is)
 ## Quick Start
 
 **This approach is recommended over Docker due to intermittent serial communications issues I've seen on \*nix systems.**
+**Be sure you own 2 GB Ram. On less equipped systems (Raspi, VM) you need to add swap otherwise building frontend fails**
 
 ```bash
 git clone https://github.com/jkingsman/Remote-Terminal-for-MeshCore.git
@@ -293,3 +294,8 @@ npx playwright test --headed # show the browser window
 ## API Documentation
 
 With the backend running: http://localhost:8000/docs
+
+## FAQ
+
+### ERROR:app.radio:Error in connection monitor, continuing: Radio command channel is unresponsive (no_event_received).
+Maybe you use an outdated MeshCore Firmware on your device. Update your firmware and try again.
