@@ -6,11 +6,19 @@ import { Separator } from '../ui/separator';
 import { toast } from '../ui/sonner';
 import { api } from '../../api';
 import { formatTime } from '../../utils/messageParser';
-import type { AppSettings, AppSettingsUpdate, HealthStatus } from '../../types';
+import type {
+  AppSettings,
+  AppSettingsUpdate,
+  Channel,
+  Contact,
+  HealthStatus,
+} from '../../types';
 
 export function SettingsDatabaseSection({
   appSettings,
   health,
+  contacts = [],
+  channels = [],
   onSaveAppSettings,
   onHealthRefresh,
   blockedKeys = [],
@@ -21,6 +29,8 @@ export function SettingsDatabaseSection({
 }: {
   appSettings: AppSettings;
   health: HealthStatus | null;
+  contacts?: Contact[];
+  channels?: Channel[];
   onSaveAppSettings: (update: AppSettingsUpdate) => Promise<void>;
   onHealthRefresh: () => Promise<void>;
   blockedKeys?: string[];
@@ -33,13 +43,33 @@ export function SettingsDatabaseSection({
   const [cleaning, setCleaning] = useState(false);
   const [purgingDecryptedRaw, setPurgingDecryptedRaw] = useState(false);
   const [autoDecryptOnAdvert, setAutoDecryptOnAdvert] = useState(false);
+  const [appriseEnabled, setAppriseEnabled] = useState(false);
+  const [appriseUrl, setAppriseUrl] = useState('');
+  const [appriseMode, setAppriseMode] = useState<'all' | 'selected'>('all');
+  const [apprisePreserveIdentity, setApprisePreserveIdentity] = useState(true);
+  const [appriseTargets, setAppriseTargets] = useState<
+    Array<{ type: 'channel' | 'contact'; id: string }>
+  >([]);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setAutoDecryptOnAdvert(appSettings.auto_decrypt_dm_on_advert);
+    setAppriseEnabled(appSettings.apprise_enabled);
+    setAppriseUrl(appSettings.apprise_url || '');
+    setAppriseMode(appSettings.apprise_mode || 'all');
+    setApprisePreserveIdentity(appSettings.apprise_preserve_identity ?? true);
+    setAppriseTargets(appSettings.apprise_targets || []);
   }, [appSettings]);
+
+  const toggleAppriseTarget = (type: 'channel' | 'contact', id: string) => {
+    setAppriseTargets((prev) => {
+      const exists = prev.some((t) => t.type === type && t.id === id);
+      if (exists) return prev.filter((t) => !(t.type === type && t.id === id));
+      return [...prev, { type, id }];
+    });
+  };
 
   const handleCleanup = async () => {
     const days = parseInt(retentionDays, 10);
@@ -92,7 +122,14 @@ export function SettingsDatabaseSection({
     setError(null);
 
     try {
-      await onSaveAppSettings({ auto_decrypt_dm_on_advert: autoDecryptOnAdvert });
+      await onSaveAppSettings({
+        auto_decrypt_dm_on_advert: autoDecryptOnAdvert,
+        apprise_enabled: appriseEnabled,
+        apprise_url: appriseUrl.trim(),
+        apprise_mode: appriseMode,
+        apprise_preserve_identity: apprisePreserveIdentity,
+        apprise_targets: appriseTargets,
+      });
       toast.success('Database settings saved');
     } catch (err) {
       console.error('Failed to save database settings:', err);
@@ -208,6 +245,126 @@ export function SettingsDatabaseSection({
 
       <Separator />
 
+      <div className="space-y-3">
+        <Label>External Notifications (Apprise)</Label>
+        <label className="flex items-center gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={appriseEnabled}
+            onChange={(e) => setAppriseEnabled(e.target.checked)}
+            className="w-4 h-4 rounded border-input accent-primary"
+          />
+          <span className="text-sm">Enable incoming message notifications</span>
+        </label>
+        <div className="space-y-1">
+          <Label htmlFor="apprise-url" className="text-xs">
+            Apprise URL(s), one per line
+          </Label>
+          <textarea
+            id="apprise-url"
+            value={appriseUrl}
+            onChange={(e) => setAppriseUrl(e.target.value)}
+            rows={4}
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            placeholder={'discord://webhook_id/webhook_token\nhttps://discord.com/api/webhooks/...'}
+          />
+          <p className="text-xs text-muted-foreground">
+            Supported destinations:{' '}
+            <a
+              className="underline"
+              href="https://github.com/caronc/apprise"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Apprise GitHub
+            </a>
+          </p>
+        </div>
+        <div className="space-y-2">
+          <Label className="text-xs">Notify For</Label>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="apprise-mode"
+              checked={appriseMode === 'all'}
+              onChange={() => setAppriseMode('all')}
+              className="w-4 h-4 accent-primary"
+            />
+            <span className="text-sm">All incoming messages</span>
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="apprise-mode"
+              checked={appriseMode === 'selected'}
+              onChange={() => setAppriseMode('selected')}
+              className="w-4 h-4 accent-primary"
+            />
+            <span className="text-sm">Only selected channels/DMs</span>
+          </label>
+        </div>
+        {appriseMode === 'selected' && (
+          <div className="space-y-2 rounded-md border border-input p-3">
+            {channels.length > 0 && (
+              <div>
+                <span className="text-xs text-muted-foreground font-medium">Channels</span>
+                <div className="mt-1 space-y-1 max-h-32 overflow-y-auto">
+                  {channels.map((ch) => {
+                    const checked = appriseTargets.some(
+                      (t) => t.type === 'channel' && t.id === ch.key
+                    );
+                    return (
+                      <label key={ch.key} className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleAppriseTarget('channel', ch.key)}
+                          className="w-4 h-4 rounded border-input accent-primary"
+                        />
+                        <span>{ch.name || `#${ch.key.slice(0, 8)}`}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            {contacts.length > 0 && (
+              <div>
+                <span className="text-xs text-muted-foreground font-medium">Direct Messages</span>
+                <div className="mt-1 space-y-1 max-h-32 overflow-y-auto">
+                  {contacts.map((c) => {
+                    const checked = appriseTargets.some(
+                      (t) => t.type === 'contact' && t.id === c.public_key
+                    );
+                    return (
+                      <label key={c.public_key} className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleAppriseTarget('contact', c.public_key)}
+                          className="w-4 h-4 rounded border-input accent-primary"
+                        />
+                        <span>{c.name || c.public_key.slice(0, 12)}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        <label className="flex items-center gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={apprisePreserveIdentity}
+            onChange={(e) => setApprisePreserveIdentity(e.target.checked)}
+            className="w-4 h-4 rounded border-input accent-primary"
+          />
+          <span className="text-sm">Preserve webhook avatar/name where supported</span>
+        </label>
+      </div>
+
+      <Separator />
       <div className="space-y-3">
         <Label>Blocked Contacts</Label>
         <p className="text-xs text-muted-foreground">

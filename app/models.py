@@ -499,6 +499,26 @@ class AppSettings(BaseModel):
         default=False,
         description="Whether to publish raw packets to MQTT",
     )
+    apprise_enabled: bool = Field(
+        default=False,
+        description="Whether external notifications via Apprise are enabled",
+    )
+    apprise_url: str = Field(
+        default="",
+        description="Apprise URL used for external message notifications",
+    )
+    apprise_mode: Literal["all", "selected"] = Field(
+        default="all",
+        description="Notify for all incoming messages or only selected conversations",
+    )
+    apprise_preserve_identity: bool = Field(
+        default=True,
+        description="Preserve destination webhook identity (e.g., Discord avatar/username)",
+    )
+    apprise_targets: list[Favorite] = Field(
+        default_factory=list,
+        description="Allowed channels/contacts when apprise_mode is 'selected'",
+    )
     community_mqtt_enabled: bool = Field(
         default=False,
         description="Whether to publish raw packets to the community MQTT broker (letsmesh.net)",

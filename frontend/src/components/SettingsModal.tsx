@@ -2,6 +2,8 @@ import { useState, useEffect, type ReactNode } from 'react';
 import type {
   AppSettings,
   AppSettingsUpdate,
+  Channel,
+  Contact,
   HealthStatus,
   RadioConfig,
   RadioConfigUpdate,
@@ -23,6 +25,8 @@ interface SettingsModalBaseProps {
   config: RadioConfig | null;
   health: HealthStatus | null;
   appSettings: AppSettings | null;
+  contacts?: Contact[];
+  channels?: Channel[];
   onClose: () => void;
   onSave: (update: RadioConfigUpdate) => Promise<void>;
   onSaveAppSettings: (update: AppSettingsUpdate) => Promise<void>;
@@ -51,6 +55,8 @@ export function SettingsModal(props: SettingsModalProps) {
     config,
     health,
     appSettings,
+    contacts = [],
+    channels = [],
     onClose,
     onSave,
     onSaveAppSettings,
@@ -205,6 +211,8 @@ export function SettingsModal(props: SettingsModalProps) {
             <SettingsDatabaseSection
               appSettings={appSettings}
               health={health}
+              contacts={contacts}
+              channels={channels}
               onSaveAppSettings={onSaveAppSettings}
               onHealthRefresh={onHealthRefresh}
               blockedKeys={blockedKeys}

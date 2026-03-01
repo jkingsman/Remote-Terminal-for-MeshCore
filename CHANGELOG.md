@@ -26,6 +26,12 @@ Misc: Fix stale closures and misc. frontend perf/correctness improvements
 Misc: Add Windows startup notes
 Misc: E2E expansion + improvement
 Misc: Move around visualizer settings
+Feature: Add Apprise external notifications for incoming messages
+Feature: Add notification scope control (all incoming vs selected channels/DMs)
+Feature: Add multi-destination Apprise URL support (one URL per line)
+Feature: Add webhook identity preservation option for Discord-compatible webhooks
+Feature: Add `**via:** [...]` path metadata in DM/channel notifications
+Bugfix: Ensure DM notifications include `direct` when path metadata is unavailable
 
 ## [2.4.0] - 2026-03-02
 
@@ -276,4 +282,3 @@ Bugixes: Cleaner DB shutdown, radio reconnect contention, packet dedupe garbage 
 ## [1.0.0] - 2026-01-13
 
 Initial full release!
-

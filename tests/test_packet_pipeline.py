@@ -898,6 +898,70 @@ class TestCreateDMMessageFromDecrypted:
         assert message_broadcasts[0]["data"]["outgoing"] is True
 
     @pytest.mark.asyncio
+    async def test_incoming_dm_triggers_external_notification(self, test_db, captured_broadcasts):
+        from app.decoder import DecryptedDirectMessage
+        from app.packet_processor import create_dm_message_from_decrypted
+
+        packet_id, _ = await RawPacketRepository.create(b"test_incoming_notify_dm", 1700000000)
+        decrypted = DecryptedDirectMessage(
+            timestamp=1700000000,
+            flags=0,
+            message="Notify me",
+            dest_hash="fa",
+            src_hash="a1",
+        )
+
+        with (
+            patch("app.packet_processor.broadcast_event"),
+            patch(
+                "app.packet_processor.enqueue_incoming_message_notification", new_callable=AsyncMock
+            ) as mock_notify,
+        ):
+            await create_dm_message_from_decrypted(
+                packet_id=packet_id,
+                decrypted=decrypted,
+                their_public_key=self.A1B2C3_PUB,
+                our_public_key=self.FACE12_PUB,
+                received_at=1700000001,
+                outgoing=False,
+            )
+
+        mock_notify.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_outgoing_dm_does_not_trigger_external_notification(
+        self, test_db, captured_broadcasts
+    ):
+        from app.decoder import DecryptedDirectMessage
+        from app.packet_processor import create_dm_message_from_decrypted
+
+        packet_id, _ = await RawPacketRepository.create(b"test_outgoing_notify_dm", 1700000000)
+        decrypted = DecryptedDirectMessage(
+            timestamp=1700000000,
+            flags=0,
+            message="Do not notify",
+            dest_hash="a1",
+            src_hash="fa",
+        )
+
+        with (
+            patch("app.packet_processor.broadcast_event"),
+            patch(
+                "app.packet_processor.enqueue_incoming_message_notification", new_callable=AsyncMock
+            ) as mock_notify,
+        ):
+            await create_dm_message_from_decrypted(
+                packet_id=packet_id,
+                decrypted=decrypted,
+                their_public_key=self.A1B2C3_PUB,
+                our_public_key=self.FACE12_PUB,
+                received_at=1700000001,
+                outgoing=True,
+            )
+
+        mock_notify.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_returns_none_for_duplicate_dm(self, test_db, captured_broadcasts):
         """create_dm_message_from_decrypted returns None for duplicate DM."""
         from app.decoder import DecryptedDirectMessage

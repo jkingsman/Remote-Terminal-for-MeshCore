@@ -30,6 +30,8 @@ class AppSettingsRepository:
                    mqtt_broker_host, mqtt_broker_port, mqtt_username, mqtt_password,
                    mqtt_use_tls, mqtt_tls_insecure, mqtt_topic_prefix,
                    mqtt_publish_messages, mqtt_publish_raw_packets,
+                   apprise_enabled, apprise_url, apprise_mode,
+                   apprise_preserve_identity, apprise_targets,
                    community_mqtt_enabled, community_mqtt_iata,
                    community_mqtt_broker_host, community_mqtt_broker_port,
                    community_mqtt_email, flood_scope,
@@ -42,6 +44,12 @@ class AppSettingsRepository:
         if not row:
             # Should not happen after migration, but handle gracefully
             return AppSettings()
+
+        def row_get(key: str, default: Any = None) -> Any:
+            try:
+                return row[key]
+            except (KeyError, IndexError, TypeError):
+                return default
 
         # Parse favorites JSON
         favorites = []
@@ -71,17 +79,31 @@ class AppSettingsRepository:
 
         # Parse bots JSON
         bots: list[BotConfig] = []
-        if row["bots"]:
+        if row_get("bots"):
             try:
-                bots_data = json.loads(row["bots"])
+                bots_data = json.loads(row_get("bots"))
                 bots = [BotConfig(**b) for b in bots_data]
             except (json.JSONDecodeError, TypeError, KeyError) as e:
                 logger.warning(
                     "Failed to parse bots JSON, using empty list: %s (data=%r)",
                     e,
-                    row["bots"][:100] if row["bots"] else None,
+                    row_get("bots")[:100] if row_get("bots") else None,
                 )
                 bots = []
+
+        # Parse apprise_targets JSON
+        apprise_targets: list[Favorite] = []
+        if row_get("apprise_targets"):
+            try:
+                targets_data = json.loads(row_get("apprise_targets"))
+                apprise_targets = [Favorite(**t) for t in targets_data]
+            except (json.JSONDecodeError, TypeError, KeyError) as e:
+                logger.warning(
+                    "Failed to parse apprise_targets JSON, using empty list: %s (data=%r)",
+                    e,
+                    row_get("apprise_targets")[:100] if row_get("apprise_targets") else None,
+                )
+                apprise_targets = []
 
         # Parse blocked_keys JSON
         blocked_keys: list[str] = []
@@ -103,6 +125,9 @@ class AppSettingsRepository:
         sort_order = row["sidebar_sort_order"]
         if sort_order not in ("recent", "alpha"):
             sort_order = "recent"
+        apprise_mode = row_get("apprise_mode", "all")
+        if apprise_mode not in ("all", "selected"):
+            apprise_mode = "all"
 
         return AppSettings(
             max_radio_contacts=row["max_radio_contacts"],
@@ -123,6 +148,11 @@ class AppSettingsRepository:
             mqtt_topic_prefix=row["mqtt_topic_prefix"] or "meshcore",
             mqtt_publish_messages=bool(row["mqtt_publish_messages"]),
             mqtt_publish_raw_packets=bool(row["mqtt_publish_raw_packets"]),
+            apprise_enabled=bool(row_get("apprise_enabled", 0)),
+            apprise_url=row_get("apprise_url", "") or "",
+            apprise_mode=apprise_mode,
+            apprise_preserve_identity=bool(row_get("apprise_preserve_identity", 1)),
+            apprise_targets=apprise_targets,
             community_mqtt_enabled=bool(row["community_mqtt_enabled"]),
             community_mqtt_iata=row["community_mqtt_iata"] or "",
             community_mqtt_broker_host=row["community_mqtt_broker_host"]
@@ -154,6 +184,11 @@ class AppSettingsRepository:
         mqtt_topic_prefix: str | None = None,
         mqtt_publish_messages: bool | None = None,
         mqtt_publish_raw_packets: bool | None = None,
+        apprise_enabled: bool | None = None,
+        apprise_url: str | None = None,
+        apprise_mode: str | None = None,
+        apprise_preserve_identity: bool | None = None,
+        apprise_targets: list[Favorite] | None = None,
         community_mqtt_enabled: bool | None = None,
         community_mqtt_iata: str | None = None,
         community_mqtt_broker_host: str | None = None,
@@ -240,6 +275,27 @@ class AppSettingsRepository:
         if mqtt_publish_raw_packets is not None:
             updates.append("mqtt_publish_raw_packets = ?")
             params.append(1 if mqtt_publish_raw_packets else 0)
+
+        if apprise_enabled is not None:
+            updates.append("apprise_enabled = ?")
+            params.append(1 if apprise_enabled else 0)
+
+        if apprise_url is not None:
+            updates.append("apprise_url = ?")
+            params.append(apprise_url)
+
+        if apprise_mode is not None:
+            updates.append("apprise_mode = ?")
+            params.append(apprise_mode)
+
+        if apprise_preserve_identity is not None:
+            updates.append("apprise_preserve_identity = ?")
+            params.append(1 if apprise_preserve_identity else 0)
+
+        if apprise_targets is not None:
+            updates.append("apprise_targets = ?")
+            targets_json = json.dumps([t.model_dump() for t in apprise_targets])
+            params.append(targets_json)
 
         if community_mqtt_enabled is not None:
             updates.append("community_mqtt_enabled = ?")

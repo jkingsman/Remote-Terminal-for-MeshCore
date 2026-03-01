@@ -5,7 +5,8 @@ from typing import TYPE_CHECKING
 
 from meshcore import EventType
 
-from app.models import CONTACT_TYPE_REPEATER, Contact, Message, MessagePath
+from app.models import CONTACT_TYPE_REPEATER, CONTACT_TYPE_ROOM, Contact, Message, MessagePath
+from app.notifications import enqueue_incoming_message_notification
 from app.packet_processor import process_raw_packet
 from app.repository import (
     AmbiguousPublicKeyPrefixError,
@@ -93,11 +94,12 @@ async def on_contact_message(event: "Event") -> None:
         # Promote any prefix-stored messages to this full key
         await MessageRepository.claim_prefix_messages(sender_pubkey)
 
-        # Skip messages from repeaters - they only send CLI responses, not chat messages.
+        # Skip messages from repeaters/rooms - they only send CLI-style/control traffic.
         # CLI responses are handled by the command endpoint and txt_type filter above.
-        if contact.type == CONTACT_TYPE_REPEATER:
+        if contact.type in (CONTACT_TYPE_REPEATER, CONTACT_TYPE_ROOM):
             logger.debug(
-                "Skipping message from repeater %s (not stored in chat history)",
+                "Skipping message from non-chat contact type %s (%s)",
+                contact.type,
                 sender_pubkey[:12],
             )
             return
@@ -150,6 +152,16 @@ async def on_contact_message(event: "Event") -> None:
     # Update contact last_contacted (contact was already fetched above)
     if contact:
         await ContactRepository.update_last_contacted(sender_pubkey, received_at)
+
+    await enqueue_incoming_message_notification(
+        msg_type="PRIV",
+        conversation_id=sender_pubkey,
+        text=payload.get("text", ""),
+        conversation_name=contact.name if contact else None,
+        sender_name=contact.name if contact else None,
+        contact_type=contact.type if contact else None,
+        path=payload.get("path"),
+    )
 
     # Run bot if enabled
     from app.bot import run_bot_for_message

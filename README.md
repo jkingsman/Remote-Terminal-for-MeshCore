@@ -69,7 +69,7 @@ usbipd attach --wsl --busid 3-8
 **This approach is recommended over Docker due to intermittent serial communications issues I've seen on \*nix systems.**
 
 ```bash
-git clone https://github.com/jkingsman/Remote-Terminal-for-MeshCore.git
+git clone https://github.com/yellowcooln/Remote-Terminal-for-MeshCore.git
 cd Remote-Terminal-for-MeshCore
 
 # Install backend dependencies
@@ -225,6 +225,27 @@ npm run build                        # build the frontend
 | `MESHCORE_DISABLE_BOTS` | false | Disable bot system entirely (blocks execution and config) |
 
 Only one transport may be active at a time. If multiple are set, the server will refuse to start.
+
+## External Notifications (Apprise)
+
+RemoteTerm supports external incoming-message notifications through [Apprise](https://appriseit.com/services/), configured in the **Settings -> Database -> External Notifications (Apprise)** section.
+
+Key behavior:
+
+- Supports multiple Apprise URLs (one per line)
+- Notify scope can be set to:
+  - all incoming messages
+  - only selected channels/DMs
+- Only incoming messages are sent
+- Repeater/room traffic and outgoing messages are excluded
+- Optional webhook-identity preservation for Discord-compatible webhooks (keeps webhook avatar/name)
+
+Message format:
+
+- Channel: `**Channel:** Username: Message **via:** [\`20\`, \`27\`, \`97\`]`
+- DM: `**DM:** Username: Message **via:** [\`direct\`]`
+
+For routed packets, `via` includes hop prefixes. If direct delivery is the only path, it shows only `direct`.
 
 ## Additional Setup
 

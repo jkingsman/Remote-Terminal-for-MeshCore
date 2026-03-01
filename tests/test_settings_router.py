@@ -118,6 +118,25 @@ class TestUpdateSettings:
         assert settings.mqtt_publish_raw_packets is False
 
     @pytest.mark.asyncio
+    async def test_forwards_apprise_settings(self, test_db):
+        result = await update_settings(
+            AppSettingsUpdate(
+                apprise_enabled=True,
+                apprise_url="discord://123/abc",
+                apprise_mode="selected",
+                apprise_preserve_identity=False,
+                apprise_targets=[FavoriteRequest(type="channel", id="00112233445566778899AABBCCDDEEFF")],
+            )
+        )
+
+        assert result.apprise_enabled is True
+        assert result.apprise_url == "discord://123/abc"
+        assert result.apprise_mode == "selected"
+        assert result.apprise_preserve_identity is False
+        assert len(result.apprise_targets) == 1
+        assert result.apprise_targets[0].type == "channel"
+
+    @pytest.mark.asyncio
     async def test_community_mqtt_fields_round_trip(self, test_db):
         """Community MQTT settings should be saved and retrieved correctly."""
         mock_community = type("MockCommunity", (), {"restart": AsyncMock()})()

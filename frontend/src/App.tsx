@@ -855,6 +855,8 @@ export function App() {
                     config={config}
                     health={health}
                     appSettings={appSettings}
+                    contacts={contacts}
+                    channels={channels}
                     onClose={handleCloseSettingsView}
                     onSave={handleSaveConfig}
                     onSaveAppSettings={handleSaveAppSettings}

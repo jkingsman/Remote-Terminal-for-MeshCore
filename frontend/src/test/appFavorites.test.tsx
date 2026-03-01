@@ -186,6 +186,11 @@ const baseSettings = {
   advert_interval: 0,
   last_advert_time: 0,
   bots: [],
+  apprise_enabled: false,
+  apprise_url: '',
+  apprise_mode: 'all' as const,
+  apprise_preserve_identity: true,
+  apprise_targets: [] as Array<{ type: 'channel' | 'contact'; id: string }>,
 };
 
 const publicChannel = {

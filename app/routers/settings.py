@@ -35,6 +35,11 @@ def validate_all_bots(bots: list[BotConfig]) -> None:
         validate_bot_code(bot.code, bot.name)
 
 
+class FavoriteRequest(BaseModel):
+    type: Literal["channel", "contact"] = Field(description="'channel' or 'contact'")
+    id: str = Field(description="Channel key or contact public key")
+
+
 class AppSettingsUpdate(BaseModel):
     max_radio_contacts: int | None = Field(
         default=None,
@@ -99,6 +104,26 @@ class AppSettingsUpdate(BaseModel):
         default=None,
         description="Whether to publish raw packets to MQTT",
     )
+    apprise_enabled: bool | None = Field(
+        default=None,
+        description="Whether external notifications via Apprise are enabled",
+    )
+    apprise_url: str | None = Field(
+        default=None,
+        description="Apprise URL(s), one per line",
+    )
+    apprise_mode: Literal["all", "selected"] | None = Field(
+        default=None,
+        description="Notify for all incoming or selected conversations only",
+    )
+    apprise_preserve_identity: bool | None = Field(
+        default=None,
+        description="Preserve destination webhook identity where supported",
+    )
+    apprise_targets: list[FavoriteRequest] | None = Field(
+        default=None,
+        description="Allowed channels/contacts when apprise_mode is 'selected'",
+    )
     community_mqtt_enabled: bool | None = Field(
         default=None,
         description="Whether to publish raw packets to the community MQTT broker",
@@ -141,11 +166,6 @@ class BlockKeyRequest(BaseModel):
 
 class BlockNameRequest(BaseModel):
     name: str = Field(description="Display name to toggle block status")
-
-
-class FavoriteRequest(BaseModel):
-    type: Literal["channel", "contact"] = Field(description="'channel' or 'contact'")
-    id: str = Field(description="Channel key or contact public key")
 
 
 class MigratePreferencesRequest(BaseModel):
@@ -228,6 +248,26 @@ async def update_settings(update: AppSettingsUpdate) -> AppSettings:
         if value is not None:
             kwargs[field] = value
             mqtt_changed = True
+
+    if update.apprise_enabled is not None:
+        logger.info("Updating apprise_enabled to %s", update.apprise_enabled)
+        kwargs["apprise_enabled"] = update.apprise_enabled
+
+    if update.apprise_url is not None:
+        logger.info("Updating apprise_url (len=%d)", len(update.apprise_url.strip()))
+        kwargs["apprise_url"] = update.apprise_url.strip()
+
+    if update.apprise_mode is not None:
+        logger.info("Updating apprise_mode to %s", update.apprise_mode)
+        kwargs["apprise_mode"] = update.apprise_mode
+
+    if update.apprise_preserve_identity is not None:
+        logger.info("Updating apprise_preserve_identity to %s", update.apprise_preserve_identity)
+        kwargs["apprise_preserve_identity"] = update.apprise_preserve_identity
+
+    if update.apprise_targets is not None:
+        logger.info("Updating apprise_targets (count=%d)", len(update.apprise_targets))
+        kwargs["apprise_targets"] = update.apprise_targets
 
     # Community MQTT fields
     community_mqtt_changed = False

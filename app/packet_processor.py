@@ -30,11 +30,13 @@ from app.decoder import (
 from app.keystore import get_private_key, get_public_key, has_private_key
 from app.models import (
     CONTACT_TYPE_REPEATER,
+    CONTACT_TYPE_ROOM,
     Message,
     MessagePath,
     RawPacketBroadcast,
     RawPacketDecryptedInfo,
 )
+from app.notifications import enqueue_incoming_message_notification
 from app.repository import (
     ChannelRepository,
     ContactAdvertPathRepository,
@@ -159,10 +161,12 @@ async def create_message_from_decrypted(
 
     # Resolve sender_key: look up contact by exact name match
     resolved_sender_key: str | None = None
+    resolved_sender_type: int | None = None
     if sender:
         candidates = await ContactRepository.get_by_name(sender)
         if len(candidates) == 1:
             resolved_sender_key = candidates[0].public_key
+            resolved_sender_type = candidates[0].type
 
     # Try to create message - INSERT OR IGNORE handles duplicates atomically
     msg_id = await MessageRepository.create(
@@ -209,6 +213,16 @@ async def create_message_from_decrypted(
             sender_name=sender,
             sender_key=resolved_sender_key,
         ).model_dump(),
+    )
+
+    await enqueue_incoming_message_notification(
+        msg_type="CHAN",
+        conversation_id=channel_key_normalized,
+        text=message_text,
+        conversation_name=channel_name,
+        sender_name=sender,
+        contact_type=resolved_sender_type,
+        path=path,
     )
 
     # Run bot if enabled (for incoming channel messages, not historical decryption)
@@ -262,9 +276,10 @@ async def create_dm_message_from_decrypted(
     # Check if sender is a repeater - repeaters only send CLI responses, not chat messages.
     # CLI responses are handled by the command endpoint, not stored in chat history.
     contact = await ContactRepository.get_by_key(their_public_key)
-    if contact and contact.type == CONTACT_TYPE_REPEATER:
+    if contact and contact.type in (CONTACT_TYPE_REPEATER, CONTACT_TYPE_ROOM):
         logger.debug(
-            "Skipping message from repeater %s (CLI responses not stored): %s",
+            "Skipping message from non-chat contact type %s (%s): %s",
+            contact.type,
             their_public_key[:12],
             (decrypted.message or "")[:50],
         )
@@ -327,6 +342,17 @@ async def create_dm_message_from_decrypted(
             outgoing=outgoing,
         ).model_dump(),
     )
+
+    if not outgoing:
+        await enqueue_incoming_message_notification(
+            msg_type="PRIV",
+            conversation_id=conversation_key,
+            text=decrypted.message,
+            conversation_name=contact.name if contact else None,
+            sender_name=contact.name if contact else None,
+            contact_type=contact.type if contact else None,
+            path=path,
+        )
 
     # Update contact's last_contacted timestamp (for sorting)
     await ContactRepository.update_last_contacted(conversation_key, received)

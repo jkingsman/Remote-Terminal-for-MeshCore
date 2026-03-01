@@ -282,6 +282,20 @@ async def run_migrations(conn: aiosqlite.Connection) -> int:
         await set_version(conn, 35)
         applied += 1
 
+    # Migration 36: Add Apprise external notification settings
+    if version < 36:
+        logger.info("Applying migration 36: add apprise notification settings")
+        await _migrate_036_add_apprise_settings(conn)
+        await set_version(conn, 36)
+        applied += 1
+
+    # Migration 37: Add apprise_preserve_identity setting
+    if version < 37:
+        logger.info("Applying migration 37: add apprise preserve identity setting")
+        await _migrate_037_add_apprise_preserve_identity(conn)
+        await set_version(conn, 37)
+        applied += 1
+
     if applied > 0:
         logger.info(
             "Applied %d migration(s), schema now at version %d", applied, await get_version(conn)
@@ -2010,6 +2024,79 @@ async def _migrate_035_add_block_lists(conn: aiosqlite.Connection) -> None:
             logger.debug("blocked_names column already exists, skipping")
         elif "no such table" in error_msg:
             logger.debug("app_settings table not ready, skipping blocked_names migration")
+        else:
+            raise
+
+    await conn.commit()
+
+
+async def _migrate_036_add_apprise_settings(conn: aiosqlite.Connection) -> None:
+    """Add Apprise external notification settings columns to app_settings."""
+    cursor = await conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='app_settings'"
+    )
+    if await cursor.fetchone() is None:
+        logger.debug("app_settings table does not exist yet, skipping apprise settings migration")
+        return
+
+    try:
+        await conn.execute("ALTER TABLE app_settings ADD COLUMN apprise_enabled INTEGER DEFAULT 0")
+        logger.debug("Added apprise_enabled column to app_settings")
+    except aiosqlite.OperationalError as e:
+        if "duplicate column name" in str(e).lower():
+            logger.debug("app_settings.apprise_enabled already exists, skipping")
+        else:
+            raise
+
+    try:
+        await conn.execute("ALTER TABLE app_settings ADD COLUMN apprise_url TEXT DEFAULT ''")
+        logger.debug("Added apprise_url column to app_settings")
+    except aiosqlite.OperationalError as e:
+        if "duplicate column name" in str(e).lower():
+            logger.debug("app_settings.apprise_url already exists, skipping")
+        else:
+            raise
+
+    try:
+        await conn.execute("ALTER TABLE app_settings ADD COLUMN apprise_mode TEXT DEFAULT 'all'")
+        logger.debug("Added apprise_mode column to app_settings")
+    except aiosqlite.OperationalError as e:
+        if "duplicate column name" in str(e).lower():
+            logger.debug("app_settings.apprise_mode already exists, skipping")
+        else:
+            raise
+
+    try:
+        await conn.execute("ALTER TABLE app_settings ADD COLUMN apprise_targets TEXT DEFAULT '[]'")
+        logger.debug("Added apprise_targets column to app_settings")
+    except aiosqlite.OperationalError as e:
+        if "duplicate column name" in str(e).lower():
+            logger.debug("app_settings.apprise_targets already exists, skipping")
+        else:
+            raise
+
+    await conn.commit()
+
+
+async def _migrate_037_add_apprise_preserve_identity(conn: aiosqlite.Connection) -> None:
+    """Add apprise_preserve_identity to app_settings."""
+    cursor = await conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='app_settings'"
+    )
+    if await cursor.fetchone() is None:
+        logger.debug(
+            "app_settings table does not exist yet, skipping apprise preserve identity migration"
+        )
+        return
+
+    try:
+        await conn.execute(
+            "ALTER TABLE app_settings ADD COLUMN apprise_preserve_identity INTEGER DEFAULT 1"
+        )
+        logger.debug("Added apprise_preserve_identity column to app_settings")
+    except aiosqlite.OperationalError as e:
+        if "duplicate column name" in str(e).lower():
+            logger.debug("app_settings.apprise_preserve_identity already exists, skipping")
         else:
             raise
 

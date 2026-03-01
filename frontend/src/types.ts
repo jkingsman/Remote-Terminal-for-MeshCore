@@ -224,6 +224,11 @@ export interface AppSettings {
   mqtt_topic_prefix: string;
   mqtt_publish_messages: boolean;
   mqtt_publish_raw_packets: boolean;
+  apprise_enabled: boolean;
+  apprise_url: string;
+  apprise_mode: 'all' | 'selected';
+  apprise_preserve_identity: boolean;
+  apprise_targets: Favorite[];
   community_mqtt_enabled: boolean;
   community_mqtt_iata: string;
   community_mqtt_broker_host: string;
@@ -249,6 +254,11 @@ export interface AppSettingsUpdate {
   mqtt_topic_prefix?: string;
   mqtt_publish_messages?: boolean;
   mqtt_publish_raw_packets?: boolean;
+  apprise_enabled?: boolean;
+  apprise_url?: string;
+  apprise_mode?: 'all' | 'selected';
+  apprise_preserve_identity?: boolean;
+  apprise_targets?: Favorite[];
   community_mqtt_enabled?: boolean;
   community_mqtt_iata?: string;
   community_mqtt_broker_host?: string;
