@@ -228,7 +228,7 @@ Only one transport may be active at a time. If multiple are set, the server will
 
 ## External Notifications (Apprise)
 
-RemoteTerm supports external incoming-message notifications through [Apprise](https://appriseit.com/services/), configured in the **Settings -> Database -> External Notifications (Apprise)** section.
+RemoteTerm supports external incoming-message notifications through [Apprise](https://github.com/caronc/apprise), configured in the **Settings -> Database -> External Notifications (Apprise)** section.
 
 Key behavior:
 
