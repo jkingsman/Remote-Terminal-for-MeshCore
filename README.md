@@ -69,7 +69,7 @@ usbipd attach --wsl --busid 3-8
 **This approach is recommended over Docker due to intermittent serial communications issues I've seen on \*nix systems.**
 
 ```bash
-git clone https://github.com/yellowcooln/Remote-Terminal-for-MeshCore.git
+git clone https://github.com/jkingsman/Remote-Terminal-for-MeshCore.git
 cd Remote-Terminal-for-MeshCore
 
 # Install backend dependencies
