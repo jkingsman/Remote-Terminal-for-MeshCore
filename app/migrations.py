@@ -296,6 +296,13 @@ async def run_migrations(conn: aiosqlite.Connection) -> int:
         await set_version(conn, 37)
         applied += 1
 
+    # Migration 38: Repair missing app_settings columns from historical version drift
+    if version < 38:
+        logger.info("Applying migration 38: repair missing app_settings columns")
+        await _migrate_038_repair_app_settings_columns(conn)
+        await set_version(conn, 38)
+        applied += 1
+
     if applied > 0:
         logger.info(
             "Applied %d migration(s), schema now at version %d", applied, await get_version(conn)
@@ -2101,3 +2108,18 @@ async def _migrate_037_add_apprise_preserve_identity(conn: aiosqlite.Connection)
             raise
 
     await conn.commit()
+
+
+async def _migrate_038_repair_app_settings_columns(conn: aiosqlite.Connection) -> None:
+    """Backfill any missing app_settings columns when schema version drift occurred.
+
+    This is intentionally defensive: some historical upgrades ended up with advanced
+    user_version values while one or more app_settings ALTERs were never applied.
+    Re-running these idempotent column migrations repairs the table safely.
+    """
+    await _migrate_031_add_mqtt_columns(conn)
+    await _migrate_032_add_community_mqtt_columns(conn)
+    await _migrate_034_add_flood_scope(conn)
+    await _migrate_035_add_block_lists(conn)
+    await _migrate_036_add_apprise_settings(conn)
+    await _migrate_037_add_apprise_preserve_identity(conn)
