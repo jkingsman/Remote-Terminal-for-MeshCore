@@ -71,6 +71,7 @@ class CreateContactRequest(BaseModel):
 
 # Contact type constants
 CONTACT_TYPE_REPEATER = 2
+CONTACT_TYPE_ROOM = 3
 
 
 class ContactAdvertPath(BaseModel):

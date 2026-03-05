@@ -100,7 +100,7 @@ class TestMigration001:
             # Run migrations
             applied = await run_migrations(conn)
 
-            assert applied == 57  # All migrations run
+            assert applied == 37  # All migrations run
             assert await get_version(conn) == 37
 
             # Verify columns exist by inserting and selecting
@@ -183,7 +183,7 @@ class TestMigration001:
             applied1 = await run_migrations(conn)
             applied2 = await run_migrations(conn)
 
-            assert applied1 == 35  # All migrations run
+            assert applied1 == 37  # All migrations run
             assert applied2 == 0  # No migrations on second run
             assert await get_version(conn) == 37
         finally:
@@ -246,7 +246,7 @@ class TestMigration001:
             applied = await run_migrations(conn)
 
             # All migrations applied (version incremented) but no error
-            assert applied == 57
+            assert applied == 37
             assert await get_version(conn) == 37
         finally:
             await conn.close()
@@ -376,7 +376,7 @@ class TestMigration013:
 
             # Run migration 13 (plus 14-34 which also run)
             applied = await run_migrations(conn)
-            assert applied == 45
+            assert applied == 25
             assert await get_version(conn) == 37
 
             # Verify bots array was created with migrated data
@@ -575,7 +575,7 @@ class TestMigration018:
             await conn.commit()
 
             applied = await run_migrations(conn)
-            assert applied == 40  # Migrations 18-35 run (18+19 skip internally)
+            assert applied == 20  # Migrations 18-37 run (18+19 skip internally)
             assert await get_version(conn) == 37
         finally:
             await conn.close()
