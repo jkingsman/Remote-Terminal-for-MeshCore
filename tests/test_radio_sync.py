@@ -1037,7 +1037,7 @@ class TestSyncAndOffloadChannels:
 
     @pytest.mark.asyncio
     async def test_iterates_all_40_channel_slots(self):
-        """All 40 channel slots are checked."""
+        """All firmware-reported channel slots are checked."""
         from app.radio_sync import sync_and_offload_channels
 
         empty_result = MagicMock()
@@ -1045,10 +1045,11 @@ class TestSyncAndOffloadChannels:
 
         mock_mc = MagicMock()
         mock_mc.commands.get_channel = AsyncMock(return_value=empty_result)
+        radio_manager.max_channels = 8
 
         result = await sync_and_offload_channels(mock_mc)
 
-        assert mock_mc.commands.get_channel.call_count == 40
+        assert mock_mc.commands.get_channel.call_count == 8
         assert result["synced"] == 0
         assert result["cleared"] == 0
 

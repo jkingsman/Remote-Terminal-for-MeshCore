@@ -78,17 +78,25 @@ async def run_post_connect_setup(radio_manager) -> None:
                     return await _original_handle_rx(data)
 
                 reader.handle_rx = _capture_handle_rx
+                radio_manager.max_channels = 40
                 radio_manager.path_hash_mode = 0
                 radio_manager.path_hash_mode_supported = False
                 try:
                     device_query = await mc.commands.send_device_query()
+                    if device_query and "max_channels" in device_query.payload:
+                        radio_manager.max_channels = max(
+                            1, int(device_query.payload["max_channels"])
+                        )
                     if device_query and "path_hash_mode" in device_query.payload:
                         radio_manager.path_hash_mode = device_query.payload["path_hash_mode"]
                         radio_manager.path_hash_mode_supported = True
                     elif _captured_frame:
-                        # Raw-frame fallback: byte 1 = fw_ver, byte 81 = path_hash_mode
+                        # Raw-frame fallback:
+                        # byte 1 = fw_ver, byte 3 = max_channels, byte 81 = path_hash_mode
                         raw = _captured_frame[-1]
                         fw_ver = raw[1] if len(raw) > 1 else 0
+                        if fw_ver >= 3 and len(raw) >= 4:
+                            radio_manager.max_channels = max(1, raw[3])
                         if fw_ver >= 10 and len(raw) >= 82:
                             radio_manager.path_hash_mode = raw[81]
                             radio_manager.path_hash_mode_supported = True
@@ -106,8 +114,9 @@ async def run_post_connect_setup(radio_manager) -> None:
                         logger.info("Path hash mode: %d (supported)", radio_manager.path_hash_mode)
                     else:
                         logger.debug("Firmware does not report path_hash_mode")
+                    logger.info("Max channel slots: %d", radio_manager.max_channels)
                 except Exception as exc:
-                    logger.debug("Failed to query path_hash_mode: %s", exc)
+                    logger.debug("Failed to query device info capabilities: %s", exc)
                 finally:
                     reader.handle_rx = _original_handle_rx
 

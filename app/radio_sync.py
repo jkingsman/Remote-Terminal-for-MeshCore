@@ -33,6 +33,8 @@ from app.websocket import broadcast_error
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_MAX_CHANNELS = 40
+
 
 def _contact_sync_debug_fields(contact: Contact) -> dict[str, object]:
     """Return key contact fields for sync failure diagnostics."""
@@ -96,6 +98,20 @@ async def upsert_channel_from_radio_slot(payload: dict, *, on_radio: bool) -> st
         on_radio=on_radio,
     )
     return key_hex
+
+
+def get_radio_channel_limit(max_channels: int | None = None) -> int:
+    """Return the effective channel-slot limit for the connected firmware."""
+    discovered = getattr(radio_manager, "max_channels", DEFAULT_MAX_CHANNELS)
+    try:
+        limit = max(1, int(discovered))
+    except (TypeError, ValueError):
+        limit = DEFAULT_MAX_CHANNELS
+
+    if max_channels is not None:
+        return min(limit, max(1, int(max_channels)))
+
+    return limit
 
 
 # Message poll task handle
@@ -285,7 +301,7 @@ async def sync_and_offload_contacts(mc: MeshCore) -> dict:
     return {"synced": synced, "removed": removed}
 
 
-async def sync_and_offload_channels(mc: MeshCore) -> dict:
+async def sync_and_offload_channels(mc: MeshCore, max_channels: int | None = None) -> dict:
     """
     Sync channels from radio to database, then clear them from radio.
     Returns counts of synced and cleared channels.
@@ -294,8 +310,10 @@ async def sync_and_offload_channels(mc: MeshCore) -> dict:
     cleared = 0
 
     try:
-        # Check all 40 channel slots
-        for idx in range(40):
+        channel_limit = get_radio_channel_limit(max_channels)
+
+        # Check all available channel slots for this firmware variant
+        for idx in range(channel_limit):
             result = await mc.commands.get_channel(idx)
 
             if result.type != EventType.CHANNEL_INFO:

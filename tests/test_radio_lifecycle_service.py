@@ -99,7 +99,9 @@ class TestRunPostConnectSetup:
         initial_mc.start_auto_message_fetching = AsyncMock()
 
         replacement_mc = MagicMock()
-        replacement_mc.commands.send_device_query = AsyncMock(return_value=None)
+        replacement_mc.commands.send_device_query = AsyncMock(
+            return_value=MagicMock(payload={"max_channels": 8})
+        )
         replacement_mc.commands.set_flood_scope = AsyncMock(return_value=None)
         replacement_mc._reader = MagicMock()
         replacement_mc._reader.handle_rx = AsyncMock()
@@ -110,6 +112,7 @@ class TestRunPostConnectSetup:
         radio_manager._setup_lock = None
         radio_manager._setup_in_progress = False
         radio_manager._setup_complete = False
+        radio_manager.max_channels = 40
         radio_manager.path_hash_mode = 0
         radio_manager.path_hash_mode_supported = False
 
@@ -141,3 +144,4 @@ class TestRunPostConnectSetup:
         mock_sync_time.assert_awaited_once_with(replacement_mc)
         replacement_mc.start_auto_message_fetching.assert_awaited_once()
         initial_mc.start_auto_message_fetching.assert_not_called()
+        assert radio_manager.max_channels == 8

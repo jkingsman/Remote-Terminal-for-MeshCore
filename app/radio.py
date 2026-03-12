@@ -129,6 +129,7 @@ class RadioManager:
         self._setup_lock: asyncio.Lock | None = None
         self._setup_in_progress: bool = False
         self._setup_complete: bool = False
+        self.max_channels: int = 40
         self.path_hash_mode: int = 0
         self.path_hash_mode_supported: bool = False
 
@@ -366,6 +367,7 @@ class RadioManager:
             await self._disable_meshcore_auto_reconnect(mc)
             self._meshcore = None
             self._setup_complete = False
+            self.max_channels = 40
             self.path_hash_mode = 0
             self.path_hash_mode_supported = False
             logger.debug("Radio disconnected")

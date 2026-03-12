@@ -475,6 +475,7 @@ class TestManualDisconnectCleanup:
         mock_mc.connection_manager = connection_manager
         rm._meshcore = mock_mc
         rm._setup_complete = True
+        rm.max_channels = 8
         rm.path_hash_mode = 2
         rm.path_hash_mode_supported = True
 
@@ -486,6 +487,7 @@ class TestManualDisconnectCleanup:
         assert reconnect_task is not None and reconnect_task.cancelled()
         assert rm.meshcore is None
         assert rm.is_setup_complete is False
+        assert rm.max_channels == 40
         assert rm.path_hash_mode == 0
         assert rm.path_hash_mode_supported is False
 
