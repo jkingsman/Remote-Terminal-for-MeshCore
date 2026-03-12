@@ -234,6 +234,8 @@ class RadioManager:
 
     def channel_slot_reuse_enabled(self) -> bool:
         """Return whether this transport can safely reuse cached channel slots."""
+        if settings.force_channel_slot_reconfigure:
+            return False
         if self._connection_info:
             return not self._connection_info.startswith("TCP:")
         return settings.connection_type != "tcp"
@@ -303,6 +305,10 @@ class RadioManager:
             return
         self._channel_slot_by_key.move_to_end(normalized_key)
         self._channel_key_by_slot[slot] = normalized_key
+
+    def get_channel_send_cache_snapshot(self) -> list[tuple[str, int]]:
+        """Return the current channel send cache contents in LRU order."""
+        return list(self._channel_slot_by_key.items())
 
     def _find_first_free_channel_slot(self, capacity: int, preferred_slot: int) -> int:
         """Pick the first unclaimed app-managed slot, preferring the requested slot."""

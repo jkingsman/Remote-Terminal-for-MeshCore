@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     database_path: str = "data/meshcore.db"
     disable_bots: bool = False
     enable_message_poll_fallback: bool = False
+    force_channel_slot_reconfigure: bool = False
     basic_auth_username: str = ""
     basic_auth_password: str = ""
 

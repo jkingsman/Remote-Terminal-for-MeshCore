@@ -450,6 +450,31 @@ class TestOutgoingChannelBroadcast:
         assert mc.commands.send_chan_msg.await_count == 2
         assert radio_manager.get_cached_channel_slot(chan_key) is None
 
+    @pytest.mark.asyncio
+    async def test_send_channel_msg_force_reconfigure_env_disables_reuse(self, test_db):
+        mc = _make_mc(name="MyNode")
+        chan_key = "e1" * 16
+        await ChannelRepository.upsert(key=chan_key, name="#forced")
+        radio_manager.max_channels = 4
+        radio_manager._connection_info = "Serial: /dev/ttyUSB0"
+
+        with (
+            patch("app.routers.messages.require_connected", return_value=mc),
+            patch.object(radio_manager, "_meshcore", mc),
+            patch("app.decoder.calculate_channel_hash", return_value="abcd"),
+            patch("app.routers.messages.broadcast_event"),
+            patch("app.radio.settings.force_channel_slot_reconfigure", True),
+        ):
+            await send_channel_message(
+                SendChannelMessageRequest(channel_key=chan_key, text="first send")
+            )
+            await send_channel_message(
+                SendChannelMessageRequest(channel_key=chan_key, text="second send")
+            )
+
+        assert mc.commands.set_channel.await_count == 2
+        assert radio_manager.get_cached_channel_slot(chan_key) is None
+
 
 class TestResendChannelMessage:
     """Test the user-triggered resend endpoint."""

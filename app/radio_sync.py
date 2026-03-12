@@ -466,6 +466,63 @@ async def poll_for_messages(mc: MeshCore) -> int:
     return count
 
 
+def _normalize_channel_secret(payload: dict) -> bytes:
+    """Return a normalized bytes representation of a radio channel secret."""
+    secret = payload.get("channel_secret", b"")
+    if isinstance(secret, bytes):
+        return secret
+    return bytes(secret)
+
+
+async def audit_channel_send_cache(mc: MeshCore) -> bool:
+    """Verify cached send-slot expectations still match radio channel contents.
+
+    If a mismatch is detected, the app's send-slot cache is reset so future sends
+    fall back to reloading channels before reuse resumes.
+    """
+    if not radio_manager.channel_slot_reuse_enabled():
+        return True
+
+    cached_slots = radio_manager.get_channel_send_cache_snapshot()
+    if not cached_slots:
+        return True
+
+    mismatches: list[str] = []
+    for channel_key, slot in cached_slots:
+        result = await mc.commands.get_channel(slot)
+        if result.type != EventType.CHANNEL_INFO:
+            mismatches.append(
+                f"slot {slot}: expected {channel_key[:8]} but radio returned {result.type}"
+            )
+            continue
+
+        observed_name = result.payload.get("channel_name") or ""
+        observed_key = _normalize_channel_secret(result.payload).hex().upper()
+        expected_channel = await ChannelRepository.get_by_key(channel_key)
+        expected_name = expected_channel.name if expected_channel is not None else None
+
+        if observed_key != channel_key or expected_name is None or observed_name != expected_name:
+            mismatches.append(
+                f"slot {slot}: expected {expected_name or '(missing db row)'} "
+                f"{channel_key[:8]}, got {observed_name or '(empty)'} {observed_key[:8]}"
+            )
+
+    if not mismatches:
+        return True
+
+    logger.error(
+        "A periodic radio audit discovered that the channel send-slot cache fell out of sync with radio state. This indicates that some other system, internal or external to the radio, has updated the channel slots on the radio (which the app assumes it has exclusive rights to, except on TCP-linked devices). The cache is resetting now, but you should review the README.md and consider using the environment variable MESHCORE_FORCE_CHANNEL_SLOT_RECONFIGURE=true to make the radio use non-optimistic channel management and force-write the channel to radio before each send. This is a minor performance hit, but guarantees consistency. Mismatches found: %s",
+        "; ".join(mismatches),
+    )
+    radio_manager.reset_channel_send_cache()
+    broadcast_error(
+        "A periodic poll task has discovered radio inconsistencies.",
+        "Please check the logs for recommendations (search "
+        "'MESHCORE_FORCE_CHANNEL_SLOT_RECONFIGURE').",
+    )
+    return False
+
+
 async def _message_poll_loop():
     """Background task that periodically polls for messages."""
     while True:
@@ -483,6 +540,7 @@ async def _message_poll_loop():
                         suspend_auto_fetch=True,
                     ) as mc:
                         count = await poll_for_messages(mc)
+                        await audit_channel_send_cache(mc)
                         if count > 0:
                             if aggressive_fallback:
                                 logger.warning(

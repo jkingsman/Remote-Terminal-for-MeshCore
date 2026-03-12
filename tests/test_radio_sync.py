@@ -16,6 +16,7 @@ from app.radio_sync import (
     _message_poll_loop,
     _periodic_advert_loop,
     _periodic_sync_loop,
+    audit_channel_send_cache,
     ensure_contact_on_radio,
     is_polling_paused,
     pause_polling,
@@ -38,6 +39,7 @@ def reset_sync_state():
     prev_mc = radio_manager._meshcore
     prev_lock = radio_manager._operation_lock
     prev_max_channels = radio_manager.max_channels
+    prev_connection_info = radio_manager._connection_info
     prev_slot_by_key = radio_manager._channel_slot_by_key.copy()
     prev_key_by_slot = radio_manager._channel_key_by_slot.copy()
 
@@ -49,6 +51,7 @@ def reset_sync_state():
     radio_manager._meshcore = prev_mc
     radio_manager._operation_lock = prev_lock
     radio_manager.max_channels = prev_max_channels
+    radio_manager._connection_info = prev_connection_info
     radio_manager._channel_slot_by_key = prev_slot_by_key
     radio_manager._channel_key_by_slot = prev_key_by_slot
 
@@ -1339,6 +1342,70 @@ class TestMessagePollLoopRaces:
 
         mock_logger.warning.assert_called_once()
         mock_broadcast_error.assert_not_called()
+
+
+class TestChannelSendCacheAudit:
+    """Verify session-local channel-slot reuse state is audited against the radio."""
+
+    @pytest.mark.asyncio
+    async def test_audit_channel_send_cache_accepts_matching_radio_state(self, test_db):
+        chan_key = "ab" * 16
+        await ChannelRepository.upsert(key=chan_key, name="#flightless")
+        radio_manager.note_channel_slot_loaded(chan_key, 0)
+
+        ok_result = MagicMock()
+        ok_result.type = EventType.CHANNEL_INFO
+        ok_result.payload = {
+            "channel_name": "#flightless",
+            "channel_secret": bytes.fromhex(chan_key),
+        }
+
+        mock_mc = MagicMock()
+        mock_mc.commands.get_channel = AsyncMock(return_value=ok_result)
+
+        with patch("app.radio_sync.broadcast_error") as mock_broadcast_error:
+            assert await audit_channel_send_cache(mock_mc) is True
+
+        mock_mc.commands.get_channel.assert_awaited_once_with(0)
+        mock_broadcast_error.assert_not_called()
+        assert radio_manager.get_cached_channel_slot(chan_key) == 0
+
+    @pytest.mark.asyncio
+    async def test_audit_channel_send_cache_resets_and_toasts_on_mismatch(self, test_db):
+        chan_key = "cd" * 16
+        await ChannelRepository.upsert(key=chan_key, name="#flightless")
+        radio_manager.note_channel_slot_loaded(chan_key, 0)
+
+        mismatch_result = MagicMock()
+        mismatch_result.type = EventType.CHANNEL_INFO
+        mismatch_result.payload = {
+            "channel_name": "#elsewhere",
+            "channel_secret": bytes.fromhex("ef" * 16),
+        }
+
+        mock_mc = MagicMock()
+        mock_mc.commands.get_channel = AsyncMock(return_value=mismatch_result)
+
+        with (
+            patch("app.radio_sync.logger") as mock_logger,
+            patch("app.radio_sync.broadcast_error") as mock_broadcast_error,
+        ):
+            assert await audit_channel_send_cache(mock_mc) is False
+
+        mock_logger.error.assert_called_once()
+        mock_broadcast_error.assert_called_once()
+        assert radio_manager.get_cached_channel_slot(chan_key) is None
+
+    @pytest.mark.asyncio
+    async def test_audit_channel_send_cache_skips_when_reuse_forced_off(self, test_db):
+        chan_key = "ef" * 16
+        radio_manager.note_channel_slot_loaded(chan_key, 0)
+        mock_mc = MagicMock()
+
+        with patch("app.radio.settings.force_channel_slot_reconfigure", True):
+            assert await audit_channel_send_cache(mock_mc) is True
+
+        mock_mc.commands.get_channel.assert_not_called()
 
 
 class TestPeriodicAdvertLoopRaces:

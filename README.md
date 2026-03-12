@@ -224,7 +224,6 @@ npm run build                        # build the frontend
 | `MESHCORE_LOG_LEVEL` | INFO | DEBUG, INFO, WARNING, ERROR |
 | `MESHCORE_DATABASE_PATH` | data/meshcore.db | SQLite database path |
 | `MESHCORE_DISABLE_BOTS` | false | Disable bot system entirely (blocks execution and config) |
-| `MESHCORE_ENABLE_MESSAGE_POLL_FALLBACK` | false | Run aggressive 10-second `get_msg()` fallback polling instead of the default hourly audit task |
 | `MESHCORE_BASIC_AUTH_USERNAME` | | Optional app-wide HTTP Basic auth username; must be set together with `MESHCORE_BASIC_AUTH_PASSWORD` |
 | `MESHCORE_BASIC_AUTH_PASSWORD` | | Optional app-wide HTTP Basic auth password; must be set together with `MESHCORE_BASIC_AUTH_USERNAME` |
 
@@ -232,7 +231,21 @@ Only one transport may be active at a time. If multiple are set, the server will
 
 If you enable Basic Auth, protect the app with HTTPS. HTTP Basic credentials are not safe on plain HTTP.
 
-By default the app relies on radio events plus MeshCore auto-fetch for incoming messages, and also runs a low-frequency hourly audit poll. If that audit ever finds radio data that was not surfaced through event subscription, the backend logs an error and the UI shows a toast telling the operator to check the logs. If you see that warning, or if messages on the radio never show up in the app, try `MESHCORE_ENABLE_MESSAGE_POLL_FALLBACK=true` to switch that task into a more aggressive 10-second `get_msg()` safety net.
+### Remediation Environment Variables
+
+These are intended for diagnosing or working around radios that behave oddly.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MESHCORE_ENABLE_MESSAGE_POLL_FALLBACK` | false | Run aggressive 10-second `get_msg()` fallback polling instead of the default hourly sanity check |
+| `MESHCORE_FORCE_CHANNEL_SLOT_RECONFIGURE` | false | Disable channel-slot reuse and force `set_channel(...)` before every channel send |
+
+By default the app relies on radio events plus MeshCore auto-fetch for incoming messages, and also runs a low-frequency hourly audit poll. That audit checks both:
+
+- whether messages were left on the radio without reaching the app through event subscription
+- whether the app's channel-slot expectations still match the radio's actual channel listing
+
+If the audit finds a mismatch, you'll see an error in the application UI and your logs. If you see that warning, or if messages on the radio never show up in the app, try `MESHCORE_ENABLE_MESSAGE_POLL_FALLBACK=true` to switch that task into a more aggressive 10-second safety net. If room sends appear to be using the wrong channel slot or another client is changing slots underneath this app, try `MESHCORE_FORCE_CHANNEL_SLOT_RECONFIGURE=true` to force the radio to validate the channel slot is valid before sending (will delay sending by ~500ms).
 
 ## Additional Setup
 
