@@ -478,6 +478,7 @@ class TestManualDisconnectCleanup:
         rm.max_channels = 8
         rm.path_hash_mode = 2
         rm.path_hash_mode_supported = True
+        rm.note_channel_slot_loaded("AA" * 16, 0)
 
         await rm.disconnect()
 
@@ -490,6 +491,7 @@ class TestManualDisconnectCleanup:
         assert rm.max_channels == 40
         assert rm.path_hash_mode == 0
         assert rm.path_hash_mode_supported is False
+        assert rm.get_cached_channel_slot("AA" * 16) is None
 
     @pytest.mark.asyncio
     async def test_pause_connection_marks_connection_undesired(self):

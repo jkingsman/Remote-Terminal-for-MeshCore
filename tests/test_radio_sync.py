@@ -37,6 +37,9 @@ def reset_sync_state():
 
     prev_mc = radio_manager._meshcore
     prev_lock = radio_manager._operation_lock
+    prev_max_channels = radio_manager.max_channels
+    prev_slot_by_key = radio_manager._channel_slot_by_key.copy()
+    prev_key_by_slot = radio_manager._channel_key_by_slot.copy()
 
     radio_sync._polling_pause_count = 0
     radio_sync._last_contact_sync = 0.0
@@ -45,6 +48,9 @@ def reset_sync_state():
     radio_sync._last_contact_sync = 0.0
     radio_manager._meshcore = prev_mc
     radio_manager._operation_lock = prev_lock
+    radio_manager.max_channels = prev_max_channels
+    radio_manager._channel_slot_by_key = prev_slot_by_key
+    radio_manager._channel_key_by_slot = prev_key_by_slot
 
 
 KEY_A = "aa" * 32
@@ -1052,6 +1058,23 @@ class TestSyncAndOffloadChannels:
         assert mock_mc.commands.get_channel.call_count == 8
         assert result["synced"] == 0
         assert result["cleared"] == 0
+
+    @pytest.mark.asyncio
+    async def test_channel_offload_resets_send_slot_cache(self):
+        """Clearing radio channels should invalidate session-local send-slot reuse state."""
+        from app.radio_sync import sync_and_offload_channels
+
+        empty_result = MagicMock()
+        empty_result.type = EventType.ERROR
+
+        mock_mc = MagicMock()
+        mock_mc.commands.get_channel = AsyncMock(return_value=empty_result)
+        radio_manager.max_channels = 2
+        radio_manager.note_channel_slot_loaded("AA" * 16, 0)
+
+        await sync_and_offload_channels(mock_mc)
+
+        assert radio_manager.get_cached_channel_slot("AA" * 16) is None
 
 
 class TestEnsureDefaultChannels:

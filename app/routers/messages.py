@@ -126,7 +126,9 @@ async def send_direct_message(request: SendDirectMessageRequest) -> Message:
     )
 
 
-# Temporary radio slot used for sending channel messages
+# Preferred first radio slot used for sending channel messages.
+# The send service may reuse/load other app-managed slots depending on transport
+# and session cache state.
 TEMP_RADIO_SLOT = 0
 
 
@@ -155,10 +157,9 @@ async def send_channel_message(request: SendChannelMessageRequest) -> Message:
 
     expected_hash = calculate_channel_hash(key_bytes)
     logger.info(
-        "Sending to channel %s (%s) via radio slot %d, key hash: %s",
+        "Sending to channel %s (%s) via managed radio slot, key hash: %s",
         request.channel_key,
         db_channel.name,
-        TEMP_RADIO_SLOT,
         expected_hash,
     )
     return await send_channel_message_to_channel(

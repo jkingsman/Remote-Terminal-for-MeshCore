@@ -2,6 +2,7 @@ import asyncio
 import glob
 import logging
 import platform
+from collections import OrderedDict
 from contextlib import asynccontextmanager, nullcontext
 from pathlib import Path
 
@@ -132,6 +133,8 @@ class RadioManager:
         self.max_channels: int = 40
         self.path_hash_mode: int = 0
         self.path_hash_mode_supported: bool = False
+        self._channel_slot_by_key: OrderedDict[str, int] = OrderedDict()
+        self._channel_key_by_slot: dict[int, str] = {}
 
     async def _acquire_operation_lock(
         self,
@@ -223,6 +226,94 @@ class RadioManager:
         from app.services.radio_lifecycle import run_post_connect_setup
 
         await run_post_connect_setup(self)
+
+    def reset_channel_send_cache(self) -> None:
+        """Forget any session-local channel-slot reuse state."""
+        self._channel_slot_by_key.clear()
+        self._channel_key_by_slot.clear()
+
+    def channel_slot_reuse_enabled(self) -> bool:
+        """Return whether this transport can safely reuse cached channel slots."""
+        if self._connection_info:
+            return not self._connection_info.startswith("TCP:")
+        return settings.connection_type != "tcp"
+
+    def get_channel_send_cache_capacity(self) -> int:
+        """Return the app-managed channel cache capacity for the current session."""
+        try:
+            return max(1, int(self.max_channels))
+        except (TypeError, ValueError):
+            return 1
+
+    def get_cached_channel_slot(self, channel_key: str) -> int | None:
+        """Return the cached radio slot for a channel key, if present."""
+        return self._channel_slot_by_key.get(channel_key.upper())
+
+    def plan_channel_send_slot(
+        self,
+        channel_key: str,
+        *,
+        preferred_slot: int = 0,
+    ) -> tuple[int, bool, str | None]:
+        """Choose a radio slot for a channel send.
+
+        Returns `(slot, needs_configure, evicted_channel_key)`.
+        """
+        if not self.channel_slot_reuse_enabled():
+            return preferred_slot, True, None
+
+        normalized_key = channel_key.upper()
+        cached_slot = self._channel_slot_by_key.get(normalized_key)
+        if cached_slot is not None:
+            return cached_slot, False, None
+
+        capacity = self.get_channel_send_cache_capacity()
+        if len(self._channel_slot_by_key) < capacity:
+            slot = self._find_first_free_channel_slot(capacity, preferred_slot)
+            return slot, True, None
+
+        evicted_key, slot = next(iter(self._channel_slot_by_key.items()))
+        return slot, True, evicted_key
+
+    def note_channel_slot_loaded(self, channel_key: str, slot: int) -> None:
+        """Record that a channel is now resident in the given radio slot."""
+        if not self.channel_slot_reuse_enabled():
+            return
+
+        normalized_key = channel_key.upper()
+        previous_slot = self._channel_slot_by_key.pop(normalized_key, None)
+        if previous_slot is not None and previous_slot != slot:
+            self._channel_key_by_slot.pop(previous_slot, None)
+
+        displaced_key = self._channel_key_by_slot.get(slot)
+        if displaced_key is not None and displaced_key != normalized_key:
+            self._channel_slot_by_key.pop(displaced_key, None)
+
+        self._channel_key_by_slot[slot] = normalized_key
+        self._channel_slot_by_key[normalized_key] = slot
+
+    def note_channel_slot_used(self, channel_key: str) -> None:
+        """Refresh LRU order for a previously loaded channel slot."""
+        if not self.channel_slot_reuse_enabled():
+            return
+
+        normalized_key = channel_key.upper()
+        slot = self._channel_slot_by_key.get(normalized_key)
+        if slot is None:
+            return
+        self._channel_slot_by_key.move_to_end(normalized_key)
+        self._channel_key_by_slot[slot] = normalized_key
+
+    def _find_first_free_channel_slot(self, capacity: int, preferred_slot: int) -> int:
+        """Pick the first unclaimed app-managed slot, preferring the requested slot."""
+        if preferred_slot < capacity and preferred_slot not in self._channel_key_by_slot:
+            return preferred_slot
+
+        for slot in range(capacity):
+            if slot not in self._channel_key_by_slot:
+                return slot
+
+        return preferred_slot
 
     @property
     def meshcore(self) -> MeshCore | None:
@@ -370,6 +461,7 @@ class RadioManager:
             self.max_channels = 40
             self.path_hash_mode = 0
             self.path_hash_mode_supported = False
+            self.reset_channel_send_cache()
             logger.debug("Radio disconnected")
 
     async def reconnect(self, *, broadcast_on_success: bool = True) -> bool:

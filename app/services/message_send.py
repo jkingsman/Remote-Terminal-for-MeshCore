@@ -26,10 +26,12 @@ async def send_channel_message_with_effective_scope(
     *,
     mc,
     channel,
+    channel_key: str,
     key_bytes: bytes,
     text: str,
     timestamp_bytes: bytes,
     action_label: str,
+    radio_manager,
     temp_radio_slot: int,
     error_broadcast_fn: BroadcastFn,
     app_settings_repository=AppSettingsRepository,
@@ -64,28 +66,54 @@ async def send_channel_message_with_effective_scope(
             )
 
     try:
-        set_result = await mc.commands.set_channel(
-            channel_idx=temp_radio_slot,
-            channel_name=channel.name,
-            channel_secret=key_bytes,
+        channel_slot, needs_configure, evicted_channel_key = radio_manager.plan_channel_send_slot(
+            channel_key,
+            preferred_slot=temp_radio_slot,
         )
-        if set_result.type == EventType.ERROR:
-            logger.warning(
-                "Failed to set channel on radio slot %d before %s: %s",
-                temp_radio_slot,
+        if needs_configure:
+            logger.debug(
+                "Loading channel %s into radio slot %d before %s%s",
+                channel.name,
+                channel_slot,
                 action_label,
-                set_result.payload,
+                (
+                    f" (evicting cached {evicted_channel_key[:8]})"
+                    if evicted_channel_key is not None
+                    else ""
+                ),
             )
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to configure channel on radio before {action_label}",
+            set_result = await mc.commands.set_channel(
+                channel_idx=channel_slot,
+                channel_name=channel.name,
+                channel_secret=key_bytes,
+            )
+            if set_result.type == EventType.ERROR:
+                logger.warning(
+                    "Failed to set channel on radio slot %d before %s: %s",
+                    channel_slot,
+                    action_label,
+                    set_result.payload,
+                )
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to configure channel on radio before {action_label}",
+                )
+            radio_manager.note_channel_slot_loaded(channel_key, channel_slot)
+        else:
+            logger.debug(
+                "Reusing cached radio slot %d for channel %s before %s",
+                channel_slot,
+                channel.name,
+                action_label,
             )
 
-        return await mc.commands.send_chan_msg(
-            chan=temp_radio_slot,
+        send_result = await mc.commands.send_chan_msg(
+            chan=channel_slot,
             msg=text,
             timestamp=timestamp_bytes,
         )
+        radio_manager.note_channel_slot_used(channel_key)
+        return send_result
     finally:
         if override_scope and override_scope != baseline_scope:
             try:
@@ -223,10 +251,12 @@ async def send_channel_message_to_channel(
         result = await send_channel_message_with_effective_scope(
             mc=mc,
             channel=channel,
+            channel_key=channel_key_upper,
             key_bytes=key_bytes,
             text=text,
             timestamp_bytes=timestamp_bytes,
             action_label="sending message",
+            radio_manager=radio_manager,
             temp_radio_slot=temp_radio_slot,
             error_broadcast_fn=error_broadcast_fn,
         )
@@ -313,10 +343,12 @@ async def resend_channel_message_record(
         result = await send_channel_message_with_effective_scope(
             mc=mc,
             channel=channel,
+            channel_key=message.conversation_key,
             key_bytes=key_bytes,
             text=text_to_send,
             timestamp_bytes=timestamp_bytes,
             action_label="resending message",
+            radio_manager=radio_manager,
             temp_radio_slot=temp_radio_slot,
             error_broadcast_fn=error_broadcast_fn,
         )

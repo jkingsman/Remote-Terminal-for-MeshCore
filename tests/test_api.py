@@ -25,9 +25,17 @@ def _reset_radio_state():
     """Save/restore radio_manager state so tests don't leak."""
     prev = radio_manager._meshcore
     prev_lock = radio_manager._operation_lock
+    prev_max_channels = radio_manager.max_channels
+    prev_connection_info = radio_manager._connection_info
+    prev_slot_by_key = radio_manager._channel_slot_by_key.copy()
+    prev_key_by_slot = radio_manager._channel_key_by_slot.copy()
     yield
     radio_manager._meshcore = prev
     radio_manager._operation_lock = prev_lock
+    radio_manager.max_channels = prev_max_channels
+    radio_manager._connection_info = prev_connection_info
+    radio_manager._channel_slot_by_key = prev_slot_by_key
+    radio_manager._channel_key_by_slot = prev_key_by_slot
 
 
 def _patch_require_connected(mc=None, *, detail="Radio not connected"):

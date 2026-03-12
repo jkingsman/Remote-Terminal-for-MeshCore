@@ -310,6 +310,7 @@ async def sync_and_offload_channels(mc: MeshCore, max_channels: int | None = Non
     cleared = 0
 
     try:
+        radio_manager.reset_channel_send_cache()
         channel_limit = get_radio_channel_limit(max_channels)
 
         # Check all available channel slots for this firmware variant

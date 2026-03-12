@@ -31,9 +31,17 @@ def _reset_radio_state():
     """Save/restore radio_manager state so tests don't leak."""
     prev = radio_manager._meshcore
     prev_lock = radio_manager._operation_lock
+    prev_max_channels = radio_manager.max_channels
+    prev_connection_info = radio_manager._connection_info
+    prev_slot_by_key = radio_manager._channel_slot_by_key.copy()
+    prev_key_by_slot = radio_manager._channel_key_by_slot.copy()
     yield
     radio_manager._meshcore = prev
     radio_manager._operation_lock = prev_lock
+    radio_manager.max_channels = prev_max_channels
+    radio_manager._connection_info = prev_connection_info
+    radio_manager._channel_slot_by_key = prev_slot_by_key
+    radio_manager._channel_key_by_slot = prev_key_by_slot
 
 
 def _make_radio_result(payload=None):
@@ -345,6 +353,102 @@ class TestOutgoingChannelBroadcast:
         assert "regional override" in exc_info.value.detail.lower()
         mc.commands.set_channel.assert_not_awaited()
         mc.commands.send_chan_msg.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_send_channel_msg_reuses_cached_slot_for_same_channel(self, test_db):
+        mc = _make_mc(name="MyNode")
+        chan_key = "b1" * 16
+        await ChannelRepository.upsert(key=chan_key, name="#cached")
+        radio_manager.max_channels = 4
+        radio_manager._connection_info = "Serial: /dev/ttyUSB0"
+
+        with (
+            patch("app.routers.messages.require_connected", return_value=mc),
+            patch.object(radio_manager, "_meshcore", mc),
+            patch("app.decoder.calculate_channel_hash", return_value="abcd"),
+            patch("app.routers.messages.broadcast_event"),
+        ):
+            await send_channel_message(
+                SendChannelMessageRequest(channel_key=chan_key, text="first send")
+            )
+            await send_channel_message(
+                SendChannelMessageRequest(channel_key=chan_key, text="second send")
+            )
+
+        assert mc.commands.set_channel.await_count == 1
+        assert mc.commands.send_chan_msg.await_count == 2
+        assert [call.kwargs["chan"] for call in mc.commands.send_chan_msg.await_args_list] == [0, 0]
+
+    @pytest.mark.asyncio
+    async def test_send_channel_msg_uses_lru_slot_eviction(self, test_db):
+        mc = _make_mc(name="MyNode")
+        chan_key_a = "c1" * 16
+        chan_key_b = "c2" * 16
+        chan_key_c = "c3" * 16
+        await ChannelRepository.upsert(key=chan_key_a, name="#alpha")
+        await ChannelRepository.upsert(key=chan_key_b, name="#bravo")
+        await ChannelRepository.upsert(key=chan_key_c, name="#charlie")
+        radio_manager.max_channels = 2
+        radio_manager._connection_info = "Serial: /dev/ttyUSB0"
+
+        with (
+            patch("app.routers.messages.require_connected", return_value=mc),
+            patch.object(radio_manager, "_meshcore", mc),
+            patch("app.decoder.calculate_channel_hash", return_value="abcd"),
+            patch("app.routers.messages.broadcast_event"),
+        ):
+            await send_channel_message(
+                SendChannelMessageRequest(channel_key=chan_key_a, text="to alpha")
+            )
+            await send_channel_message(
+                SendChannelMessageRequest(channel_key=chan_key_b, text="to bravo")
+            )
+            await send_channel_message(
+                SendChannelMessageRequest(channel_key=chan_key_a, text="alpha again")
+            )
+            await send_channel_message(
+                SendChannelMessageRequest(channel_key=chan_key_c, text="to charlie")
+            )
+
+        assert [call.kwargs["channel_idx"] for call in mc.commands.set_channel.await_args_list] == [
+            0,
+            1,
+            1,
+        ]
+        assert [call.kwargs["chan"] for call in mc.commands.send_chan_msg.await_args_list] == [
+            0,
+            1,
+            0,
+            1,
+        ]
+        assert radio_manager.get_cached_channel_slot(chan_key_a) == 0
+        assert radio_manager.get_cached_channel_slot(chan_key_b) is None
+        assert radio_manager.get_cached_channel_slot(chan_key_c) == 1
+
+    @pytest.mark.asyncio
+    async def test_send_channel_msg_tcp_always_reconfigures_slot(self, test_db):
+        mc = _make_mc(name="MyNode")
+        chan_key = "d1" * 16
+        await ChannelRepository.upsert(key=chan_key, name="#tcp")
+        radio_manager.max_channels = 4
+        radio_manager._connection_info = "TCP: 127.0.0.1:4000"
+
+        with (
+            patch("app.routers.messages.require_connected", return_value=mc),
+            patch.object(radio_manager, "_meshcore", mc),
+            patch("app.decoder.calculate_channel_hash", return_value="abcd"),
+            patch("app.routers.messages.broadcast_event"),
+        ):
+            await send_channel_message(
+                SendChannelMessageRequest(channel_key=chan_key, text="first send")
+            )
+            await send_channel_message(
+                SendChannelMessageRequest(channel_key=chan_key, text="second send")
+            )
+
+        assert mc.commands.set_channel.await_count == 2
+        assert mc.commands.send_chan_msg.await_count == 2
+        assert radio_manager.get_cached_channel_slot(chan_key) is None
 
 
 class TestResendChannelMessage:
