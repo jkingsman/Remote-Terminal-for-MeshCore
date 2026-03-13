@@ -552,9 +552,9 @@ async def _message_poll_loop():
                             else:
                                 logger.error(
                                     "[RADIO SYNC ERROR] Periodic radio audit caught %d message(s) that were not "
-                                    "surfaced via event subscription. See README and consider "
+                                    "surfaced via event subscription. This means that the method of event (new contacts, messages, etc.) awareness we want isn't giving us everything. There is a fallback method available; see README.md and consider "
                                     "setting MESHCORE_ENABLE_MESSAGE_POLL_FALLBACK=true to "
-                                    "enable more frequent polling.",
+                                    "enable active radio polling every few seconds.",
                                     count,
                                 )
                                 broadcast_error(
