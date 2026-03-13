@@ -590,13 +590,43 @@ class TestSqsModule:
     async def test_status_connected_with_queue_url(self):
         from app.fanout.sqs import SqsModule
 
-        with patch("app.fanout.sqs.boto3.client", return_value=MagicMock()):
+        with patch("app.fanout.sqs.boto3.client", return_value=MagicMock()) as mock_client:
             mod = SqsModule(
                 "test",
                 {"queue_url": "https://sqs.us-east-1.amazonaws.com/123456789012/mesh-events"},
             )
             await mod.start()
             assert mod.status == "connected"
+            mock_client.assert_called_once_with("sqs", region_name="us-east-1")
+            await mod.stop()
+
+    @pytest.mark.asyncio
+    async def test_explicit_region_overrides_queue_url_inference(self):
+        from app.fanout.sqs import SqsModule
+
+        with patch("app.fanout.sqs.boto3.client", return_value=MagicMock()) as mock_client:
+            mod = SqsModule(
+                "test",
+                {
+                    "queue_url": "https://sqs.us-east-1.amazonaws.com/123456789012/mesh-events",
+                    "region_name": "us-west-2",
+                },
+            )
+            await mod.start()
+            mock_client.assert_called_once_with("sqs", region_name="us-west-2")
+            await mod.stop()
+
+    @pytest.mark.asyncio
+    async def test_custom_queue_url_does_not_infer_region(self):
+        from app.fanout.sqs import SqsModule
+
+        with patch("app.fanout.sqs.boto3.client", return_value=MagicMock()) as mock_client:
+            mod = SqsModule(
+                "test",
+                {"queue_url": "https://localhost:4566/000000000000/mesh-events"},
+            )
+            await mod.start()
+            mock_client.assert_called_once_with("sqs")
             await mod.stop()
 
     @pytest.mark.asyncio

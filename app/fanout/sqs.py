@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 from functools import partial
+from urllib.parse import urlparse
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
@@ -26,6 +27,24 @@ def _build_payload(data: dict, *, event_type: str) -> str:
         separators=(",", ":"),
         sort_keys=True,
     )
+
+
+def _infer_region_from_queue_url(queue_url: str) -> str | None:
+    """Infer AWS region from a standard SQS queue URL host when possible."""
+    host = urlparse(queue_url).hostname or ""
+    if not host:
+        return None
+
+    parts = host.split(".")
+    if len(parts) < 4 or parts[0] != "sqs":
+        return None
+    if parts[2] != "amazonaws":
+        return None
+    if parts[3] not in {"com", "com.cn"}:
+        return None
+
+    region = parts[1].strip()
+    return region or None
 
 
 def _is_fifo_queue(queue_url: str) -> bool:
@@ -69,12 +88,15 @@ class SqsModule(FanoutModule):
 
     async def start(self) -> None:
         kwargs: dict[str, str] = {}
+        queue_url = str(self.config.get("queue_url", "")).strip()
         region_name = str(self.config.get("region_name", "")).strip()
         endpoint_url = str(self.config.get("endpoint_url", "")).strip()
         access_key_id = str(self.config.get("access_key_id", "")).strip()
         secret_access_key = str(self.config.get("secret_access_key", "")).strip()
         session_token = str(self.config.get("session_token", "")).strip()
 
+        if not region_name:
+            region_name = _infer_region_from_queue_url(queue_url) or ""
         if region_name:
             kwargs["region_name"] = region_name
         if endpoint_url:

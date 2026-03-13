@@ -82,7 +82,7 @@ Push notifications via Apprise library. Config blob:
 ### sqs (sqs.py)
 Amazon SQS delivery. Config blob:
 - `queue_url` — target queue URL
-- `region_name` (optional), `endpoint_url` (optional)
+- `region_name` (optional; inferred from standard AWS SQS queue URLs when omitted), `endpoint_url` (optional)
 - `access_key_id`, `secret_access_key`, `session_token` (all optional; blank uses the normal AWS credential chain)
 - Publishes a JSON envelope of the form `{"event_type":"message"|"raw_packet","data":...}`
 - Supports both decoded messages and raw packets via normal scope selection
