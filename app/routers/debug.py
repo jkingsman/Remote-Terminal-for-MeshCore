@@ -39,7 +39,6 @@ class DebugRuntimeInfo(BaseModel):
     path_hash_mode_supported: bool
     channel_slot_reuse_enabled: bool
     channel_send_cache_capacity: int
-    channel_send_cache: list[dict[str, int | str]]
     remediation_flags: dict[str, bool]
 
 
@@ -284,10 +283,6 @@ async def debug_support_snapshot() -> DebugSnapshotResponse:
             path_hash_mode_supported=radio_runtime.path_hash_mode_supported,
             channel_slot_reuse_enabled=radio_runtime.channel_slot_reuse_enabled(),
             channel_send_cache_capacity=radio_runtime.get_channel_send_cache_capacity(),
-            channel_send_cache=[
-                {"channel_key": channel_key, "slot": slot}
-                for channel_key, slot in radio_runtime.get_channel_send_cache_snapshot()
-            ],
             remediation_flags={
                 "enable_message_poll_fallback": settings.enable_message_poll_fallback,
                 "force_channel_slot_reconfigure": settings.force_channel_slot_reconfigure,

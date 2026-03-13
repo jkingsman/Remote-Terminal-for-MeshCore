@@ -187,7 +187,6 @@ class TestDebugEndpoint:
 
         assert payload["application"]["commit_hash"] == "deadbeef"
         assert payload["runtime"]["channel_slot_reuse_enabled"] is True
-        assert payload["runtime"]["channel_send_cache"] == [{"channel_key": channel_key, "slot": 0}]
         assert any("support snapshot marker" in line for line in payload["logs"])
 
         radio_probe = payload["radio_probe"]

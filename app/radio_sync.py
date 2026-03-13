@@ -513,7 +513,7 @@ async def audit_channel_send_cache(mc: MeshCore) -> bool:
         return True
 
     logger.error(
-        "A periodic radio audit discovered that the channel send-slot cache fell out of sync with radio state. This indicates that some other system, internal or external to the radio, has updated the channel slots on the radio (which the app assumes it has exclusive rights to, except on TCP-linked devices). The cache is resetting now, but you should review the README.md and consider using the environment variable MESHCORE_FORCE_CHANNEL_SLOT_RECONFIGURE=true to make the radio use non-optimistic channel management and force-write the channel to radio before each send. This is a minor performance hit, but guarantees consistency. Mismatches found: %s",
+        "[RADIO SYNC ERROR] A periodic radio audit discovered that the channel send-slot cache fell out of sync with radio state. This indicates that some other system, internal or external to the radio, has updated the channel slots on the radio (which the app assumes it has exclusive rights to, except on TCP-linked devices). The cache is resetting now, but you should review the README.md and consider using the environment variable MESHCORE_FORCE_CHANNEL_SLOT_RECONFIGURE=true to make the radio use non-optimistic channel management and force-write the channel to radio before each send. This is a minor performance hit, but guarantees consistency. Mismatches found: %s",
         "; ".join(mismatches),
     )
     radio_manager.reset_channel_send_cache()
@@ -551,7 +551,7 @@ async def _message_poll_loop():
                                 )
                             else:
                                 logger.error(
-                                    "Periodic radio audit caught %d message(s) that were not "
+                                    "[RADIO SYNC ERROR] Periodic radio audit caught %d message(s) that were not "
                                     "surfaced via event subscription. See README and consider "
                                     "setting MESHCORE_ENABLE_MESSAGE_POLL_FALLBACK=true to "
                                     "enable more frequent polling.",
