@@ -85,15 +85,6 @@ class PacketInfo:
     path_hash_size: int = 1  # Bytes per hop: 1, 2, or 3
 
 
-def calculate_channel_hash(channel_key: bytes) -> str:
-    """
-    Calculate the channel hash from a 16-byte channel key.
-    Returns the first byte of SHA256(key) as hex.
-    """
-    hash_bytes = hashlib.sha256(channel_key).digest()
-    return format(hash_bytes[0], "02x")
-
-
 def extract_payload(raw_packet: bytes) -> bytes | None:
     """
     Extract just the payload from a raw packet, skipping header and path.
@@ -233,7 +224,7 @@ def try_decrypt_packet_with_channel_key(
         return None
 
     packet_channel_hash = format(packet_info.payload[0], "02x")
-    expected_hash = calculate_channel_hash(channel_key)
+    expected_hash = format(hashlib.sha256(channel_key).digest()[0], "02x")
 
     if packet_channel_hash != expected_hash:
         return None

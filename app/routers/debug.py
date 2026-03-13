@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from app.config import get_recent_log_lines, settings
 from app.radio_sync import get_contacts_selected_for_radio_sync, get_radio_channel_limit
+from app.repository import MessageRepository
 from app.routers.health import HealthResponse, build_health_data
 from app.services.radio_runtime import radio_runtime
 
@@ -34,6 +35,7 @@ class DebugRuntimeInfo(BaseModel):
     connection_desired: bool
     setup_in_progress: bool
     setup_complete: bool
+    channels_with_incoming_messages: int
     max_channels: int
     path_hash_mode: int
     path_hash_mode_supported: bool
@@ -269,6 +271,9 @@ async def debug_support_snapshot() -> DebugSnapshotResponse:
     """Return a support/debug snapshot with recent logs and live radio state."""
     health_data = await build_health_data(radio_runtime.is_connected, radio_runtime.connection_info)
     radio_probe = await _probe_radio()
+    channels_with_incoming_messages = (
+        await MessageRepository.count_channels_with_incoming_messages()
+    )
     return DebugSnapshotResponse(
         captured_at=datetime.now(timezone.utc).isoformat(),
         application=_build_application_info(),
@@ -278,6 +283,7 @@ async def debug_support_snapshot() -> DebugSnapshotResponse:
             connection_desired=radio_runtime.connection_desired,
             setup_in_progress=radio_runtime.is_setup_in_progress,
             setup_complete=radio_runtime.is_setup_complete,
+            channels_with_incoming_messages=channels_with_incoming_messages,
             max_channels=radio_runtime.max_channels,
             path_hash_mode=radio_runtime.path_hash_mode,
             path_hash_mode_supported=radio_runtime.path_hash_mode_supported,

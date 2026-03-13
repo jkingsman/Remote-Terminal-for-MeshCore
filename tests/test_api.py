@@ -127,6 +127,13 @@ class TestDebugEndpoint:
         channel_key = "CD" * 16
         await _insert_contact(contact_key, "Alice", last_contacted=1700000000)
         await ChannelRepository.upsert(key=channel_key, name="#flightless", on_radio=False)
+        await MessageRepository.create(
+            msg_type="CHAN",
+            text="Alice: hello",
+            received_at=1700000001,
+            conversation_key=channel_key,
+            sender_timestamp=1700000001,
+        )
 
         radio_manager.max_channels = 2
         radio_manager.path_hash_mode = 1
@@ -187,6 +194,7 @@ class TestDebugEndpoint:
 
         assert payload["application"]["commit_hash"] == "deadbeef"
         assert payload["runtime"]["channel_slot_reuse_enabled"] is True
+        assert payload["runtime"]["channels_with_incoming_messages"] == 1
         assert any("support snapshot marker" in line for line in payload["logs"])
 
         radio_probe = payload["radio_probe"]
@@ -226,6 +234,7 @@ class TestDebugEndpoint:
         payload = response.json()
         assert payload["radio_probe"]["performed"] is False
         assert payload["radio_probe"]["errors"] == ["Radio not connected"]
+        assert payload["runtime"]["channels_with_incoming_messages"] == 0
 
 
 class TestRadioDisconnectedHandler:
@@ -328,7 +337,6 @@ class TestMessagesEndpoint:
         radio_manager._meshcore = mock_mc
         with (
             _patch_require_connected(mock_mc),
-            patch("app.decoder.calculate_channel_hash", return_value="abcd"),
             patch("app.routers.messages.broadcast_event") as mock_broadcast,
         ):
             response = await client.post(

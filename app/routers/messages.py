@@ -138,7 +138,6 @@ async def send_channel_message(request: SendChannelMessageRequest) -> Message:
     require_connected()
 
     # Get channel info from our database
-    from app.decoder import calculate_channel_hash
     from app.repository import ChannelRepository
 
     db_channel = await ChannelRepository.get_by_key(request.channel_key)
@@ -155,13 +154,6 @@ async def send_channel_message(request: SendChannelMessageRequest) -> Message:
             status_code=400, detail=f"Invalid channel key format: {request.channel_key}"
         ) from None
 
-    expected_hash = calculate_channel_hash(key_bytes)
-    logger.info(
-        "Sending to channel %s (%s) via managed radio slot, key hash: %s",
-        request.channel_key,
-        db_channel.name,
-        expected_hash,
-    )
     return await send_channel_message_to_channel(
         channel=db_channel,
         channel_key_upper=request.channel_key.upper(),

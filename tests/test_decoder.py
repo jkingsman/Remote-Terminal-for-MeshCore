@@ -14,7 +14,6 @@ from app.decoder import (
     PayloadType,
     RouteType,
     _clamp_scalar,
-    calculate_channel_hash,
     decrypt_direct_message,
     decrypt_group_text,
     derive_public_key,
@@ -34,21 +33,7 @@ class TestChannelKeyDerivation:
         channel_name = "#test"
         expected_key = hashlib.sha256(channel_name.encode("utf-8")).digest()[:16]
 
-        # Verify the derived key produces the expected channel hash
-        result_hash = calculate_channel_hash(expected_key)
-        expected_hash = format(hashlib.sha256(expected_key).digest()[0], "02x")
-        assert result_hash == expected_hash
         assert len(expected_key) == 16
-
-    def test_channel_hash_calculation(self):
-        """Channel hash is the first byte of SHA256(key) as hex."""
-        key = bytes(16)  # All zeros
-        expected_hash = format(hashlib.sha256(key).digest()[0], "02x")
-
-        result = calculate_channel_hash(key)
-
-        assert result == expected_hash
-        assert len(result) == 2  # Two hex chars
 
 
 class TestPacketParsing:

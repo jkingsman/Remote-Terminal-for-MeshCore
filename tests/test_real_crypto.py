@@ -210,12 +210,10 @@ class TestChannelDecryption:
 
     def test_channel_hash_matches_packet(self):
         """Channel hash in packet matches hash computed from key."""
-        from app.decoder import calculate_channel_hash
-
         info = parse_packet(CHANNEL_PACKET)
         assert info is not None
         packet_hash = format(info.payload[0], "02x")
-        expected_hash = calculate_channel_hash(CHANNEL_KEY)
+        expected_hash = format(sha256(CHANNEL_KEY).digest()[0], "02x")
         assert packet_hash == expected_hash
 
     def test_wrong_channel_key_fails(self):

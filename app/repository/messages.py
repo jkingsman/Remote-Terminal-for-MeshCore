@@ -858,6 +858,19 @@ class MessageRepository:
         }
 
     @staticmethod
+    async def count_channels_with_incoming_messages() -> int:
+        """Count distinct channel conversations with at least one incoming message."""
+        cursor = await db.conn.execute(
+            """
+            SELECT COUNT(DISTINCT conversation_key) AS cnt
+            FROM messages
+            WHERE type = 'CHAN' AND outgoing = 0
+            """
+        )
+        row = await cursor.fetchone()
+        return int(row["cnt"]) if row and row["cnt"] is not None else 0
+
+    @staticmethod
     async def get_most_active_rooms(sender_key: str, limit: int = 5) -> list[tuple[str, str, int]]:
         """Get channels where a contact has sent the most messages.
 

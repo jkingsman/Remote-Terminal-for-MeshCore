@@ -209,7 +209,6 @@ class TestOutgoingChannelBroadcast:
         with (
             patch("app.routers.messages.require_connected", return_value=mc),
             patch.object(radio_manager, "_meshcore", mc),
-            patch("app.decoder.calculate_channel_hash", return_value="abcd"),
             patch("app.routers.messages.broadcast_event", side_effect=capture_broadcast),
         ):
             request = SendChannelMessageRequest(channel_key=chan_key, text="!lasttime5 someone")
@@ -234,7 +233,6 @@ class TestOutgoingChannelBroadcast:
         with (
             patch("app.routers.messages.require_connected", return_value=mc),
             patch.object(radio_manager, "_meshcore", mc),
-            patch("app.decoder.calculate_channel_hash", return_value="abcd"),
             patch("app.routers.messages.broadcast_event"),
         ):
             request = SendChannelMessageRequest(channel_key=chan_key, text="acked now")
@@ -262,7 +260,6 @@ class TestOutgoingChannelBroadcast:
         with (
             patch("app.routers.messages.require_connected", return_value=mc),
             patch.object(radio_manager, "_meshcore", mc),
-            patch("app.decoder.calculate_channel_hash", return_value="abcd"),
             patch("app.routers.messages.broadcast_event", side_effect=capture_broadcast),
         ):
             request = SendChannelMessageRequest(channel_key=chan_key, text="hello")
@@ -293,7 +290,6 @@ class TestOutgoingChannelBroadcast:
         with (
             patch("app.routers.messages.require_connected", return_value=mc),
             patch.object(radio_manager, "_meshcore", mc),
-            patch("app.decoder.calculate_channel_hash", return_value="abcd"),
             patch("app.routers.messages.broadcast_event"),
         ):
             request = SendChannelMessageRequest(channel_key=chan_key, text="hello")
@@ -317,7 +313,6 @@ class TestOutgoingChannelBroadcast:
         with (
             patch("app.routers.messages.require_connected", return_value=mc),
             patch.object(radio_manager, "_meshcore", mc),
-            patch("app.decoder.calculate_channel_hash", return_value="abcd"),
             patch("app.routers.messages.broadcast_event"),
         ):
             request = SendChannelMessageRequest(channel_key=chan_key, text="hello")
@@ -339,7 +334,6 @@ class TestOutgoingChannelBroadcast:
         with (
             patch("app.routers.messages.require_connected", return_value=mc),
             patch.object(radio_manager, "_meshcore", mc),
-            patch("app.decoder.calculate_channel_hash", return_value="abcd"),
             patch("app.routers.messages.broadcast_event"),
             pytest.raises(HTTPException) as exc_info,
         ):
@@ -362,7 +356,6 @@ class TestOutgoingChannelBroadcast:
         with (
             patch("app.routers.messages.require_connected", return_value=mc),
             patch.object(radio_manager, "_meshcore", mc),
-            patch("app.decoder.calculate_channel_hash", return_value="abcd"),
             patch("app.routers.messages.broadcast_event"),
         ):
             await send_channel_message(
@@ -391,7 +384,6 @@ class TestOutgoingChannelBroadcast:
         with (
             patch("app.routers.messages.require_connected", return_value=mc),
             patch.object(radio_manager, "_meshcore", mc),
-            patch("app.decoder.calculate_channel_hash", return_value="abcd"),
             patch("app.routers.messages.broadcast_event"),
         ):
             await send_channel_message(
@@ -433,7 +425,6 @@ class TestOutgoingChannelBroadcast:
         with (
             patch("app.routers.messages.require_connected", return_value=mc),
             patch.object(radio_manager, "_meshcore", mc),
-            patch("app.decoder.calculate_channel_hash", return_value="abcd"),
             patch("app.routers.messages.broadcast_event"),
         ):
             await send_channel_message(
@@ -458,7 +449,6 @@ class TestOutgoingChannelBroadcast:
         with (
             patch("app.routers.messages.require_connected", return_value=mc),
             patch.object(radio_manager, "_meshcore", mc),
-            patch("app.decoder.calculate_channel_hash", return_value="abcd"),
             patch("app.routers.messages.broadcast_event"),
             patch("app.radio.settings.force_channel_slot_reconfigure", True),
         ):
@@ -487,7 +477,6 @@ class TestOutgoingChannelBroadcast:
         with (
             patch("app.routers.messages.require_connected", return_value=mc),
             patch.object(radio_manager, "_meshcore", mc),
-            patch("app.decoder.calculate_channel_hash", return_value="abcd"),
             patch("app.routers.messages.broadcast_event"),
             pytest.raises(HTTPException) as exc_info,
         ):
