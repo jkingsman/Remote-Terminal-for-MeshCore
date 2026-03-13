@@ -1,5 +1,7 @@
 import logging
 import logging.config
+from collections import deque
+from threading import Lock
 from typing import Literal
 
 from pydantic import model_validator
@@ -65,6 +67,47 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+class _RingBufferLogHandler(logging.Handler):
+    """Keep a bounded in-memory tail of formatted log lines."""
+
+    def __init__(self, max_lines: int = 1000) -> None:
+        super().__init__()
+        self._buffer: deque[str] = deque(maxlen=max_lines)
+        self._lock = Lock()
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            line = self.format(record)
+        except Exception:
+            self.handleError(record)
+            return
+        with self._lock:
+            self._buffer.append(line)
+
+    def get_lines(self, limit: int = 1000) -> list[str]:
+        with self._lock:
+            if limit <= 0:
+                return []
+            return list(self._buffer)[-limit:]
+
+    def clear(self) -> None:
+        with self._lock:
+            self._buffer.clear()
+
+
+_recent_log_handler = _RingBufferLogHandler(max_lines=1000)
+
+
+def get_recent_log_lines(limit: int = 1000) -> list[str]:
+    """Return recent formatted log lines from the in-memory ring buffer."""
+    return _recent_log_handler.get_lines(limit)
+
+
+def clear_recent_log_lines() -> None:
+    """Clear the in-memory log ring buffer."""
+    _recent_log_handler.clear()
 
 
 class _RepeatSquelch(logging.Filter):
@@ -152,6 +195,19 @@ def setup_logging() -> None:
             },
         }
     )
+
+    _recent_log_handler.setLevel(logging.DEBUG)
+    _recent_log_handler.setFormatter(
+        logging.Formatter(
+            fmt="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+    )
+    for logger_name in ("", "uvicorn", "uvicorn.error", "uvicorn.access"):
+        target = logging.getLogger(logger_name)
+        if _recent_log_handler not in target.handlers:
+            target.addHandler(_recent_log_handler)
+
     # Squelch repeated messages from the meshcore library (e.g. rapid-fire
     # "Serial Connection started" when the port is contended).
     logging.getLogger("meshcore").addFilter(_RepeatSquelch())

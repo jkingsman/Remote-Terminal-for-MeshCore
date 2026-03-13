@@ -290,6 +290,7 @@ All endpoints are prefixed with `/api` (e.g., `/api/health`).
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/health` | Connection status, fanout statuses, bots_disabled flag |
+| GET | `/api/debug` | Support snapshot: recent logs, live radio probe, contact/channel drift audit, and running version/git info |
 | GET | `/api/radio/config` | Radio configuration, including `path_hash_mode`, `path_hash_mode_supported`, and whether adverts include current node location |
 | PATCH | `/api/radio/config` | Update name, location, advert-location on/off, radio params, and `path_hash_mode` when supported |
 | PUT | `/api/radio/private-key` | Import private key to radio |

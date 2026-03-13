@@ -20,6 +20,7 @@ from app.radio_sync import (
     ensure_contact_on_radio,
     is_polling_paused,
     pause_polling,
+    sync_and_offload_all,
     sync_radio_time,
     sync_recent_contacts_to_radio,
 )
@@ -211,11 +212,6 @@ class TestSyncRecentContactsToRadio:
         result = await sync_recent_contacts_to_radio()
 
         assert result["loaded"] == 2
-        # Verify contacts are now marked as on_radio in DB
-        alice = await ContactRepository.get_by_key(KEY_A)
-        bob = await ContactRepository.get_by_key(KEY_B)
-        assert alice.on_radio is True
-        assert bob.on_radio is True
 
     @pytest.mark.asyncio
     async def test_fills_remaining_slots_with_recently_contacted_then_advertised(self, test_db):
@@ -272,6 +268,39 @@ class TestSyncRecentContactsToRadio:
         ]
         assert loaded_keys == favorite_keys
 
+
+class TestSyncAndOffloadAll:
+    """Test session-local contact radio residency reset behavior."""
+
+    @pytest.mark.asyncio
+    async def test_clears_stale_contact_on_radio_flags_before_reload(self, test_db):
+        await _insert_contact(KEY_A, "Alice", on_radio=True)
+        await _insert_contact(KEY_B, "Bob", on_radio=True)
+
+        mock_mc = MagicMock()
+
+        with (
+            patch(
+                "app.radio_sync.sync_and_offload_contacts",
+                new=AsyncMock(return_value={"synced": 0, "removed": 0}),
+            ),
+            patch(
+                "app.radio_sync.sync_and_offload_channels",
+                new=AsyncMock(return_value={"synced": 0, "cleared": 0}),
+            ),
+            patch("app.radio_sync.ensure_default_channels", new=AsyncMock()),
+            patch(
+                "app.radio_sync.sync_recent_contacts_to_radio",
+                new=AsyncMock(return_value={"loaded": 0, "already_on_radio": 0, "failed": 0}),
+            ),
+        ):
+            await sync_and_offload_all(mock_mc)
+
+        alice = await ContactRepository.get_by_key(KEY_A)
+        bob = await ContactRepository.get_by_key(KEY_B)
+        assert alice is not None and alice.on_radio is False
+        assert bob is not None and bob.on_radio is False
+
     @pytest.mark.asyncio
     async def test_advert_fill_skips_repeaters(self, test_db):
         """Recent advert fallback only considers non-repeaters."""
@@ -325,7 +354,7 @@ class TestSyncRecentContactsToRadio:
     @pytest.mark.asyncio
     async def test_skips_contacts_already_on_radio(self, test_db):
         """Contacts already on radio are counted but not re-added."""
-        await _insert_contact(KEY_A, "Alice", on_radio=True)
+        await _insert_contact(KEY_A, "Alice", on_radio=False)
         await AppSettingsRepository.update(favorites=[Favorite(type="contact", id=KEY_A)])
 
         mock_mc = MagicMock()
@@ -381,23 +410,6 @@ class TestSyncRecentContactsToRadio:
 
         assert result["loaded"] == 0
         assert "error" in result
-
-    @pytest.mark.asyncio
-    async def test_marks_on_radio_when_found_but_not_flagged(self, test_db):
-        """Contact found on radio but not flagged gets set_on_radio(True)."""
-        await _insert_contact(KEY_A, "Alice", on_radio=False)
-        await AppSettingsRepository.update(favorites=[Favorite(type="contact", id=KEY_A)])
-
-        mock_mc = MagicMock()
-        mock_mc.get_contact_by_key_prefix = MagicMock(return_value=MagicMock())  # Found
-
-        radio_manager._meshcore = mock_mc
-        result = await sync_recent_contacts_to_radio()
-
-        assert result["already_on_radio"] == 1
-        # Should update the flag since contact.on_radio was False
-        contact = await ContactRepository.get_by_key(KEY_A)
-        assert contact.on_radio is True
 
     @pytest.mark.asyncio
     async def test_handles_add_failure(self, test_db):

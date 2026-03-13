@@ -161,9 +161,6 @@ class TestOutgoingDMBroadcast:
         assert contact_payload["out_path"] == "aa00bb00"
         assert contact_payload["out_path_len"] == 2
         assert contact_payload["out_path_hash_mode"] == 1
-        contact = await ContactRepository.get_by_key(pub_key)
-        assert contact is not None
-        assert contact.on_radio is True
 
     @pytest.mark.asyncio
     async def test_send_dm_prefers_route_override_over_learned_path(self, test_db):

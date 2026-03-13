@@ -915,7 +915,7 @@ class TestOnNewContact:
             contact = await ContactRepository.get_by_key("cc" * 32)
             assert contact is not None
             assert contact.name == "Charlie"
-            assert contact.on_radio is True
+            assert contact.on_radio is False
             assert contact.last_seen == 1700000000
 
             mock_broadcast.assert_called_once()

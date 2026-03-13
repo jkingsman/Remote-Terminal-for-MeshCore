@@ -168,20 +168,15 @@ async def send_direct_message_to_contact(
 ) -> Any:
     """Send a direct message and persist/broadcast the outgoing row."""
     contact_data = contact.to_radio_dict()
-    contact_ensured_on_radio = False
     async with radio_manager.radio_operation("send_direct_message") as mc:
         logger.debug("Ensuring contact %s is on radio before sending", contact.public_key[:12])
         add_result = await mc.commands.add_contact(contact_data)
         if add_result.type == EventType.ERROR:
             logger.warning("Failed to add contact to radio: %s", add_result.payload)
-        else:
-            contact_ensured_on_radio = True
 
         cached_contact = mc.get_contact_by_key_prefix(contact.public_key[:12])
         if not cached_contact:
             cached_contact = contact_data
-        else:
-            contact_ensured_on_radio = True
 
         logger.info("Sending direct message to %s", contact.public_key[:12])
         now = int(now_fn())
@@ -193,9 +188,6 @@ async def send_direct_message_to_contact(
 
     if result.type == EventType.ERROR:
         raise HTTPException(status_code=500, detail=f"Failed to send message: {result.payload}")
-
-    if contact_ensured_on_radio and not contact.on_radio:
-        await contact_repository.set_on_radio(contact.public_key.lower(), True)
 
     message = await create_outgoing_direct_message(
         conversation_key=contact.public_key.lower(),

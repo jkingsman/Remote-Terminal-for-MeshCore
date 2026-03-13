@@ -67,6 +67,30 @@ class ChannelRepository:
         ]
 
     @staticmethod
+    async def get_on_radio() -> list[Channel]:
+        """Return channels currently marked as resident on the radio in the database."""
+        cursor = await db.conn.execute(
+            """
+            SELECT key, name, is_hashtag, on_radio, flood_scope_override, last_read_at
+            FROM channels
+            WHERE on_radio = 1
+            ORDER BY name
+            """
+        )
+        rows = await cursor.fetchall()
+        return [
+            Channel(
+                key=row["key"],
+                name=row["name"],
+                is_hashtag=bool(row["is_hashtag"]),
+                on_radio=bool(row["on_radio"]),
+                flood_scope_override=row["flood_scope_override"],
+                last_read_at=row["last_read_at"],
+            )
+            for row in rows
+        ]
+
+    @staticmethod
     async def delete(key: str) -> None:
         """Delete a channel by key."""
         await db.conn.execute(

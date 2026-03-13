@@ -5,6 +5,7 @@ Uses httpx.AsyncClient or direct function calls with real in-memory SQLite.
 """
 
 import hashlib
+import logging
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -107,6 +108,125 @@ class TestHealthEndpoint:
             data = response.json()
             assert data["radio_connected"] is False
             assert data["connection_info"] is None
+
+
+class TestDebugEndpoint:
+    """Test the debug support snapshot endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_support_snapshot_returns_logs_and_live_radio_audits(self, test_db, client):
+        """Debug snapshot should include recent logs plus live radio/contact/channel state."""
+        from meshcore import EventType
+
+        from app.config import clear_recent_log_lines
+        from app.routers.debug import DebugApplicationInfo
+
+        clear_recent_log_lines()
+
+        contact_key = "ab" * 32
+        channel_key = "CD" * 16
+        await _insert_contact(contact_key, "Alice", last_contacted=1700000000)
+        await ChannelRepository.upsert(key=channel_key, name="#flightless", on_radio=False)
+
+        radio_manager.max_channels = 2
+        radio_manager.path_hash_mode = 1
+        radio_manager.path_hash_mode_supported = True
+        radio_manager._connection_info = "Serial: /dev/ttyUSB0"
+        radio_manager.note_channel_slot_loaded(channel_key, 0)
+
+        mock_mc = MagicMock()
+        mock_mc.self_info = {"name": "TestNode", "radio_freq": 910.525}
+        mock_mc.stop_auto_message_fetching = AsyncMock()
+        mock_mc.start_auto_message_fetching = AsyncMock()
+        mock_mc.commands.send_device_query = AsyncMock(
+            return_value=MagicMock(type=EventType.DEVICE_INFO, payload={"max_channels": 2})
+        )
+        mock_mc.commands.get_stats_core = AsyncMock(
+            return_value=MagicMock(type=EventType.STATS_CORE, payload={"heap_free": 1234})
+        )
+        mock_mc.commands.get_stats_radio = AsyncMock(
+            return_value=MagicMock(type=EventType.STATS_RADIO, payload={"tx_good": 9})
+        )
+        mock_mc.commands.get_contacts = AsyncMock(
+            return_value=MagicMock(
+                type=EventType.OK,
+                payload={contact_key: {"adv_name": "Alice"}},
+            )
+        )
+
+        def _channel_event(slot: int) -> MagicMock:
+            if slot == 0:
+                return MagicMock(
+                    type=EventType.CHANNEL_INFO,
+                    payload={
+                        "channel_name": "#flightless",
+                        "channel_secret": bytes.fromhex(channel_key),
+                    },
+                )
+            return MagicMock(type=EventType.OK, payload={})
+
+        mock_mc.commands.get_channel = AsyncMock(side_effect=_channel_event)
+        radio_manager._meshcore = mock_mc
+
+        logging.getLogger("tests.debug").warning("support snapshot marker")
+
+        with patch(
+            "app.routers.debug._build_application_info",
+            return_value=DebugApplicationInfo(
+                version="3.2.0",
+                commit_hash="deadbeef",
+                git_branch="main",
+                git_dirty=False,
+                python_version="3.12.0",
+            ),
+        ):
+            response = await client.get("/api/debug")
+
+        assert response.status_code == 200
+        payload = response.json()
+
+        assert payload["application"]["commit_hash"] == "deadbeef"
+        assert payload["runtime"]["channel_slot_reuse_enabled"] is True
+        assert payload["runtime"]["channel_send_cache"] == [{"channel_key": channel_key, "slot": 0}]
+        assert any("support snapshot marker" in line for line in payload["logs"])
+
+        radio_probe = payload["radio_probe"]
+        assert radio_probe["performed"] is True
+        assert radio_probe["device_info"] == {"max_channels": 2}
+        assert radio_probe["stats_core"] == {"heap_free": 1234}
+        assert radio_probe["stats_radio"] == {"tx_good": 9}
+        assert radio_probe["contacts"]["expected_and_found"] == 1
+        assert radio_probe["contacts"]["expected_but_not_found"] == []
+        assert radio_probe["contacts"]["found_but_not_expected"] == []
+        assert radio_probe["channels"]["matched_slots"] == 2
+        assert radio_probe["channels"]["wrong_slots"] == []
+
+    @pytest.mark.asyncio
+    async def test_support_snapshot_returns_runtime_when_disconnected(self, test_db, client):
+        """Debug snapshot should still return logs and runtime state when radio is disconnected."""
+        from app.config import clear_recent_log_lines
+        from app.routers.debug import DebugApplicationInfo
+
+        clear_recent_log_lines()
+        radio_manager._meshcore = None
+        radio_manager._connection_info = None
+
+        with patch(
+            "app.routers.debug._build_application_info",
+            return_value=DebugApplicationInfo(
+                version="3.2.0",
+                commit_hash="deadbeef",
+                git_branch="main",
+                git_dirty=False,
+                python_version="3.12.0",
+            ),
+        ):
+            response = await client.get("/api/debug")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["radio_probe"]["performed"] is False
+        assert payload["radio_probe"]["errors"] == ["Radio not connected"]
 
 
 class TestRadioDisconnectedHandler:

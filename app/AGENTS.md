@@ -53,6 +53,7 @@ app/
 ├── frontend_static.py   # Mount/serve built frontend (production)
 └── routers/
     ├── health.py
+    ├── debug.py
     ├── radio.py
     ├── contacts.py
     ├── channels.py
@@ -148,6 +149,9 @@ app/
 
 ### Health
 - `GET /health`
+
+### Debug
+- `GET /debug` — support snapshot with recent logs, live radio probe, slot/contact audits, and version/git info
 
 ### Radio
 - `GET /radio/config` — includes `path_hash_mode`, `path_hash_mode_supported`, and advert-location on/off

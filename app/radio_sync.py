@@ -50,7 +50,6 @@ def _contact_sync_debug_fields(contact: Contact) -> dict[str, object]:
         "last_advert": contact.last_advert,
         "lat": contact.lat,
         "lon": contact.lon,
-        "on_radio": contact.on_radio,
     }
 
 
@@ -380,16 +379,19 @@ async def sync_and_offload_all(mc: MeshCore) -> dict:
     """Sync and offload both contacts and channels, then ensure defaults exist."""
     logger.info("Starting full radio sync and offload")
 
+    # Contact on_radio is legacy/stale metadata. Clear it during the offload/reload
+    # cycle so old rows stop claiming radio residency we do not actively track.
+    await ContactRepository.clear_on_radio_except([])
+
     contacts_result = await sync_and_offload_contacts(mc)
     channels_result = await sync_and_offload_channels(mc)
 
     # Ensure default channels exist
     await ensure_default_channels()
 
-    # Reload favorites plus a working-set fill back onto the radio immediately
-    # so they do not stay in on_radio=False limbo after offload. Pass mc directly
-    # since the caller already holds the radio operation lock (asyncio.Lock is not
-    # reentrant).
+    # Reload favorites plus a working-set fill back onto the radio immediately.
+    # Pass mc directly since the caller already holds the radio operation lock
+    # (asyncio.Lock is not reentrant).
     reload_result = await sync_recent_contacts_to_radio(force=True, mc=mc)
 
     return {
@@ -776,20 +778,8 @@ _last_contact_sync: float = 0.0
 CONTACT_SYNC_THROTTLE_SECONDS = 30  # Don't sync more than once per 30 seconds
 
 
-async def _sync_contacts_to_radio_inner(mc: MeshCore) -> dict:
-    """
-    Core logic for loading contacts onto the radio.
-
-    Fill order is:
-    1. Favorite contacts
-    2. Most recently interacted-with non-repeaters
-    3. Most recently advert-heard non-repeaters without interaction history
-
-    Favorite contacts are always reloaded first, up to the configured capacity.
-    Additional non-favorite fill stops at the refill target (80% of capacity).
-
-    Caller must hold the radio operation lock and pass a valid MeshCore instance.
-    """
+async def get_contacts_selected_for_radio_sync() -> list[Contact]:
+    """Return the contacts that would be loaded onto the radio right now."""
     app_settings = await AppSettingsRepository.get()
     max_contacts = app_settings.max_radio_contacts
     refill_target, _full_sync_trigger = _compute_radio_contact_limits(max_contacts)
@@ -856,6 +846,24 @@ async def _sync_contacts_to_radio_inner(mc: MeshCore) -> dict:
         refill_target,
         max_contacts,
     )
+    return selected_contacts
+
+
+async def _sync_contacts_to_radio_inner(mc: MeshCore) -> dict:
+    """
+    Core logic for loading contacts onto the radio.
+
+    Fill order is:
+    1. Favorite contacts
+    2. Most recently interacted-with non-repeaters
+    3. Most recently advert-heard non-repeaters without interaction history
+
+    Favorite contacts are always reloaded first, up to the configured capacity.
+    Additional non-favorite fill stops at the refill target (80% of capacity).
+
+    Caller must hold the radio operation lock and pass a valid MeshCore instance.
+    """
+    selected_contacts = await get_contacts_selected_for_radio_sync()
     return await _load_contacts_to_radio(mc, selected_contacts)
 
 
@@ -928,8 +936,6 @@ async def _load_contacts_to_radio(mc: MeshCore, contacts: list[Contact]) -> dict
         radio_contact = mc.get_contact_by_key_prefix(contact.public_key[:12])
         if radio_contact:
             already_on_radio += 1
-            if not contact.on_radio:
-                await ContactRepository.set_on_radio(contact.public_key, True)
             continue
 
         try:
@@ -937,7 +943,6 @@ async def _load_contacts_to_radio(mc: MeshCore, contacts: list[Contact]) -> dict
             result = await mc.commands.add_contact(radio_contact_payload)
             if result.type == EventType.OK:
                 loaded += 1
-                await ContactRepository.set_on_radio(contact.public_key, True)
                 logger.debug("Loaded contact %s to radio", contact.public_key[:12])
             else:
                 failed += 1

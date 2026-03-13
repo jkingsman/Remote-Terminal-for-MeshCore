@@ -278,11 +278,6 @@ export function ContactInfoPane({
                     <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-medium">
                       {CONTACT_TYPE_LABELS[contact.type] ?? 'Unknown'}
                     </span>
-                    {contact.on_radio && (
-                      <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium">
-                        On Radio
-                      </span>
-                    )}
                   </div>
                 </div>
               </div>

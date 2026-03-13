@@ -66,8 +66,8 @@ async def _ensure_on_radio(mc, contact: Contact) -> None:
 
 
 async def _best_effort_push_contact_to_radio(contact: Contact, operation_name: str) -> None:
-    """Push the current effective route to the radio when the contact is already loaded."""
-    if not radio_manager.is_connected or not contact.on_radio:
+    """Best-effort push the current effective route to the radio when connected."""
+    if not radio_manager.is_connected:
         return
 
     try:

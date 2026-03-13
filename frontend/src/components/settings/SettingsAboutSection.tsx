@@ -113,6 +113,19 @@ export function SettingsAboutSection({ className }: { className?: string }) {
             </a>
           </p>
         </div>
+
+        <Separator />
+
+        <div className="text-center">
+          <a
+            href="/api/debug"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs text-muted-foreground hover:text-primary hover:underline"
+          >
+            Open debug support snapshot
+          </a>
+        </div>
       </div>
     </div>
   );

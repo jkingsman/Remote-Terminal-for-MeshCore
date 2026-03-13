@@ -21,6 +21,7 @@ from app.radio_sync import (
 from app.routers import (
     channels,
     contacts,
+    debug,
     fanout,
     health,
     messages,
@@ -136,6 +137,7 @@ async def radio_disconnected_handler(request: Request, exc: RadioDisconnectedErr
 
 # API routes - all prefixed with /api for production compatibility
 app.include_router(health.router, prefix="/api")
+app.include_router(debug.router, prefix="/api")
 app.include_router(fanout.router, prefix="/api")
 app.include_router(radio.router, prefix="/api")
 app.include_router(contacts.router, prefix="/api")
