@@ -306,6 +306,15 @@ class RadioManager:
         self._channel_slot_by_key.move_to_end(normalized_key)
         self._channel_key_by_slot[slot] = normalized_key
 
+    def invalidate_cached_channel_slot(self, channel_key: str) -> None:
+        """Drop any cached slot assignment for a channel key."""
+        normalized_key = channel_key.upper()
+        slot = self._channel_slot_by_key.pop(normalized_key, None)
+        if slot is None:
+            return
+        if self._channel_key_by_slot.get(slot) == normalized_key:
+            self._channel_key_by_slot.pop(slot, None)
+
     def get_channel_send_cache_snapshot(self) -> list[tuple[str, int]]:
         """Return the current channel send cache contents in LRU order."""
         return list(self._channel_slot_by_key.items())

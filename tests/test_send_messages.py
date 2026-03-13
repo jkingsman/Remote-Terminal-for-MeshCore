@@ -475,6 +475,32 @@ class TestOutgoingChannelBroadcast:
         assert mc.commands.set_channel.await_count == 2
         assert radio_manager.get_cached_channel_slot(chan_key) is None
 
+    @pytest.mark.asyncio
+    async def test_send_channel_msg_error_invalidates_cached_slot(self, test_db):
+        mc = _make_mc(name="MyNode")
+        chan_key = "f1" * 16
+        await ChannelRepository.upsert(key=chan_key, name="#stale")
+        radio_manager.max_channels = 4
+        radio_manager._connection_info = "Serial: /dev/ttyUSB0"
+
+        mc.commands.send_chan_msg = AsyncMock(
+            return_value=MagicMock(type=EventType.ERROR, payload="bad slot")
+        )
+
+        with (
+            patch("app.routers.messages.require_connected", return_value=mc),
+            patch.object(radio_manager, "_meshcore", mc),
+            patch("app.decoder.calculate_channel_hash", return_value="abcd"),
+            patch("app.routers.messages.broadcast_event"),
+            pytest.raises(HTTPException) as exc_info,
+        ):
+            await send_channel_message(
+                SendChannelMessageRequest(channel_key=chan_key, text="this will fail")
+            )
+
+        assert exc_info.value.status_code == 500
+        assert radio_manager.get_cached_channel_slot(chan_key) is None
+
 
 class TestResendChannelMessage:
     """Test the user-triggered resend endpoint."""

@@ -112,7 +112,10 @@ async def send_channel_message_with_effective_scope(
             msg=text,
             timestamp=timestamp_bytes,
         )
-        radio_manager.note_channel_slot_used(channel_key)
+        if send_result.type == EventType.ERROR:
+            radio_manager.invalidate_cached_channel_slot(channel_key)
+        else:
+            radio_manager.note_channel_slot_used(channel_key)
         return send_result
     finally:
         if override_scope and override_scope != baseline_scope:
