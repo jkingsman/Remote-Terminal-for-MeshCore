@@ -154,7 +154,7 @@ export function NewMessageModal({
           <DialogDescription className="sr-only">
             {tab === 'existing' && 'Select an existing contact to start a conversation'}
             {tab === 'new-contact' && 'Add a new contact by entering their name and public key'}
-            {tab === 'new-room' && 'Create a private room with a shared encryption key'}
+            {tab === 'new-room' && 'Create a private channel with a shared encryption key'}
             {tab === 'hashtag' && 'Join a public hashtag channel'}
           </DialogDescription>
         </DialogHeader>
@@ -170,7 +170,7 @@ export function NewMessageModal({
           <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="existing">Existing</TabsTrigger>
             <TabsTrigger value="new-contact">Contact</TabsTrigger>
-            <TabsTrigger value="new-room">Room</TabsTrigger>
+            <TabsTrigger value="new-room">Channel</TabsTrigger>
             <TabsTrigger value="hashtag">Hashtag</TabsTrigger>
           </TabsList>
 
@@ -237,16 +237,16 @@ export function NewMessageModal({
 
           <TabsContent value="new-room" className="mt-4 space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="room-name">Room Name</Label>
+              <Label htmlFor="room-name">Channel Name</Label>
               <Input
                 id="room-name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="Room name"
+                placeholder="Channel name"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="room-key">Room Key</Label>
+              <Label htmlFor="room-key">Channel Key</Label>
               <div className="flex gap-2">
                 <Input
                   id="room-key"
