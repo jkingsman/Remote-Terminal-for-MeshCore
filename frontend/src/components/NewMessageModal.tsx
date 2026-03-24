@@ -67,7 +67,7 @@ export function NewMessageModal({
         await onCreateContact(name.trim(), contactKey.trim(), tryHistorical);
       } else if (tab === 'new-room') {
         if (!name.trim() || !roomKey.trim()) {
-          setError('Room name and key are required');
+          setError('Channel name and key are required');
           return;
         }
         await onCreateChannel(name.trim(), roomKey.trim(), tryHistorical);
@@ -147,7 +147,7 @@ export function NewMessageModal({
           <DialogTitle>New Conversation</DialogTitle>
           <DialogDescription className="sr-only">
             {tab === 'new-contact' && 'Add a new contact by entering their name and public key'}
-            {tab === 'new-room' && 'Create a private room with a shared encryption key'}
+            {tab === 'new-room' && 'Create a private channel with a shared encryption key'}
             {tab === 'hashtag' && 'Join a public hashtag channel'}
           </DialogDescription>
         </DialogHeader>
@@ -189,7 +189,7 @@ export function NewMessageModal({
 
           <TabsContent value="new-room" className="mt-4 space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="room-name">Room Name</Label>
+              <Label htmlFor="room-name">Channel Name</Label>
               <Input
                 id="room-name"
                 value={name}
@@ -198,7 +198,7 @@ export function NewMessageModal({
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="room-key">Room Key</Label>
+              <Label htmlFor="room-key">Channel Key</Label>
               <div className="flex gap-2">
                 <Input
                   id="room-key"
@@ -251,7 +251,7 @@ export function NewMessageModal({
                   onChange={(e) => setPermitCapitals(e.target.checked)}
                   className="w-4 h-4 rounded border-input accent-primary"
                 />
-                <span className="text-sm">Permit capitals in room key derivation</span>
+                <span className="text-sm">Permit capitals in channel key derivation</span>
               </label>
               <p className="text-xs text-muted-foreground pl-7">
                 Not recommended; most companions normalize to lowercase
