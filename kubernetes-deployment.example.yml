@@ -1,0 +1,166 @@
+# optional - PersistentVolume only needed if local storage is used
+# apiVersion: v1
+# kind: PersistentVolume
+# metadata:
+#   name: local-meshcore
+# spec:
+#   capacity:
+#    storage: 2Gi
+#   volumeMode: Filesystem
+#   accessModes:
+#     - ReadWriteMany
+#   persistentVolumeReclaimPolicy: Retain
+#   storageClassName: generic
+#   local:
+#     path: <PATH-TO-LOCAL-MOUNT>                                   # absolut path - eg. "/mnt/data/meshcore/"
+#   nodeAffinity:
+#     required:
+#       nodeSelectorTerms:
+#       - matchExpressions:
+#         - key: kubernetes.io/hostname
+#           operator: In
+#           values:
+#           - <NODE-NAME>                                           # optional: name of node where local data exists
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: meshcore
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: meshcore-ingress
+  namespace: meshcore
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+#    cert-manager.io/cluster-issuer: "cloudflare-issuer"            # optional: handy if certmanager is used
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - meshcore.company.com                                          # set domain
+    secretName: meshcore-certificate
+  rules:
+  - host: "meshcore.company.com"                                    # set domain
+    http:
+      paths:
+      - path: "/"
+        pathType: Prefix
+        backend:
+          service:
+            name: meshcore-service
+            port:
+              number: 80
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: meshcore-config
+  namespace: meshcore
+data:
+  MESHCORE_DATABASE_PATH: "data/meshcore.db"
+  MESHCORE_TCP_HOST: "192.168.0.100"                                # set IP of Meshcore Node if Wifi is used
+  MESHCORE_TCP_PORT: "5000"
+
+  # Fix for Hardlink error
+  UV_LINK_MODE: "copy"
+  # Fix for Permission Denied: Move the venv and cache into your writable PVC
+  UV_PROJECT_ENVIRONMENT: "/app/data/venv"
+  UV_CACHE_DIR: "/app/data/.cache/uv"
+  # Ensure the app looks in the new venv location
+  PATH: "/app/data/venv/bin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: meshcore-deployment
+  namespace: meshcore
+  labels:
+    app: remoteterm
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: remoteterm
+  template:
+    metadata:
+      labels:
+        app: remoteterm
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+      - name: remoteterm
+        image: jkingsman/remoteterm-meshcore:latest                 # set version - do not use latest
+        ports:
+        - containerPort: 8000
+        envFrom:
+        - configMapRef:
+            name: meshcore-config
+        volumeMounts:
+        - name: storage
+          mountPath: /app/data
+        - name: cache-volume # Add this
+          mountPath: /.cache
+      volumes:
+      - name: storage
+        persistentVolumeClaim:
+          claimName: meshcore-data-pvc
+      - name: cache-volume # Add this
+        emptyDir: {}
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: meshcore-data-pvc
+  namespace: meshcore
+spec:
+  volumeName: local-meshcore
+#  storageClassName: 'generic'                                      # optional: set storageClass
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 2Gi
+---
+# optional - PersistentVolume only needed if local storage is used
+# apiVersion: v1
+# kind: PersistentVolume
+# metadata:
+#   name: local-meshcore
+# spec:
+#   capacity:
+#    storage: 2Gi
+#   volumeMode: Filesystem
+#   accessModes:
+#     - ReadWriteMany
+#   persistentVolumeReclaimPolicy: Retain
+#   storageClassName: generic
+#   local:
+#     path: <PATH-TO-LOCAL-MOUNT>                                   # absolut path - eg. "/mnt/data/meshcore/"
+#   nodeAffinity:
+#     required:
+#       nodeSelectorTerms:
+#       - matchExpressions:
+#         - key: kubernetes.io/hostname
+#           operator: In
+#           values:
+#           - <NODE-NAME>                                           # optional: name of node where local data exists
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: meshcore-service
+  namespace: meshcore
+spec:
+  selector:
+    app: remoteterm
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8000
