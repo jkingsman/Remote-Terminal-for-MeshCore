@@ -18,6 +18,9 @@ import {
   getTextReplaceMapJson,
   applyTextReplacements,
 } from '../utils/textReplace';
+import type { Contact } from '../types';
+import { getContactDisplayName } from '../utils/pubkey';
+import { getCaretCoordinates } from '../utils/caretCoordinates';
 
 // MeshCore message size limits (empirically determined from LoRa packet constraints)
 // Direct delivery allows ~156 bytes; multi-hop requires buffer for path growth.
@@ -44,6 +47,8 @@ interface MessageInputProps {
   conversationType?: 'contact' | 'channel' | 'raw';
   /** Sender name (radio name) for channel message limit calculation */
   senderName?: string;
+  /** Contacts list for @-mention autocomplete */
+  contacts?: Contact[];
 }
 
 type LimitState = 'normal' | 'warning' | 'danger' | 'error';
@@ -54,12 +59,18 @@ export interface MessageInputHandle {
 }
 
 export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(function MessageInput(
-  { onSend, disabled, placeholder, conversationType, senderName },
+  { onSend, disabled, placeholder, conversationType, senderName, contacts },
   ref
 ) {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Mention state
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const [mentionCaretPos, setMentionCaretPos] = useState<number>(-1);
+  const [mentionCoords, setMentionCoords] = useState<{ top: number; left: number } | null>(null);
+  const [mentionIndex, setMentionIndex] = useState(0);
 
   /** Resize textarea to fit content, clamped between 1 row and ~6 rows. */
   const autoResize = useCallback(() => {
@@ -161,37 +172,120 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
   const handleChange = useCallback((e: ChangeEvent<HTMLTextAreaElement>) => {
     const input = e.target;
     const raw = input.value;
+    const pos = input.selectionStart ?? raw.length;
+
     // Skip replacement during IME / dead-key composition to avoid garbling interim input
     if (!e.nativeEvent || (e.nativeEvent as InputEvent).isComposing) {
       setText(raw);
       return;
     }
+
+    // Mention detection
+    const textBeforeCaret = raw.substring(0, pos);
+    const lastAt = textBeforeCaret.lastIndexOf('@');
+    // We want to trigger if @ is the start of a word, newline, or start of string
+    const isAtStartOrAfterWhitespace =
+      lastAt === 0 || (lastAt > 0 && /\s/.test(textBeforeCaret[lastAt - 1]));
+
+    if (lastAt !== -1 && isAtStartOrAfterWhitespace) {
+      const query = textBeforeCaret.substring(lastAt + 1);
+      // Only show if there's no space between @ and caret
+      if (!query.includes(' ')) {
+        setMentionQuery(query);
+        setMentionCaretPos(lastAt);
+        setMentionIndex(0);
+        // Calculate coords
+        const coords = getCaretCoordinates(input, lastAt);
+        setMentionCoords({
+          top: coords.top - input.scrollTop,
+          left: coords.left - input.scrollLeft,
+        });
+      } else {
+        setMentionQuery(null);
+      }
+    } else {
+      setMentionQuery(null);
+    }
+
     if (getTextReplaceEnabled()) {
-      const result = applyTextReplacements(
-        raw,
-        input.selectionStart ?? raw.length,
-        getTextReplaceMapJson()
-      );
+      const result = applyTextReplacements(raw, pos, getTextReplaceMapJson());
       if (result) {
         setText(result.text);
         // Schedule cursor restore after React flushes the new value
-        const pos = result.cursor;
-        requestAnimationFrame(() => input.setSelectionRange(pos, pos));
+        const resPos = result.cursor;
+        requestAnimationFrame(() => input.setSelectionRange(resPos, resPos));
         return;
       }
     }
     setText(raw);
   }, []);
 
+  const filteredContacts = useMemo(() => {
+    if (mentionQuery === null || !contacts) return [];
+    const q = mentionQuery.toLowerCase();
+    return contacts
+      .map((c) => ({
+        contact: c,
+        displayName: getContactDisplayName(c.name, c.public_key, c.last_advert),
+      }))
+      .filter((item) => item.displayName.toLowerCase().includes(q))
+      .slice(0, 8);
+  }, [mentionQuery, contacts]);
+
+  const insertMention = useCallback(
+    (item: { contact: Contact; displayName: string }) => {
+      if (mentionCaretPos === -1) return;
+      const mention = `@[${item.displayName}] `;
+      const before = text.substring(0, mentionCaretPos);
+      const after = text.substring(textareaRef.current?.selectionStart ?? text.length);
+      const newText = before + mention + after;
+      setText(newText);
+      setMentionQuery(null);
+
+      // Restore focus and position cursor after the mention
+      const newPos = mentionCaretPos + mention.length;
+      requestAnimationFrame(() => {
+        if (textareaRef.current) {
+          textareaRef.current.focus();
+          textareaRef.current.setSelectionRange(newPos, newPos);
+        }
+      });
+    },
+    [text, mentionCaretPos]
+  );
+
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
+      if (mentionQuery !== null && filteredContacts.length > 0) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          setMentionIndex((prev) => (prev + 1) % filteredContacts.length);
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          setMentionIndex((prev) => (prev - 1 + filteredContacts.length) % filteredContacts.length);
+          return;
+        }
+        if (e.key === 'Enter' || e.key === 'Tab') {
+          e.preventDefault();
+          insertMention(filteredContacts[mentionIndex]);
+          return;
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          setMentionQuery(null);
+          return;
+        }
+      }
+
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         handleSubmit(e as unknown as FormEvent);
       }
       // Shift+Enter falls through naturally and inserts a newline
     },
-    [handleSubmit]
+    [mentionQuery, filteredContacts, mentionIndex, insertMention, handleSubmit]
   );
 
   const canSubmit = text.trim().length > 0;
@@ -207,7 +301,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
       onSubmit={handleSubmit}
       autoComplete="off"
     >
-      <div className="flex gap-2 items-end">
+      <div className="relative flex gap-2 items-end">
         <textarea
           ref={textareaRef}
           autoComplete="off"
@@ -230,6 +324,47 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
           )}
           style={{ minHeight: '40px', maxHeight: '160px' }}
         />
+
+        {mentionQuery !== null && mentionCoords && (
+          <div
+            className="absolute z-[100] min-w-[180px] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md animate-in fade-in-0 zoom-in-95"
+            style={{
+              top: `${mentionCoords.top}px`,
+              left: `${mentionCoords.left}px`,
+              transform: 'translateY(-100%) translateY(-8px)', // Position above the caret
+            }}
+          >
+            <div className="flex flex-col p-1">
+              {filteredContacts.length > 0 ? (
+                filteredContacts.map((item, index) => (
+                  <button
+                    key={item.contact.public_key}
+                    type="button"
+                    className={cn(
+                      'flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none transition-colors text-left',
+                      index === mentionIndex
+                        ? 'bg-accent text-accent-foreground'
+                        : 'hover:bg-accent/50'
+                    )}
+                    onClick={() => insertMention(item)}
+                  >
+                    <span className="truncate">{item.displayName}</span>
+                    <span className="ml-auto text-[10px] text-muted-foreground opacity-50">
+                      {item.contact.public_key.slice(0, 8)}
+                    </span>
+                  </button>
+                ))
+              ) : (
+                <div className="px-3 py-2 text-xs text-muted-foreground italic text-center">
+                  {contacts && contacts.length > 0
+                    ? 'No se encontraron contactos'
+                    : 'Lista de contactos vacía'}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         <Button
           type="submit"
           disabled={disabled || sending || !canSubmit}

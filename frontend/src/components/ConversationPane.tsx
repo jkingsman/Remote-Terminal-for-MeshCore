@@ -367,6 +367,7 @@ export function ConversationPane({
           disabled={!health?.radio_connected}
           conversationType={activeConversation.type}
           senderName={config?.name}
+          contacts={contacts}
           placeholder={
             !health?.radio_connected
               ? 'Radio not connected'

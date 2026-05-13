@@ -26,3 +26,22 @@ if (typeof globalThis.matchMedia === 'undefined') {
     }),
   });
 }
+
+// Mock localStorage for tests if not provided by environment
+if (typeof globalThis.localStorage === 'undefined') {
+  const mockStorage: Record<string, string> = {};
+  globalThis.localStorage = {
+    getItem: (key: string) => mockStorage[key] || null,
+    setItem: (key: string, value: string) => {
+      mockStorage[key] = value;
+    },
+    removeItem: (key: string) => {
+      delete mockStorage[key];
+    },
+    clear: () => {
+      Object.keys(mockStorage).forEach((key) => delete mockStorage[key]);
+    },
+    length: 0,
+    key: (index: number) => Object.keys(mockStorage)[index] || null,
+  };
+}
