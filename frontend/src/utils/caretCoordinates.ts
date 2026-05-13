@@ -69,7 +69,7 @@ export function getCaretCoordinates(
 
   // Replicate styles
   properties.forEach((prop) => {
-    (style as any)[prop] = computed.getPropertyValue(prop);
+    (style as any)[prop] = (computed as any)[prop];
   });
 
   const isFirefox = typeof (window as any).mozInnerScreenX !== 'undefined';
