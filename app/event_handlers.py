@@ -31,6 +31,11 @@ logger = logging.getLogger(__name__)
 # This prevents handler duplication after reconnects
 _active_subscriptions: list["Subscription"] = []
 
+# Queue for CLI responses (txt_type=1) that arrive as push events.
+# fetch_contact_cli_response drains this before polling get_msg().
+import asyncio as _asyncio
+_cli_response_queue: _asyncio.Queue = _asyncio.Queue()
+
 
 def track_pending_ack(expected_ack: str, message_id: int, timeout_ms: int) -> bool:
     """Compatibility wrapper for pending DM ACK tracking."""
@@ -60,7 +65,8 @@ async def on_contact_message(event: "Event") -> None:
     # Skip CLI command responses (txt_type=1) - these are handled by the command endpoint
     txt_type = payload.get("txt_type", 0)
     if txt_type == 1:
-        logger.debug("Skipping CLI response from %s (txt_type=1)", payload.get("pubkey_prefix"))
+        logger.debug("Queuing CLI response from %s (txt_type=1)", payload.get("pubkey_prefix"))
+        _cli_response_queue.put_nowait(event)
         return
 
     # Get full public key if available, otherwise use prefix

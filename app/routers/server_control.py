@@ -14,6 +14,7 @@ from app.models import (
     RepeaterLoginResponse,
 )
 from app.radio_sync import _store_pending_channel_message, _store_pending_direct_message
+from app.event_handlers import _cli_response_queue
 from app.routers.contacts import _ensure_on_radio
 from app.services.radio_runtime import radio_runtime as radio_manager
 
@@ -92,6 +93,17 @@ async def fetch_contact_cli_response(
     deadline = _monotonic() + timeout
 
     while _monotonic() < deadline:
+        # Drain push-delivered CLI responses first before polling get_msg().
+        try:
+            queued = _cli_response_queue.get_nowait()
+            msg_prefix = queued.payload.get("pubkey_prefix", "")
+            txt_type = queued.payload.get("txt_type", 0)
+            if msg_prefix == target_pubkey_prefix and txt_type == 1:
+                logger.debug("CLI response for %s found in push queue", target_pubkey_prefix)
+                return queued
+            logger.debug("Discarding queued CLI response for wrong contact %s", msg_prefix)
+        except asyncio.QueueEmpty:
+            pass
         try:
             result = await mc.commands.get_msg(timeout=2.0)
         except TimeoutError:
