@@ -13,7 +13,11 @@ from app.models import (
     Contact,
     RepeaterLoginResponse,
 )
-from app.radio_sync import _store_pending_channel_message, _store_pending_direct_message
+from app.radio_sync import (
+    _store_pending_channel_message,
+    _store_pending_direct_message,
+    drain_pending_messages,
+)
 from app.routers.contacts import _ensure_on_radio
 from app.services.radio_runtime import radio_runtime as radio_manager
 
@@ -83,59 +87,130 @@ def extract_response_text(event) -> str:
     return text
 
 
+async def _flush_pending_messages(mc) -> None:
+    """Drain the radio's pending-message buffer before issuing a CLI command.
+
+    A CLI response that arrived after a previous command already returned can
+    sit buffered in the radio. Without this flush, the next command's fetch
+    could pull that stale response and mis-attribute it as the new command's
+    answer (the firmware does not correlate responses to requests). Draining
+    first routes any real DMs/channel messages to storage and lets stale CLI
+    responses (txt_type=1) be dropped by ``event_handlers.on_contact_message``,
+    so they cannot be returned as this command's answer.
+
+    This shrinks — but cannot fully eliminate — same-contact straddle
+    mis-attribution: a reply that is still in flight when we send can only be
+    bounded by a protocol-level request id, which the wire format lacks.
+    """
+    try:
+        drained = await drain_pending_messages(mc)
+        if drained:
+            logger.debug("Flushed %d buffered message(s) before CLI send", drained)
+    except Exception:
+        logger.debug("Pre-send message flush failed", exc_info=True)
+
+
 async def fetch_contact_cli_response(
     mc,
     target_pubkey_prefix: str,
     timeout: float = 20.0,
 ) -> "Event | None":
-    """Fetch a CLI response from a specific contact via a validated get_msg() loop."""
-    deadline = _monotonic() + timeout
+    """Fetch a CLI response (txt_type=1) from a specific contact.
 
-    while _monotonic() < deadline:
-        try:
-            result = await mc.commands.get_msg(timeout=2.0)
-        except TimeoutError:
-            continue
-        except Exception as exc:
-            logger.debug("get_msg() exception: %s", exc)
-            await asyncio.sleep(1.0)
-            continue
+    CLI responses arrive as ``CONTACT_MSG_RECV`` events, and the dispatcher
+    clones every such event to *all* subscribers. The permanent handler in
+    ``event_handlers.on_contact_message`` can therefore consume (and drop) a
+    response in the gap between this loop's ``get_msg`` polls, producing a
+    spurious timeout even though the response was delivered.
 
-        if result.type == EventType.NO_MORE_MSGS:
-            await asyncio.sleep(1.0)
-            continue
+    To close that race we hold a request-scoped subscription for the target's
+    CLI responses for the whole window. Whichever path observes the response
+    first wins — ``get_msg``'s return value on the happy path, or the
+    subscription when ``get_msg`` misses it — and the subscription is torn down
+    in ``finally`` so nothing outlives this call (no global state, so a late or
+    duplicate response cannot leak into an unrelated later fetch).
 
-        if result.type == EventType.ERROR:
-            logger.debug("get_msg() error: %s", result.payload)
-            await asyncio.sleep(1.0)
-            continue
+    ``get_msg`` is still polled to pump the radio into delivering buffered
+    frames and to route any unrelated DMs/channel messages to storage.
+    """
+    loop = asyncio.get_running_loop()
+    response_future: asyncio.Future = loop.create_future()
 
-        if result.type == EventType.CONTACT_MSG_RECV:
-            msg_prefix = result.payload.get("pubkey_prefix", "")
-            txt_type = result.payload.get("txt_type", 0)
-            if msg_prefix == target_pubkey_prefix and txt_type == 1:
-                return result
-            logger.debug(
-                "Storing non-target DM (from=%s, txt_type=%d) consumed while waiting for %s",
-                msg_prefix,
-                txt_type,
-                target_pubkey_prefix,
-            )
-            await _store_pending_direct_message(result)
-            continue
+    def _capture(event: "Event") -> None:
+        # Dispatcher invokes sync callbacks inline with a cloned event; the
+        # attribute filter guarantees this only fires for the target's CLI
+        # responses, so we resolve with the first one seen.
+        if not response_future.done():
+            response_future.set_result(event)
 
-        if result.type == EventType.CHANNEL_MSG_RECV:
-            logger.debug(
-                "Storing channel message (channel_idx=%s) consumed during CLI fetch",
-                result.payload.get("channel_idx"),
-            )
-            await _store_pending_channel_message(mc, result.payload)
-            continue
+    subscription = mc.subscribe(
+        EventType.CONTACT_MSG_RECV,
+        _capture,
+        attribute_filters={"pubkey_prefix": target_pubkey_prefix, "txt_type": 1},
+    )
 
-        logger.debug("Unexpected event type %s during CLI fetch, skipping", result.type)
+    try:
+        deadline = _monotonic() + timeout
 
-    logger.warning("No CLI response from contact %s within %.1fs", target_pubkey_prefix, timeout)
-    return None
+        while _monotonic() < deadline:
+            if response_future.done():
+                return response_future.result()
+
+            try:
+                result = await mc.commands.get_msg(timeout=2.0)
+            except TimeoutError:
+                continue
+            except Exception as exc:
+                logger.debug("get_msg() exception: %s", exc)
+                await asyncio.sleep(1.0)
+                continue
+
+            if result.type == EventType.NO_MORE_MSGS:
+                # The subscription may have captured a late delivery the radio
+                # didn't hand back through this poll; prefer it over sleeping.
+                if response_future.done():
+                    return response_future.result()
+                await asyncio.sleep(1.0)
+                continue
+
+            if result.type == EventType.ERROR:
+                logger.debug("get_msg() error: %s", result.payload)
+                await asyncio.sleep(1.0)
+                continue
+
+            if result.type == EventType.CONTACT_MSG_RECV:
+                msg_prefix = result.payload.get("pubkey_prefix", "")
+                txt_type = result.payload.get("txt_type", 0)
+                if msg_prefix == target_pubkey_prefix and txt_type == 1:
+                    return result
+                logger.debug(
+                    "Storing non-target DM (from=%s, txt_type=%d) consumed while waiting for %s",
+                    msg_prefix,
+                    txt_type,
+                    target_pubkey_prefix,
+                )
+                await _store_pending_direct_message(result)
+                continue
+
+            if result.type == EventType.CHANNEL_MSG_RECV:
+                logger.debug(
+                    "Storing channel message (channel_idx=%s) consumed during CLI fetch",
+                    result.payload.get("channel_idx"),
+                )
+                await _store_pending_channel_message(mc, result.payload)
+                continue
+
+            logger.debug("Unexpected event type %s during CLI fetch, skipping", result.type)
+
+        # Final grace check in case a delivery raced the deadline.
+        if response_future.done():
+            return response_future.result()
+        logger.warning(
+            "No CLI response from contact %s within %.1fs", target_pubkey_prefix, timeout
+        )
+        return None
+    finally:
+        subscription.unsubscribe()
 
 
 async def prepare_authenticated_contact_connection(
@@ -252,6 +327,10 @@ async def batch_cli_fetch(
             await _ensure_on_radio(mc, contact)
             await asyncio.sleep(1.0)  # settle after add_contact
 
+            # Clear any stale buffered CLI response from a prior command so it
+            # cannot be pulled and mis-attributed to this one.
+            await _flush_pending_messages(mc)
+
             send_result = await mc.commands.send_cmd(contact.public_key, cmd)
             if send_result.type == EventType.ERROR:
                 logger.debug("Command '%s' send error: %s", cmd, send_result.payload)
@@ -285,6 +364,10 @@ async def send_contact_cli_command(
         logger.info("Adding %s %s to radio", label, contact.public_key[:12])
         await _ensure_on_radio(mc, contact)
         await asyncio.sleep(1.0)
+
+        # Clear any stale buffered CLI response from a prior command so it
+        # cannot be pulled and mis-attributed to this one.
+        await _flush_pending_messages(mc)
 
         logger.info("Sending command to %s %s: %s", label, contact.public_key[:12], command)
         send_result = await mc.commands.send_cmd(contact.public_key, command)

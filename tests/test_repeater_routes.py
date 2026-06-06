@@ -47,6 +47,24 @@ def _reset_radio_state():
     radio_manager._operation_lock = prev_lock
 
 
+@pytest.fixture(autouse=True)
+def _no_op_pre_send_flush():
+    """Neutralize the pre-send buffer flush for command/batch route tests.
+
+    ``_flush_pending_messages`` drains ``mc.commands.get_msg``, which the tests
+    in this module mock to return fetch responses; flushing here would consume
+    them. The flush behavior and its stale-response regression guard are covered
+    in ``test_cli_stale_response_flush.py``, which exercises the real flush.
+    Tests in ``TestFetchContactCliResponse`` call ``fetch_contact_cli_response``
+    directly and never reach the flush, so this patch is a harmless no-op there.
+    """
+    with patch(
+        "app.routers.server_control._flush_pending_messages",
+        new_callable=AsyncMock,
+    ):
+        yield
+
+
 def _radio_result(event_type=EventType.OK, payload=None):
     result = MagicMock()
     result.type = event_type
@@ -284,6 +302,101 @@ class TestFetchContactCliResponse:
         assert result.payload["text"] == "ver 1.0"
         assert mc.commands.get_msg.await_count == 21
         assert store_dm.await_count == 20
+
+    @pytest.mark.asyncio
+    async def test_subscription_captures_response_when_get_msg_misses_it(self):
+        """The drop race: get_msg never returns the response, but the
+        request-scoped subscription captures the cloned push event."""
+        mc = _mock_mc()
+        captured: dict = {}
+
+        def _fake_subscribe(event_type, callback, attribute_filters=None):
+            captured["cb"] = callback
+            return MagicMock(unsubscribe=MagicMock())
+
+        mc.subscribe = MagicMock(side_effect=_fake_subscribe)
+
+        push_event = _radio_result(
+            EventType.CONTACT_MSG_RECV,
+            {"pubkey_prefix": "aaaaaaaaaaaa", "text": "ver 1.0", "txt_type": 1},
+        )
+        calls = {"n": 0}
+
+        async def _fake_get_msg(timeout=None):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                # Simulate the response being delivered to the permanent
+                # subscriber path (our scoped subscription) rather than via
+                # this get_msg's return value.
+                captured["cb"](push_event)
+            return _radio_result(EventType.NO_MORE_MSGS)
+
+        mc.commands.get_msg = _fake_get_msg
+
+        with (
+            patch(_MONOTONIC, side_effect=_advancing_clock()),
+            patch("app.routers.server_control.asyncio.sleep", new_callable=AsyncMock),
+        ):
+            result = await fetch_contact_cli_response(mc, "aaaaaaaaaaaa", timeout=5.0)
+
+        assert result is not None
+        assert result.payload["text"] == "ver 1.0"
+
+    @pytest.mark.asyncio
+    async def test_subscription_uses_target_and_cli_filter(self):
+        """The scoped subscription filters on the target prefix and txt_type=1."""
+        mc = _mock_mc()
+        mc.commands.get_msg = AsyncMock(
+            return_value=_radio_result(
+                EventType.CONTACT_MSG_RECV,
+                {"pubkey_prefix": "aaaaaaaaaaaa", "text": "ok", "txt_type": 1},
+            )
+        )
+
+        with patch(_MONOTONIC, side_effect=_advancing_clock()):
+            await fetch_contact_cli_response(mc, "aaaaaaaaaaaa", timeout=5.0)
+
+        args, kwargs = mc.subscribe.call_args
+        assert args[0] == EventType.CONTACT_MSG_RECV
+        assert kwargs["attribute_filters"] == {
+            "pubkey_prefix": "aaaaaaaaaaaa",
+            "txt_type": 1,
+        }
+
+    @pytest.mark.asyncio
+    async def test_unsubscribes_on_success(self):
+        mc = _mock_mc()
+        sub = MagicMock(unsubscribe=MagicMock())
+        mc.subscribe = MagicMock(return_value=sub)
+        mc.commands.get_msg = AsyncMock(
+            return_value=_radio_result(
+                EventType.CONTACT_MSG_RECV,
+                {"pubkey_prefix": "aaaaaaaaaaaa", "text": "ok", "txt_type": 1},
+            )
+        )
+
+        with patch(_MONOTONIC, side_effect=_advancing_clock()):
+            result = await fetch_contact_cli_response(mc, "aaaaaaaaaaaa", timeout=5.0)
+
+        assert result is not None
+        sub.unsubscribe.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_unsubscribes_on_timeout(self):
+        mc = _mock_mc()
+        sub = MagicMock(unsubscribe=MagicMock())
+        mc.subscribe = MagicMock(return_value=sub)
+        mc.commands.get_msg = AsyncMock(return_value=_radio_result(EventType.NO_MORE_MSGS))
+        times = iter([100.0, 100.5, 101.0, 103.0])
+
+        with (
+            patch(_MONOTONIC, side_effect=times),
+            patch("app.routers.server_control.asyncio.sleep", new_callable=AsyncMock),
+        ):
+            result = await fetch_contact_cli_response(mc, "aaaaaaaaaaaa", timeout=2.0)
+
+        assert result is None
+        sub.unsubscribe.assert_called_once()
 
 
 class TestRepeaterCommandRoute:
