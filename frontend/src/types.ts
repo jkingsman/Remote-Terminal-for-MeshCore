@@ -136,6 +136,28 @@ export interface FanoutConfig {
   created_at: number;
 }
 
+export type CommunityNeighborPhase =
+  | 'idle'
+  | 'refresh'
+  | 'scopes'
+  | 'publishing'
+  | 'scheduled'
+  | 'due';
+
+export interface CommunityNeighborStatus {
+  phase: CommunityNeighborPhase;
+  cache_size: number;
+  remaining_seconds: number | null;
+  periodic_enabled: boolean;
+  last_publish_result: 'ok' | 'failed' | null;
+}
+
+export interface CommunityNeighborActionResponse {
+  status: string;
+  message: string;
+  remaining_seconds?: number;
+}
+
 export interface MaintenanceResult {
   packets_deleted: number;
   vacuumed: boolean;

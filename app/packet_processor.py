@@ -346,6 +346,21 @@ async def process_raw_packet(
         "sender": None,
     }
 
+    # Feed neighbor radio observations directly from the primary RX pipeline.
+    # Scope responses must be matched before asynchronous fanout dispatch, and
+    # passive adverts must remain observable while MQTT clients reconnect.
+    if payload_type in (PayloadType.ADVERT, PayloadType.RESPONSE):
+        try:
+            from app.fanout.community_neighbors import community_neighbor_reporter
+
+            await community_neighbor_reporter.observe_packet(
+                raw_bytes,
+                timestamp=ts,
+                measured_snr=snr,
+            )
+        except Exception:
+            logger.debug("Community neighbor raw observation failed", exc_info=True)
+
     # Compute packet hash once for threading into message broadcasts (used by bot fanout).
     pkt_hash = calculate_packet_hash(raw_bytes)
 

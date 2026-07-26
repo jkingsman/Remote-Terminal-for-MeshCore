@@ -24,7 +24,13 @@ import {
 import { toast } from '../ui/sonner';
 import { cn } from '@/lib/utils';
 import { api } from '../../api';
-import type { Channel, Contact, FanoutConfig, HealthStatus } from '../../types';
+import type {
+  Channel,
+  CommunityNeighborStatus,
+  Contact,
+  FanoutConfig,
+  HealthStatus,
+} from '../../types';
 
 const BotCodeEditor = lazy(() =>
   import('../BotCodeEditor').then((m) => ({ default: m.BotCodeEditor }))
@@ -42,6 +48,10 @@ const TYPE_LABELS: Record<string, string> = {
 };
 
 const DEFAULT_COMMUNITY_PACKET_TOPIC_TEMPLATE = 'meshcore/{IATA}/{PUBLIC_KEY}/packets';
+const DEFAULT_COMMUNITY_NEIGHBOR_TOPIC_TEMPLATE = 'meshcore/{IATA}/{PUBLIC_KEY}/neighbors';
+const DEFAULT_COMMUNITY_NEIGHBOR_REPORTING_INTERVAL_HOURS = 24;
+const MIN_COMMUNITY_NEIGHBOR_REPORTING_INTERVAL_HOURS = 12;
+const MAX_COMMUNITY_NEIGHBOR_REPORTING_INTERVAL_HOURS = 336;
 const DEFAULT_COMMUNITY_BROKER_HOST = 'mqtt-us-v1.letsmesh.net';
 const DEFAULT_COMMUNITY_BROKER_HOST_EU = 'mqtt-eu-v1.letsmesh.net';
 const DEFAULT_COMMUNITY_BROKER_PORT = 443;
@@ -69,6 +79,12 @@ function createCommunityConfigDefaults(
     email: '',
     token_audience: '',
     topic_template: DEFAULT_COMMUNITY_PACKET_TOPIC_TEMPLATE,
+    neighbor_reporting_enabled: false,
+    neighbor_reporting_interval_hours: DEFAULT_COMMUNITY_NEIGHBOR_REPORTING_INTERVAL_HOURS,
+    neighbor_origin: '',
+    neighbor_self_scopes: '',
+    neighbor_topic_template: DEFAULT_COMMUNITY_NEIGHBOR_TOPIC_TEMPLATE,
+    neighbor_retain: false,
     ...overrides,
   };
 }
@@ -140,6 +156,13 @@ type DraftType =
   | 'sqs'
   | 'bot'
   | 'map_upload';
+
+type CommunityNeighborAction = 'discover' | 'snapshot';
+
+type CommunityNeighborFeedback = {
+  message: string;
+  isError: boolean;
+};
 
 type CreateIntegrationDefinition = {
   value: DraftType;
@@ -433,6 +456,30 @@ function normalizeIntegrationConfigForSave(
 
     const topicTemplate = String(normalized.topic_template ?? '').trim();
     normalized.topic_template = topicTemplate || DEFAULT_COMMUNITY_PACKET_TOPIC_TEMPLATE;
+
+    normalized.neighbor_reporting_enabled = Boolean(normalized.neighbor_reporting_enabled);
+    const neighborInterval = Number.parseInt(
+      String(
+        normalized.neighbor_reporting_interval_hours ??
+          DEFAULT_COMMUNITY_NEIGHBOR_REPORTING_INTERVAL_HOURS
+      ),
+      10
+    );
+    normalized.neighbor_reporting_interval_hours = Math.min(
+      MAX_COMMUNITY_NEIGHBOR_REPORTING_INTERVAL_HOURS,
+      Math.max(
+        MIN_COMMUNITY_NEIGHBOR_REPORTING_INTERVAL_HOURS,
+        Number.isNaN(neighborInterval)
+          ? DEFAULT_COMMUNITY_NEIGHBOR_REPORTING_INTERVAL_HOURS
+          : neighborInterval
+      )
+    );
+    normalized.neighbor_origin = String(normalized.neighbor_origin ?? '').trim();
+    normalized.neighbor_self_scopes = String(normalized.neighbor_self_scopes ?? '').trim();
+    const neighborTopicTemplate = String(normalized.neighbor_topic_template ?? '').trim();
+    normalized.neighbor_topic_template =
+      neighborTopicTemplate || DEFAULT_COMMUNITY_NEIGHBOR_TOPIC_TEMPLATE;
+    normalized.neighbor_retain = Boolean(normalized.neighbor_retain);
   }
 
   if (configType === 'map_upload') {
@@ -727,6 +774,23 @@ function getDefaultIntegrationName(type: string, configs: FanoutConfig[]) {
   const label = TYPE_LABELS[type] || type;
   const nextIndex = configs.filter((cfg) => cfg.type === type).length + 1;
   return `${label} #${nextIndex}`;
+}
+
+function getCommunityNeighborPhaseLabel(phase: CommunityNeighborStatus['phase']) {
+  switch (phase) {
+    case 'refresh':
+      return 'refreshing direct neighbors';
+    case 'scopes':
+      return 'querying scopes';
+    case 'publishing':
+      return 'publishing snapshot';
+    case 'scheduled':
+      return 'waiting for the next report';
+    case 'due':
+      return 'waiting for a connected broker';
+    case 'idle':
+      return 'idle';
+  }
 }
 
 function getStatusLabel(status: string | undefined, type?: string) {
@@ -1703,6 +1767,107 @@ function MqttCommunityConfigEditor({
           Use <code>{'{IATA}'}</code> and <code>{'{PUBLIC_KEY}'}</code>. Default:{' '}
           <code>{DEFAULT_COMMUNITY_PACKET_TOPIC_TEMPLATE}</code>
         </p>
+      </div>
+
+      <Separator />
+
+      <div className="space-y-3">
+        <div className="space-y-1">
+          <h3 className="text-base font-semibold tracking-tight">Neighbor Reporting</h3>
+          <p className="text-[0.8125rem] text-muted-foreground">
+            Publish directly heard repeater identities and their flood-allowed scopes to a separate
+            MQTT snapshot. Manual snapshots remain available from the integration card.
+          </p>
+        </div>
+
+        <label className="flex items-center gap-3 cursor-pointer">
+          <input
+            id="fanout-comm-neighbor-reporting-enabled"
+            type="checkbox"
+            checked={config.neighbor_reporting_enabled === true}
+            onChange={(e) => onChange({ ...config, neighbor_reporting_enabled: e.target.checked })}
+            className="h-4 w-4 rounded border-border"
+          />
+          <span className="text-sm">Enable periodic neighbor reports</span>
+        </label>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label htmlFor="fanout-comm-neighbor-interval">Report Interval (hours)</Label>
+            <Input
+              id="fanout-comm-neighbor-interval"
+              type="number"
+              min={MIN_COMMUNITY_NEIGHBOR_REPORTING_INTERVAL_HOURS}
+              max={MAX_COMMUNITY_NEIGHBOR_REPORTING_INTERVAL_HOURS}
+              step="1"
+              value={getNumberInputValue(
+                config.neighbor_reporting_interval_hours,
+                DEFAULT_COMMUNITY_NEIGHBOR_REPORTING_INTERVAL_HOURS
+              )}
+              onChange={(e) =>
+                onChange({
+                  ...config,
+                  neighbor_reporting_interval_hours: parseIntegerInputValue(e.target.value),
+                })
+              }
+            />
+            <p className="text-[0.8125rem] text-muted-foreground">12–336 hours; default 24.</p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="fanout-comm-neighbor-origin">Origin (optional)</Label>
+            <Input
+              id="fanout-comm-neighbor-origin"
+              type="text"
+              placeholder="Observer label"
+              value={(config.neighbor_origin as string | undefined) ?? ''}
+              onChange={(e) => onChange({ ...config, neighbor_origin: e.target.value })}
+            />
+            <p className="text-[0.8125rem] text-muted-foreground">
+              Included as the observer origin in each neighbor snapshot.
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="fanout-comm-neighbor-self-scopes">Observer Scopes</Label>
+          <Input
+            id="fanout-comm-neighbor-self-scopes"
+            type="text"
+            placeholder="*, Europe"
+            value={(config.neighbor_self_scopes as string | undefined) ?? ''}
+            onChange={(e) => onChange({ ...config, neighbor_self_scopes: e.target.value })}
+          />
+          <p className="text-[0.8125rem] text-muted-foreground">
+            Comma-separated flood-allowed scopes announced for this observer.
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="fanout-comm-neighbor-topic-template">Neighbor Topic Template</Label>
+          <Input
+            id="fanout-comm-neighbor-topic-template"
+            type="text"
+            placeholder={DEFAULT_COMMUNITY_NEIGHBOR_TOPIC_TEMPLATE}
+            value={(config.neighbor_topic_template as string | undefined) ?? ''}
+            onChange={(e) => onChange({ ...config, neighbor_topic_template: e.target.value })}
+          />
+          <p className="text-[0.8125rem] text-muted-foreground">
+            Use <code>{'{IATA}'}</code>, <code>{'{PUBLIC_KEY}'}</code>, or <code>{'{TYPE}'}</code>{' '}
+            (renders <code>neighbors</code>). Default:{' '}
+            <code>{DEFAULT_COMMUNITY_NEIGHBOR_TOPIC_TEMPLATE}</code>
+          </p>
+        </div>
+
+        <label className="flex items-center gap-3 cursor-pointer">
+          <input
+            id="fanout-comm-neighbor-retain"
+            type="checkbox"
+            checked={config.neighbor_retain === true}
+            onChange={(e) => onChange({ ...config, neighbor_retain: e.target.checked })}
+            className="h-4 w-4 rounded border-border"
+          />
+          <span className="text-sm">Retain published neighbor snapshots</span>
+        </label>
       </div>
     </div>
   );
@@ -3029,11 +3194,40 @@ export function SettingsFanoutSection({
     error: string;
   } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [communityNeighborStatuses, setCommunityNeighborStatuses] = useState<
+    Record<string, CommunityNeighborStatus>
+  >({});
+  const [communityNeighborAction, setCommunityNeighborAction] = useState<{
+    configId: string;
+    action: CommunityNeighborAction;
+  } | null>(null);
+  const [communityNeighborFeedback, setCommunityNeighborFeedback] = useState<
+    Record<string, CommunityNeighborFeedback>
+  >({});
+
+  const refreshCommunityNeighborStatus = useCallback(async (configId: string) => {
+    const status = await api.getCommunityNeighborStatus(configId);
+    setCommunityNeighborStatuses((current) => ({ ...current, [configId]: status }));
+    return status;
+  }, []);
 
   const loadConfigs = useCallback(async () => {
     try {
       const data = await api.getFanoutConfigs();
       setConfigs(data);
+      const statuses: Record<string, CommunityNeighborStatus> = {};
+      await Promise.all(
+        data
+          .filter((config) => config.type === 'mqtt_community' && config.enabled)
+          .map(async (config) => {
+            try {
+              statuses[config.id] = await api.getCommunityNeighborStatus(config.id);
+            } catch {
+              // An enabled integration may still be starting or unavailable.
+            }
+          })
+      );
+      setCommunityNeighborStatuses(statuses);
     } catch (err) {
       console.error('Failed to load fanout configs:', err);
     }
@@ -3074,6 +3268,47 @@ export function SettingsFanoutSection({
       toast.success(cfg.enabled ? 'Integration disabled' : 'Integration enabled');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to update');
+    }
+  };
+
+  const handleCommunityNeighborAction = async (
+    config: FanoutConfig,
+    action: CommunityNeighborAction
+  ) => {
+    setCommunityNeighborAction({ configId: config.id, action });
+    setCommunityNeighborFeedback((current) => {
+      const { [config.id]: _, ...rest } = current;
+      return rest;
+    });
+    try {
+      const result =
+        action === 'discover'
+          ? await api.discoverCommunityNeighbors(config.id)
+          : await api.publishCommunityNeighborSnapshot(config.id);
+      const fallbackMessage =
+        action === 'discover' ? 'Neighbor refresh started' : 'Neighbor snapshot started';
+      const message = result.message || fallbackMessage;
+      setCommunityNeighborFeedback((current) => ({
+        ...current,
+        [config.id]: { message, isError: false },
+      }));
+      toast.success(message);
+      try {
+        await refreshCommunityNeighborStatus(config.id);
+      } catch {
+        // The action was accepted even if its optional status refresh is unavailable.
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to start neighbor reporting';
+      setCommunityNeighborFeedback((current) => ({
+        ...current,
+        [config.id]: { message, isError: true },
+      }));
+      toast.error(message);
+    } finally {
+      setCommunityNeighborAction((current) =>
+        current?.configId === config.id && current.action === action ? null : current
+      );
     }
   };
 
@@ -3433,6 +3668,12 @@ export function SettingsFanoutSection({
                   const status = cfg.enabled ? statusEntry?.status : undefined;
                   const lastError = cfg.enabled ? statusEntry?.last_error : null;
                   const communityConfig = cfg.config as Record<string, unknown>;
+                  const neighborStatus = communityNeighborStatuses[cfg.id];
+                  const neighborActionForConfig =
+                    communityNeighborAction?.configId === cfg.id
+                      ? communityNeighborAction.action
+                      : null;
+                  const neighborFeedback = communityNeighborFeedback[cfg.id];
                   return (
                     <div
                       key={cfg.id}
@@ -3529,7 +3770,7 @@ export function SettingsFanoutSection({
                       </div>
 
                       {cfg.type === 'mqtt_community' && (
-                        <div className="space-y-1 border-t border-input px-3 py-2 text-xs text-muted-foreground">
+                        <div className="space-y-2 border-t border-input px-3 py-2 text-xs text-muted-foreground">
                           <div>
                             Broker:{' '}
                             {formatBrokerSummary(communityConfig, {
@@ -3544,6 +3785,72 @@ export function SettingsFanoutSection({
                                 DEFAULT_COMMUNITY_PACKET_TOPIC_TEMPLATE}
                             </code>
                           </div>
+                          <div>
+                            Neighbor reports:{' '}
+                            {neighborStatus ? (
+                              <>
+                                {getCommunityNeighborPhaseLabel(neighborStatus.phase)} ·{' '}
+                                {neighborStatus.cache_size} cached
+                                {neighborStatus.remaining_seconds !== null &&
+                                  ` · ${neighborStatus.remaining_seconds}s remaining`}
+                                {neighborStatus.last_publish_result &&
+                                  ` · last publish ${neighborStatus.last_publish_result}`}
+                              </>
+                            ) : communityConfig.neighbor_reporting_enabled === true ? (
+                              'enabled'
+                            ) : (
+                              'disabled'
+                            )}
+                          </div>
+                          <div className="flex flex-wrap gap-2 pt-0.5">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-7 px-2 text-xs"
+                              disabled={!cfg.enabled || neighborActionForConfig !== null}
+                              onClick={() => handleCommunityNeighborAction(cfg, 'discover')}
+                              title={
+                                cfg.enabled
+                                  ? 'Run a zero-hop repeater discovery refresh'
+                                  : 'Enable this integration to run neighbor discovery'
+                              }
+                            >
+                              {neighborActionForConfig === 'discover'
+                                ? 'Refreshing…'
+                                : 'Refresh neighbors'}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-7 px-2 text-xs"
+                              disabled={!cfg.enabled || neighborActionForConfig !== null}
+                              onClick={() => handleCommunityNeighborAction(cfg, 'snapshot')}
+                              title={
+                                cfg.enabled
+                                  ? 'Publish a neighbor scope snapshot'
+                                  : 'Enable this integration to publish a neighbor snapshot'
+                              }
+                            >
+                              {neighborActionForConfig === 'snapshot'
+                                ? 'Publishing…'
+                                : 'Publish snapshot'}
+                            </Button>
+                          </div>
+                          {neighborFeedback && (
+                            <p
+                              role="status"
+                              className={cn(
+                                'text-[0.6875rem]',
+                                neighborFeedback.isError
+                                  ? 'text-destructive'
+                                  : 'text-status-connected'
+                              )}
+                            >
+                              {neighborFeedback.message}
+                            </p>
+                          )}
                         </div>
                       )}
 

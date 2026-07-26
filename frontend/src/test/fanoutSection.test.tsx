@@ -10,6 +10,9 @@ vi.mock('../api', () => ({
     createFanoutConfig: vi.fn(),
     updateFanoutConfig: vi.fn(),
     deleteFanoutConfig: vi.fn(),
+    getCommunityNeighborStatus: vi.fn(),
+    discoverCommunityNeighbors: vi.fn(),
+    publishCommunityNeighborSnapshot: vi.fn(),
     getChannels: vi.fn(),
     getContacts: vi.fn(),
     getSettings: vi.fn(),
@@ -96,6 +99,21 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.spyOn(window, 'confirm').mockReturnValue(true);
   mockedApi.getFanoutConfigs.mockResolvedValue([]);
+  mockedApi.getCommunityNeighborStatus.mockResolvedValue({
+    phase: 'idle',
+    cache_size: 0,
+    remaining_seconds: null,
+    periodic_enabled: false,
+    last_publish_result: null,
+  });
+  mockedApi.discoverCommunityNeighbors.mockResolvedValue({
+    status: 'started',
+    message: 'Neighbor refresh started',
+  });
+  mockedApi.publishCommunityNeighborSnapshot.mockResolvedValue({
+    status: 'started',
+    message: 'Neighbor snapshot started',
+  });
   mockedApi.getChannels.mockResolvedValue([]);
   mockedApi.getContacts.mockResolvedValue([]);
   mockedApi.getSettings.mockResolvedValue({
@@ -756,6 +774,76 @@ describe('SettingsFanoutSection', () => {
     expect(screen.getByText(/LetsMesh uses/)).toBeInTheDocument();
   });
 
+  it('community MQTT editor exposes neighbor reporting defaults', async () => {
+    renderSection();
+    await openCreateIntegrationDialog();
+    selectCreateIntegration('Community MQTT/meshcoretomqtt');
+    confirmCreateIntegration();
+
+    await waitFor(() => expect(screen.getByText('← Back to list')).toBeInTheDocument());
+
+    expect(screen.getByLabelText('Enable periodic neighbor reports')).not.toBeChecked();
+    expect(screen.getByLabelText('Report Interval (hours)')).toHaveValue(24);
+    expect(screen.getByLabelText('Origin (optional)')).toHaveValue('');
+    expect(screen.getByLabelText('Observer Scopes')).toHaveValue('');
+    expect(screen.getByLabelText('Neighbor Topic Template')).toHaveValue(
+      'meshcore/{IATA}/{PUBLIC_KEY}/neighbors'
+    );
+    expect(screen.getByLabelText('Retain published neighbor snapshots')).not.toBeChecked();
+  });
+
+  it('runs manual community neighbor actions and shows the accepted result', async () => {
+    const communityConfig: FanoutConfig = {
+      id: 'comm-neighbors',
+      type: 'mqtt_community',
+      name: 'Community Neighbors',
+      enabled: true,
+      config: {
+        broker_host: 'mqtt-us-v1.letsmesh.net',
+        broker_port: 443,
+        neighbor_reporting_enabled: true,
+      },
+      scope: { messages: 'none', raw_packets: 'all' },
+      sort_order: 0,
+      created_at: 1000,
+    };
+    mockedApi.getFanoutConfigs.mockResolvedValue([communityConfig]);
+    mockedApi.getCommunityNeighborStatus.mockResolvedValue({
+      phase: 'scheduled',
+      cache_size: 2,
+      remaining_seconds: 1800,
+      periodic_enabled: true,
+      last_publish_result: 'ok',
+    });
+    mockedApi.discoverCommunityNeighbors.mockResolvedValue({
+      status: 'started',
+      message: 'Collecting direct repeaters',
+    });
+    mockedApi.publishCommunityNeighborSnapshot.mockResolvedValue({
+      status: 'started',
+      message: 'Publishing neighbor snapshot',
+    });
+
+    renderSection();
+    const group = await screen.findByRole('group', { name: 'Integration Community Neighbors' });
+
+    expect(within(group).getByText(/Neighbor reports:/)).toHaveTextContent(
+      'waiting for the next report · 2 cached · 1800s remaining · last publish ok'
+    );
+
+    fireEvent.click(within(group).getByRole('button', { name: 'Refresh neighbors' }));
+    await waitFor(() =>
+      expect(mockedApi.discoverCommunityNeighbors).toHaveBeenCalledWith('comm-neighbors')
+    );
+    expect(within(group).getByRole('status')).toHaveTextContent('Collecting direct repeaters');
+
+    fireEvent.click(within(group).getByRole('button', { name: 'Publish snapshot' }));
+    await waitFor(() =>
+      expect(mockedApi.publishCommunityNeighborSnapshot).toHaveBeenCalledWith('comm-neighbors')
+    );
+    expect(within(group).getByRole('status')).toHaveTextContent('Publishing neighbor snapshot');
+  });
+
   it('existing community MQTT config without auth_mode defaults to token in the editor', async () => {
     const communityConfig: FanoutConfig = {
       id: 'comm-legacy',
@@ -885,6 +973,12 @@ describe('SettingsFanoutSection', () => {
           email: '',
           token_audience: '',
           topic_template: 'meshcore/{IATA}/{PUBLIC_KEY}/packets',
+          neighbor_reporting_enabled: false,
+          neighbor_reporting_interval_hours: 24,
+          neighbor_origin: '',
+          neighbor_self_scopes: '',
+          neighbor_topic_template: 'meshcore/{IATA}/{PUBLIC_KEY}/neighbors',
+          neighbor_retain: false,
         },
         scope: { messages: 'none', raw_packets: 'all' },
         enabled: true,
@@ -1087,6 +1181,12 @@ describe('SettingsFanoutSection', () => {
           email: '',
           token_audience: '',
           topic_template: 'meshrank/uplink/B435F6D5F7896B74C6B995FE221C2C1F/{PUBLIC_KEY}/packets',
+          neighbor_reporting_enabled: false,
+          neighbor_reporting_interval_hours: 24,
+          neighbor_origin: '',
+          neighbor_self_scopes: '',
+          neighbor_topic_template: 'meshcore/{IATA}/{PUBLIC_KEY}/neighbors',
+          neighbor_retain: false,
         },
         scope: { messages: 'none', raw_packets: 'all' },
         enabled: true,
@@ -1239,6 +1339,12 @@ describe('SettingsFanoutSection', () => {
           email: 'user@example.com',
           token_audience: 'mqtt-us-v1.letsmesh.net',
           topic_template: 'meshcore/{IATA}/{PUBLIC_KEY}/packets',
+          neighbor_reporting_enabled: false,
+          neighbor_reporting_interval_hours: 24,
+          neighbor_origin: '',
+          neighbor_self_scopes: '',
+          neighbor_topic_template: 'meshcore/{IATA}/{PUBLIC_KEY}/neighbors',
+          neighbor_retain: false,
         },
         scope: { messages: 'none', raw_packets: 'all' },
         enabled: false,
@@ -1351,6 +1457,12 @@ describe('SettingsFanoutSection', () => {
           email: 'user@example.com',
           token_audience: 'mqtt-eu-v1.letsmesh.net',
           topic_template: 'meshcore/{IATA}/{PUBLIC_KEY}/packets',
+          neighbor_reporting_enabled: false,
+          neighbor_reporting_interval_hours: 24,
+          neighbor_origin: '',
+          neighbor_self_scopes: '',
+          neighbor_topic_template: 'meshcore/{IATA}/{PUBLIC_KEY}/neighbors',
+          neighbor_retain: false,
         },
         scope: { messages: 'none', raw_packets: 'all' },
         enabled: true,

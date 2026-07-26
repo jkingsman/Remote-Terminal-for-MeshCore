@@ -590,6 +590,34 @@ def decrypt_direct_message(payload: bytes, shared_secret: bytes) -> DecryptedDir
     )
 
 
+def decrypt_response_payload(payload: bytes, shared_secret: bytes) -> bytes | None:
+    """Decrypt a normal ``PAYLOAD_TYPE_RESPONSE`` body.
+
+    Responses use the same addressed/MACed AES envelope as direct messages:
+    destination hash, source hash, two-byte HMAC prefix, then AES-ECB blocks.
+    The response plaintext is protocol-specific (for anonymous regions it is
+    ``request_tag | remote_time | scopes``), so callers receive the raw
+    validated plaintext rather than a text-message structure.
+    """
+    if len(payload) < 4:
+        return None
+
+    mac = payload[2:4]
+    ciphertext = payload[4:]
+    if not ciphertext or len(ciphertext) % 16 != 0:
+        return None
+
+    calculated_mac = hmac.new(shared_secret, ciphertext, hashlib.sha256).digest()[:2]
+    if not hmac.compare_digest(calculated_mac, mac):
+        return None
+
+    try:
+        return AES.new(shared_secret[:16], AES.MODE_ECB).decrypt(ciphertext)
+    except Exception as e:
+        logger.debug("AES decryption failed for response payload: %s", e)
+        return None
+
+
 def try_decrypt_dm(
     raw_packet: bytes,
     our_private_key: bytes,

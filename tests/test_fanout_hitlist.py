@@ -890,6 +890,14 @@ class TestCommunityMqttIataValidation:
         # Should not raise
         _validate_mqtt_community_config({"iata": "PDX"})
 
+    def test_non_string_iata_rejected_as_validation_error(self):
+        from app.routers.fanout import _validate_mqtt_community_config
+
+        with pytest.raises(HTTPException) as exc_info:
+            _validate_mqtt_community_config({"iata": 123})
+        assert exc_info.value.status_code == 400
+        assert "string" in exc_info.value.detail
+
     def test_invalid_iata_format_rejected(self):
         from app.routers.fanout import _validate_mqtt_community_config
 

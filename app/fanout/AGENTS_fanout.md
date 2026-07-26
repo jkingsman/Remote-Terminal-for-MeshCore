@@ -113,6 +113,10 @@ Wraps `CommunityMqttPublisher` from `app/fanout/community_mqtt.py`. Config blob:
 - Only publishes raw packets (on_message is a no-op)
 - The published `raw` field is always the original packet hex.
 - When a direct packet includes a `path` field, it is emitted as comma-separated hop identifiers exactly as the packet reports them. Token width varies with the packet's path hash mode (`1`, `2`, or `3` bytes per hop); there is no legacy flat per-byte companion field.
+- Optional neighbor reporting is controlled per broker by `neighbor_reporting_enabled` (off by default), `neighbor_reporting_interval_hours` (12–336, default 24), `neighbor_origin`, `neighbor_self_scopes`, `neighbor_topic_template`, and `neighbor_retain`.
+- `community_neighbors.py` owns one bounded 50-repeater cache and one radio workflow shared across all live Community MQTT modules. Passive signed, zero-hop repeater adverts and matching active discovery responses use the same cache; periodic reports collect for 60 seconds, query every frozen neighbor under one 30-second deadline, then publish the same immutable JSON document to every valid connected target at QoS 1.
+- `neighbor_self_scopes` is an explicit operator-maintained comma-separated export of flood-allowed local scopes. Do not derive it from `known_regions` or the current flood-scope setting: those values do not represent the radio's full allow/deny permission map.
+- The three `community-neighbors` API endpoints below expose status, manual non-publishing refresh, and manual snapshot publication. Cache observation is also wired directly into `packet_processor.py` before asynchronous fanout dispatch so fast zero-hop encrypted replies are not lost while MQTT reconnects.
 
 ### bot (bot.py)
 Wraps bot code execution via `app/fanout/bot_exec.py`. Config blob:
@@ -334,6 +338,9 @@ const defaultScopes: Record<string, Record<string, unknown>> = {
 | POST | `/api/fanout` | Create new config |
 | PATCH | `/api/fanout/{id}` | Update config (triggers module reload) |
 | DELETE | `/api/fanout/{id}` | Delete config (stops module) |
+| GET | `/api/fanout/{id}/community-neighbors/status` | Shared cache and report state for a Community MQTT config |
+| POST | `/api/fanout/{id}/community-neighbors/discover` | Start or join a zero-hop refresh without publishing |
+| POST | `/api/fanout/{id}/community-neighbors/snapshot` | Query cached repeaters and publish one snapshot |
 
 ## Database
 
@@ -356,6 +363,7 @@ Migrations:
 - `app/fanout/community_mqtt.py` — CommunityMqttPublisher (community MQTT with JWT auth)
 - `app/fanout/mqtt_private.py` — Private MQTT fanout module
 - `app/fanout/mqtt_community.py` — Community MQTT fanout module
+- `app/fanout/community_neighbors.py` — Shared Community MQTT neighbor cache, discovery, scope queries, scheduling, and snapshot handoff
 - `app/fanout/bot.py` — Bot fanout module
 - `app/fanout/bot_exec.py` — Bot code execution, response processing, rate limiting
 - `app/fanout/webhook.py` — Webhook fanout module
