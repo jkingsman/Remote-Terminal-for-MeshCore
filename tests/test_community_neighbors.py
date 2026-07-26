@@ -184,12 +184,10 @@ class TestSnapshotContract:
     def test_self_scope_normalization_preserves_wildcard_and_dollar(self):
         assert normalize_self_scopes(" #*, #$private, Sweden ") == "*,$private,Sweden"
 
-    def test_snapshot_orders_by_age_then_snr_then_key(self, monkeypatch):
+    @pytest.mark.asyncio
+    async def test_snapshot_orders_by_age_then_snr_then_key(self, monkeypatch):
         reporter = CommunityNeighborReporter()
-        reporter._modules["a"] = _Module(
-            "a",
-            {"neighbor_origin": "' Observer '", "neighbor_self_scopes": "#*, #Sweden"},
-        )
+        reporter._modules["a"] = _Module("a", {})
         entries = [
             ScopeQueryEntry("CC" * 32, heard_timestamp=90, snr_q4=4, status="timeout"),
             ScopeQueryEntry("BB" * 32, heard_timestamp=95, snr_q4=4, status="send_failed"),
@@ -199,12 +197,18 @@ class TestSnapshotContract:
         ]
         monkeypatch.setattr("app.fanout.community_neighbors._wall_time", lambda: 100)
 
-        with patch("app.keystore.get_public_key", return_value=OUR_PUBLIC_KEY):
-            serialized = reporter._build_snapshot(entries, {"a"})
+        with (
+            patch("app.keystore.get_public_key", return_value=OUR_PUBLIC_KEY),
+            patch(
+                "app.fanout.community_neighbors._derive_self_scopes",
+                new=AsyncMock(return_value="*,Sweden"),
+            ),
+        ):
+            serialized = await reporter._build_snapshot(entries, {"a"})
 
         assert serialized is not None
         snapshot = json.loads(serialized)
-        assert snapshot["origin"] == "Observer"
+        assert snapshot["origin"] == "MeshCore Device"
         assert snapshot["origin_id"] == OUR_PUBLIC_KEY.hex().upper()
         assert snapshot["self"] == {"scopes": "*,Sweden"}
         assert [neighbor["pubkey"] for neighbor in snapshot["neighbors"]] == [
@@ -213,13 +217,20 @@ class TestSnapshotContract:
             "CC" * 32,
         ]
 
-    def test_snapshot_never_includes_observer_identity(self, monkeypatch):
+    @pytest.mark.asyncio
+    async def test_snapshot_never_includes_observer_identity(self, monkeypatch):
         reporter = CommunityNeighborReporter()
         reporter._modules["a"] = _Module("a", {})
         monkeypatch.setattr("app.fanout.community_neighbors._wall_time", lambda: 100)
 
-        with patch("app.keystore.get_public_key", return_value=OUR_PUBLIC_KEY):
-            serialized = reporter._build_snapshot(
+        with (
+            patch("app.keystore.get_public_key", return_value=OUR_PUBLIC_KEY),
+            patch(
+                "app.fanout.community_neighbors._derive_self_scopes",
+                new=AsyncMock(return_value="*"),
+            ),
+        ):
+            serialized = await reporter._build_snapshot(
                 [
                     ScopeQueryEntry(
                         OUR_PUBLIC_KEY.hex(),

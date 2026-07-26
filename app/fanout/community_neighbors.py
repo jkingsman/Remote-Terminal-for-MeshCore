@@ -167,6 +167,29 @@ def _format_snapshot_timestamp(timestamp: int) -> str:
     return datetime.fromtimestamp(timestamp, UTC).isoformat(timespec="microseconds")
 
 
+async def _derive_self_scopes() -> str:
+    """Derive the observer's flood-allowed scopes from RemoteTerm's active flood scope.
+
+    When a regional flood scope is configured, that scope is reported.
+    When no flood scope restriction is active, wildcard '*' is reported
+    (all scopes are flood-allowed).
+    """
+    try:
+        from app.repository import AppSettingsRepository
+
+        app_settings = await AppSettingsRepository.get()
+        flood_scope = app_settings.flood_scope if app_settings else None
+    except Exception:
+        logger.debug("Could not resolve flood scope for neighbor self_scopes", exc_info=True)
+        return "*"
+
+    if not flood_scope or not isinstance(flood_scope, str) or not flood_scope.strip():
+        return "*"
+
+    normalized = normalize_self_scopes(flood_scope)
+    return normalized or "*"
+
+
 class CommunityNeighborReporter:
     """One bounded cache / state machine shared by Community MQTT modules."""
 
@@ -878,7 +901,7 @@ class CommunityNeighborReporter:
             if periodic:
                 self._schedule_next_periodic_cycle()
 
-        serialized = self._build_snapshot(entries, target_ids)
+        serialized = await self._build_snapshot(entries, target_ids)
         if serialized is None:
             async with self._transition_lock:
                 self._last_publish_result = "failed"
@@ -901,7 +924,9 @@ class CommunityNeighborReporter:
 
     # ── Snapshot construction ──────────────────────────────────────────
 
-    def _build_snapshot(self, entries: list[ScopeQueryEntry], target_ids: set[str]) -> str | None:
+    async def _build_snapshot(
+        self, entries: list[ScopeQueryEntry], target_ids: set[str]
+    ) -> str | None:
         try:
             from app.keystore import get_public_key
             from app.services.radio_runtime import radio_runtime
@@ -913,13 +938,12 @@ class CommunityNeighborReporter:
                 )
                 return None
 
-            metadata_module = self._metadata_module(target_ids)
-            config = metadata_module.config if metadata_module is not None else {}
-            origin = normalize_neighbor_origin(config.get("neighbor_origin"))
-            if not origin and radio_runtime.meshcore and radio_runtime.meshcore.self_info:
+            origin = ""
+            if radio_runtime.meshcore and radio_runtime.meshcore.self_info:
                 origin = str(radio_runtime.meshcore.self_info.get("name") or "").strip()
-            origin = origin or "MeshCore Device"
-            self_scopes = normalize_self_scopes(config.get("neighbor_self_scopes", ""))
+            origin = normalize_neighbor_origin(origin) or "MeshCore Device"
+
+            self_scopes = await _derive_self_scopes()
         except (ValueError, TypeError):
             logger.warning(
                 "Cannot build Community MQTT neighbor snapshot: invalid local scope config",
@@ -984,15 +1008,6 @@ class CommunityNeighborReporter:
         if not encoded or len(encoded) >= MAX_SNAPSHOT_BYTES:
             return None
         return serialized
-
-    def _metadata_module(self, target_ids: set[str]) -> CommunityNeighborModule | None:
-        for config_id in sorted(target_ids):
-            module = self._modules.get(config_id)
-            if module is not None:
-                return module
-        for config_id in sorted(self._modules):
-            return self._modules[config_id]
-        return None
 
     # ── Scheduling ─────────────────────────────────────────────────────
 

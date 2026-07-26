@@ -784,8 +784,6 @@ describe('SettingsFanoutSection', () => {
 
     expect(screen.getByLabelText('Enable periodic neighbor reports')).not.toBeChecked();
     expect(screen.getByLabelText('Report Interval (hours)')).toHaveValue(24);
-    expect(screen.getByLabelText('Origin (optional)')).toHaveValue('');
-    expect(screen.getByLabelText('Observer Scopes')).toHaveValue('');
     expect(screen.getByLabelText('Neighbor Topic Template')).toHaveValue(
       'meshcore/{IATA}/{PUBLIC_KEY}/neighbors'
     );
@@ -975,8 +973,6 @@ describe('SettingsFanoutSection', () => {
           topic_template: 'meshcore/{IATA}/{PUBLIC_KEY}/packets',
           neighbor_reporting_enabled: false,
           neighbor_reporting_interval_hours: 24,
-          neighbor_origin: '',
-          neighbor_self_scopes: '',
           neighbor_topic_template: 'meshcore/{IATA}/{PUBLIC_KEY}/neighbors',
           neighbor_retain: false,
         },
@@ -1183,8 +1179,6 @@ describe('SettingsFanoutSection', () => {
           topic_template: 'meshrank/uplink/B435F6D5F7896B74C6B995FE221C2C1F/{PUBLIC_KEY}/packets',
           neighbor_reporting_enabled: false,
           neighbor_reporting_interval_hours: 24,
-          neighbor_origin: '',
-          neighbor_self_scopes: '',
           neighbor_topic_template: 'meshcore/{IATA}/{PUBLIC_KEY}/neighbors',
           neighbor_retain: false,
         },
@@ -1341,8 +1335,6 @@ describe('SettingsFanoutSection', () => {
           topic_template: 'meshcore/{IATA}/{PUBLIC_KEY}/packets',
           neighbor_reporting_enabled: false,
           neighbor_reporting_interval_hours: 24,
-          neighbor_origin: '',
-          neighbor_self_scopes: '',
           neighbor_topic_template: 'meshcore/{IATA}/{PUBLIC_KEY}/neighbors',
           neighbor_retain: false,
         },
@@ -1459,8 +1451,6 @@ describe('SettingsFanoutSection', () => {
           topic_template: 'meshcore/{IATA}/{PUBLIC_KEY}/packets',
           neighbor_reporting_enabled: false,
           neighbor_reporting_interval_hours: 24,
-          neighbor_origin: '',
-          neighbor_self_scopes: '',
           neighbor_topic_template: 'meshcore/{IATA}/{PUBLIC_KEY}/neighbors',
           neighbor_retain: false,
         },

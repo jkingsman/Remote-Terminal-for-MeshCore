@@ -81,8 +81,6 @@ function createCommunityConfigDefaults(
     topic_template: DEFAULT_COMMUNITY_PACKET_TOPIC_TEMPLATE,
     neighbor_reporting_enabled: false,
     neighbor_reporting_interval_hours: DEFAULT_COMMUNITY_NEIGHBOR_REPORTING_INTERVAL_HOURS,
-    neighbor_origin: '',
-    neighbor_self_scopes: '',
     neighbor_topic_template: DEFAULT_COMMUNITY_NEIGHBOR_TOPIC_TEMPLATE,
     neighbor_retain: false,
     ...overrides,
@@ -474,8 +472,6 @@ function normalizeIntegrationConfigForSave(
           : neighborInterval
       )
     );
-    normalized.neighbor_origin = String(normalized.neighbor_origin ?? '').trim();
-    normalized.neighbor_self_scopes = String(normalized.neighbor_self_scopes ?? '').trim();
     const neighborTopicTemplate = String(normalized.neighbor_topic_template ?? '').trim();
     normalized.neighbor_topic_template =
       neighborTopicTemplate || DEFAULT_COMMUNITY_NEIGHBOR_TOPIC_TEMPLATE;
@@ -1813,33 +1809,6 @@ function MqttCommunityConfigEditor({
             />
             <p className="text-[0.8125rem] text-muted-foreground">12–336 hours; default 24.</p>
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="fanout-comm-neighbor-origin">Origin (optional)</Label>
-            <Input
-              id="fanout-comm-neighbor-origin"
-              type="text"
-              placeholder="Observer label"
-              value={(config.neighbor_origin as string | undefined) ?? ''}
-              onChange={(e) => onChange({ ...config, neighbor_origin: e.target.value })}
-            />
-            <p className="text-[0.8125rem] text-muted-foreground">
-              Included as the observer origin in each neighbor snapshot.
-            </p>
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="fanout-comm-neighbor-self-scopes">Observer Scopes</Label>
-          <Input
-            id="fanout-comm-neighbor-self-scopes"
-            type="text"
-            placeholder="*, Europe"
-            value={(config.neighbor_self_scopes as string | undefined) ?? ''}
-            onChange={(e) => onChange({ ...config, neighbor_self_scopes: e.target.value })}
-          />
-          <p className="text-[0.8125rem] text-muted-foreground">
-            Comma-separated flood-allowed scopes announced for this observer.
-          </p>
         </div>
 
         <div className="space-y-2">

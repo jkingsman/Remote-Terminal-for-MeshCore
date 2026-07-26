@@ -83,6 +83,16 @@ def _make_envelope(
     )
 
 
+@pytest.fixture(autouse=True)
+def _mock_derive_self_scopes():
+    """Block the real DB call in every snapshot-building test."""
+    with patch(
+        "app.fanout.community_neighbors._derive_self_scopes",
+        new=AsyncMock(return_value="*"),
+    ):
+        yield
+
+
 # ===================================================================
 # S25.1 / S25.2  Cache & discovery tests
 # ===================================================================
@@ -552,16 +562,11 @@ class TestScopeQueryPhase:
 
 
 class TestJsonContractComprehensive:
-    def test_required_fields_present(self, monkeypatch):
+    @pytest.mark.asyncio
+    async def test_required_fields_present(self, monkeypatch):
         """Spec 25.4-30: all required fields present in root + neighbor."""
         reporter = CommunityNeighborReporter()
-        reporter._modules["a"] = _Module(
-            "a",
-            {
-                "neighbor_origin": "Test",
-                "neighbor_self_scopes": "EU,US",
-            },
-        )
+        reporter._modules["a"] = _Module("a", {})
         entries = [
             ScopeQueryEntry(
                 "AA" * 32, heard_timestamp=90, snr_q4=8, scopes="EU", status="responded"
@@ -570,7 +575,7 @@ class TestJsonContractComprehensive:
         monkeypatch.setattr("app.fanout.community_neighbors._wall_time", lambda: 100)
 
         with patch("app.keystore.get_public_key", return_value=OUR_PUBLIC_KEY):
-            serialized = reporter._build_snapshot(entries, {"a"})
+            serialized = await reporter._build_snapshot(entries, {"a"})
 
         assert serialized is not None
         snapshot = json.loads(serialized)
@@ -585,7 +590,8 @@ class TestJsonContractComprehensive:
         for field in ("pubkey", "snr", "heard_secs_ago", "scopes", "status"):
             assert field in neighbor, f"missing {field}"
 
-    def test_clock_backward_clamp(self, monkeypatch):
+    @pytest.mark.asyncio
+    async def test_clock_backward_clamp(self, monkeypatch):
         """Spec 25.4-33: future heard_timestamp -> age 0."""
         reporter = CommunityNeighborReporter()
         reporter._modules["a"] = _Module("a", {})
@@ -594,11 +600,12 @@ class TestJsonContractComprehensive:
             ScopeQueryEntry("AA" * 32, heard_timestamp=200, snr_q4=8, status="responded"),
         ]
         with patch("app.keystore.get_public_key", return_value=OUR_PUBLIC_KEY):
-            serialized = reporter._build_snapshot(entries, {"a"})
+            serialized = await reporter._build_snapshot(entries, {"a"})
         snapshot = json.loads(serialized)
         assert snapshot["neighbors"][0]["heard_secs_ago"] == 0
 
-    def test_pubkey_lexical_tie_break(self, monkeypatch):
+    @pytest.mark.asyncio
+    async def test_pubkey_lexical_tie_break(self, monkeypatch):
         """Spec 25.4-36: pubkey tie-break is deterministic."""
         reporter = CommunityNeighborReporter()
         reporter._modules["a"] = _Module("a", {})
@@ -609,20 +616,15 @@ class TestJsonContractComprehensive:
             ScopeQueryEntry("AA" * 32, heard_timestamp=95, snr_q4=8, status="timeout"),
         ]
         with patch("app.keystore.get_public_key", return_value=OUR_PUBLIC_KEY):
-            serialized = reporter._build_snapshot(entries, {"a"})
+            serialized = await reporter._build_snapshot(entries, {"a"})
         keys = [n["pubkey"] for n in json.loads(serialized)["neighbors"]]
         assert keys == ["AA" * 32, "BB" * 32, "CC" * 32]
 
-    def test_json_escaping_handles_quotes_in_scopes(self, monkeypatch):
+    @pytest.mark.asyncio
+    async def test_json_escaping_handles_quotes_in_scopes(self, monkeypatch):
         """Spec 25.4-37: unusual scope chars are JSON-safe."""
         reporter = CommunityNeighborReporter()
-        reporter._modules["a"] = _Module(
-            "a",
-            {
-                "neighbor_self_scopes": "a",
-                "neighbor_origin": "B",
-            },
-        )
+        reporter._modules["a"] = _Module("a", {})
         entries = [
             ScopeQueryEntry(
                 "AA" * 32, heard_timestamp=90, snr_q4=8, scopes='foo"bar', status="responded"
@@ -630,19 +632,14 @@ class TestJsonContractComprehensive:
         ]
         monkeypatch.setattr("app.fanout.community_neighbors._wall_time", lambda: 100)
         with patch("app.keystore.get_public_key", return_value=OUR_PUBLIC_KEY):
-            serialized = reporter._build_snapshot(entries, {"a"})
+            serialized = await reporter._build_snapshot(entries, {"a"})
         snapshot = json.loads(serialized)
         assert snapshot["neighbors"][0]["scopes"] == 'foo"bar'
 
-    def test_scopes_with_backslash_survive_roundtrip(self, monkeypatch):
+    @pytest.mark.asyncio
+    async def test_scopes_with_backslash_survive_roundtrip(self, monkeypatch):
         reporter = CommunityNeighborReporter()
-        reporter._modules["a"] = _Module(
-            "a",
-            {
-                "neighbor_self_scopes": "a",
-                "neighbor_origin": "B",
-            },
-        )
+        reporter._modules["a"] = _Module("a", {})
         entries = [
             ScopeQueryEntry(
                 "AA" * 32, heard_timestamp=90, snr_q4=8, scopes="path\\trail", status="responded"
@@ -650,20 +647,15 @@ class TestJsonContractComprehensive:
         ]
         monkeypatch.setattr("app.fanout.community_neighbors._wall_time", lambda: 100)
         with patch("app.keystore.get_public_key", return_value=OUR_PUBLIC_KEY):
-            serialized = reporter._build_snapshot(entries, {"a"})
+            serialized = await reporter._build_snapshot(entries, {"a"})
         snapshot = json.loads(serialized)
         assert snapshot["neighbors"][0]["scopes"] == "path\\trail"
 
-    def test_progressive_truncation_leaves_valid_json(self, monkeypatch):
+    @pytest.mark.asyncio
+    async def test_progressive_truncation_leaves_valid_json(self, monkeypatch):
         """Spec 25.4-38: tail removed, valid JSON remains."""
         reporter = CommunityNeighborReporter()
-        reporter._modules["a"] = _Module(
-            "a",
-            {
-                "neighbor_origin": "O",
-                "neighbor_self_scopes": "S",
-            },
-        )
+        reporter._modules["a"] = _Module("a", {})
         monkeypatch.setattr("app.fanout.community_neighbors._wall_time", lambda: 100)
 
         entries = [
@@ -671,7 +663,7 @@ class TestJsonContractComprehensive:
             for i in range(200)
         ]
         with patch("app.keystore.get_public_key", return_value=OUR_PUBLIC_KEY):
-            serialized = reporter._build_snapshot(entries, {"a"})
+            serialized = await reporter._build_snapshot(entries, {"a"})
 
         assert serialized is not None
         snapshot = json.loads(serialized)
@@ -679,19 +671,14 @@ class TestJsonContractComprehensive:
         encoded = serialized.encode("utf-8")
         assert 0 < len(encoded) < MAX_SNAPSHOT_BYTES
 
-    def test_root_object_too_large_fails_cleanly(self, monkeypatch):
+    @pytest.mark.asyncio
+    async def test_root_object_too_large_fails_cleanly(self, monkeypatch):
         """Spec 25.4-39: root too large -> None."""
         reporter = CommunityNeighborReporter()
-        reporter._modules["a"] = _Module(
-            "a",
-            {
-                "neighbor_origin": "N",
-                "neighbor_self_scopes": "x",
-            },
-        )
+        reporter._modules["a"] = _Module("a", {})
         monkeypatch.setattr("app.fanout.community_neighbors.MAX_SNAPSHOT_BYTES", 20)
         with patch("app.keystore.get_public_key", return_value=OUR_PUBLIC_KEY):
-            serialized = reporter._build_snapshot([], {"a"})
+            serialized = await reporter._build_snapshot([], {"a"})
         assert serialized is None
 
     def test_origin_quote_stripping(self):
@@ -704,7 +691,8 @@ class TestJsonContractComprehensive:
         assert normalize_neighbor_origin(None) == ""
         assert normalize_neighbor_origin("") == ""
 
-    def test_snr_is_float_not_string(self, monkeypatch):
+    @pytest.mark.asyncio
+    async def test_snr_is_float_not_string(self, monkeypatch):
         """SNR is a JSON number, not string."""
         reporter = CommunityNeighborReporter()
         reporter._modules["a"] = _Module("a", {})
@@ -713,13 +701,14 @@ class TestJsonContractComprehensive:
             ScopeQueryEntry("AA" * 32, heard_timestamp=90, snr_q4=10, status="responded"),
         ]
         with patch("app.keystore.get_public_key", return_value=OUR_PUBLIC_KEY):
-            serialized = reporter._build_snapshot(entries, {"a"})
+            serialized = await reporter._build_snapshot(entries, {"a"})
         snapshot = json.loads(serialized)
         snr = snapshot["neighbors"][0]["snr"]
         assert isinstance(snr, (int, float))
         assert snr == 2.5
 
-    def test_heard_secs_ago_is_int(self, monkeypatch):
+    @pytest.mark.asyncio
+    async def test_heard_secs_ago_is_int(self, monkeypatch):
         reporter = CommunityNeighborReporter()
         reporter._modules["a"] = _Module("a", {})
         monkeypatch.setattr("app.fanout.community_neighbors._wall_time", lambda: 100)
@@ -727,11 +716,12 @@ class TestJsonContractComprehensive:
             ScopeQueryEntry("AA" * 32, heard_timestamp=90, snr_q4=4, status="timeout"),
         ]
         with patch("app.keystore.get_public_key", return_value=OUR_PUBLIC_KEY):
-            serialized = reporter._build_snapshot(entries, {"a"})
+            serialized = await reporter._build_snapshot(entries, {"a"})
         snapshot = json.loads(serialized)
         assert isinstance(snapshot["neighbors"][0]["heard_secs_ago"], int)
 
-    def test_status_is_valid_enum(self, monkeypatch):
+    @pytest.mark.asyncio
+    async def test_status_is_valid_enum(self, monkeypatch):
         reporter = CommunityNeighborReporter()
         reporter._modules["a"] = _Module("a", {})
         monkeypatch.setattr("app.fanout.community_neighbors._wall_time", lambda: 100)
@@ -740,7 +730,7 @@ class TestJsonContractComprehensive:
                 ScopeQueryEntry("AA" * 32, heard_timestamp=90, snr_q4=4, status=status),
             ]
             with patch("app.keystore.get_public_key", return_value=OUR_PUBLIC_KEY):
-                serialized = reporter._build_snapshot(entries, {"a"})
+                serialized = await reporter._build_snapshot(entries, {"a"})
             assert status in serialized
 
 
@@ -1263,23 +1253,18 @@ class TestScopeQueryEarlyCompletion:
 
 
 class TestJsonKeyFormat:
-    def test_origin_id_and_pubkey_are_uppercase_64_char_hex(self, monkeypatch):
+    @pytest.mark.asyncio
+    async def test_origin_id_and_pubkey_are_uppercase_64_char_hex(self, monkeypatch):
         """Spec 25.4-31: origin_id and pubkey must be uppercase 64-character hex."""
         reporter = CommunityNeighborReporter()
-        reporter._modules["a"] = _Module(
-            "a",
-            {
-                "neighbor_origin": "Test",
-                "neighbor_self_scopes": "EU",
-            },
-        )
+        reporter._modules["a"] = _Module("a", {})
         entries = [
             ScopeQueryEntry("aa" * 32, heard_timestamp=90, snr_q4=8, scopes="", status="responded"),
         ]
         monkeypatch.setattr("app.fanout.community_neighbors._wall_time", lambda: 100)
 
         with patch("app.keystore.get_public_key", return_value=OUR_PUBLIC_KEY):
-            serialized = reporter._build_snapshot(entries, {"a"})
+            serialized = await reporter._build_snapshot(entries, {"a"})
 
         assert serialized is not None
         snapshot = json.loads(serialized)
