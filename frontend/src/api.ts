@@ -4,6 +4,8 @@ import type {
   BulkCreateHashtagChannelsResult,
   Channel,
   ChannelDetail,
+  CommunityNeighborActionResponse,
+  CommunityNeighborStatus,
   CommandResponse,
   Contact,
   ContactAnalytics,
@@ -405,6 +407,16 @@ export const api = {
       bots_disabled: boolean;
       bots_disabled_source: 'env' | 'until_restart';
     }>('/fanout/bots/disable-until-restart', {
+      method: 'POST',
+    }),
+  getCommunityNeighborStatus: (id: string) =>
+    fetchJson<CommunityNeighborStatus>(`/fanout/${id}/community-neighbors/status`),
+  discoverCommunityNeighbors: (id: string) =>
+    fetchJson<CommunityNeighborActionResponse>(`/fanout/${id}/community-neighbors/discover`, {
+      method: 'POST',
+    }),
+  publishCommunityNeighborSnapshot: (id: string) =>
+    fetchJson<CommunityNeighborActionResponse>(`/fanout/${id}/community-neighbors/snapshot`, {
       method: 'POST',
     }),
 

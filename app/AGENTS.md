@@ -213,6 +213,7 @@ Both traffic buckets come from one 24h raw-packet scan (`_packet_shape_24h`) sha
 - The telemetry collection loop in `radio_sync.py` is unified: it iterates over both `tracked_telemetry_repeaters` and `tracked_telemetry_contacts`, dispatching to `_collect_repeater_telemetry` (type 2) or `_collect_contact_telemetry` (others). The daily check ceiling uses the combined count.
 - The 60-second radio stats sampling loop in `radio_stats.py` dispatches an enriched health snapshot (radio identity + full stats) to all fanout modules after each sample.
 - Community MQTT publishes raw packets only, but its derived `path` field for direct packets is emitted as comma-separated hop identifiers, not flat path bytes.
+- Community MQTT can additionally produce canonical neighbor snapshots. `fanout/community_neighbors.py` shares one bounded direct-repeater cache and active discovery/scope-query workflow across all Community MQTT broker slots, then publishes one immutable QoS-1 document to each valid connected slot. Its local `neighbor_self_scopes` config is intentionally explicit; `known_regions` and the active flood scope are not a full flood-permission map.
 - See `app/fanout/AGENTS_fanout.md` for full architecture details and event payload shapes.
 
 ### Web Push notifications
@@ -323,6 +324,9 @@ Web Push is a standalone subsystem in `app/push/`, separate from the fanout modu
 - `POST /fanout` — create new fanout config
 - `PATCH /fanout/{id}` — update fanout config (triggers module reload)
 - `DELETE /fanout/{id}` — delete fanout config (stops module)
+- `GET /fanout/{id}/community-neighbors/status` — shared Community MQTT neighbor cache and scheduling state
+- `POST /fanout/{id}/community-neighbors/discover` — start or join zero-hop repeater discovery without publishing
+- `POST /fanout/{id}/community-neighbors/snapshot` — query cached direct repeaters and publish one QoS-1 snapshot
 - `POST /fanout/bots/disable-until-restart` — stop bot modules and keep bots disabled until restart
 
 ### Statistics
@@ -428,6 +432,7 @@ tests/
 ├── test_channel_sender_backfill.py # Sender-key backfill uniqueness rules for channel messages
 ├── test_channels_router.py     # Channels router endpoints
 ├── test_community_mqtt.py      # Community MQTT publisher (JWT, packet format, hash, broadcast)
+├── test_community_neighbors.py # Community MQTT neighbor cache, scope reporting, QoS, validation
 ├── test_config.py              # Configuration validation
 ├── test_contact_reconciliation_service.py # Prefix/contact reconciliation service helpers
 ├── test_contacts_router.py     # Contacts router endpoints

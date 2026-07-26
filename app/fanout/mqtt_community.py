@@ -10,14 +10,24 @@ from typing import Any
 
 from app.fanout.base import FanoutModule
 from app.fanout.community_mqtt import CommunityMqttPublisher, _format_raw_packet
+from app.fanout.community_neighbors import community_neighbor_reporter
 
 logger = logging.getLogger(__name__)
 
 _IATA_RE = re.compile(r"^[A-Z]{3}$")
 _DEFAULT_PACKET_TOPIC_TEMPLATE = "meshcore/{IATA}/{PUBLIC_KEY}/packets"
+_DEFAULT_NEIGHBOR_TOPIC_TEMPLATE = "meshcore/{IATA}/{PUBLIC_KEY}/neighbors"
 _TOPIC_TEMPLATE_FIELD_CANONICAL = {
     "iata": "IATA",
     "public_key": "PUBLIC_KEY",
+}
+_NEIGHBOR_TOPIC_TEMPLATE_FIELD_CANONICAL = {
+    **_TOPIC_TEMPLATE_FIELD_CANONICAL,
+    # ``device`` and ``type`` are the common names used by generic community
+    # MQTT template systems.  Keep PUBLIC_KEY as the established RemoteTerm
+    # spelling and make both forms render the same observer identity.
+    "device": "PUBLIC_KEY",
+    "type": "TYPE",
 }
 
 
@@ -47,6 +57,35 @@ def _normalize_topic_template(topic_template: str) -> str:
     return "".join(parts)
 
 
+def _normalize_neighbor_topic_template(topic_template: str) -> str:
+    """Normalize neighbor topic fields, including the ``{TYPE}`` suffix hook."""
+    template = topic_template.strip() or _DEFAULT_NEIGHBOR_TOPIC_TEMPLATE
+    parts: list[str] = []
+    try:
+        parsed = string.Formatter().parse(template)
+        for literal_text, field_name, format_spec, conversion in parsed:
+            parts.append(literal_text)
+            if field_name is None:
+                continue
+            normalized_field = _NEIGHBOR_TOPIC_TEMPLATE_FIELD_CANONICAL.get(field_name.lower())
+            if normalized_field is None:
+                raise ValueError(f"Unsupported neighbor topic template field(s): {field_name}")
+            replacement = ["{", normalized_field]
+            if conversion:
+                replacement.extend(["!", conversion])
+            if format_spec:
+                replacement.extend([":", format_spec])
+            replacement.append("}")
+            parts.append("".join(replacement))
+    except ValueError:
+        raise
+
+    normalized = "".join(parts)
+    if not (normalized.endswith("/neighbors") or normalized.endswith("/{TYPE}")):
+        raise ValueError("Neighbor topic templates must end with /neighbors or /{TYPE}")
+    return normalized
+
+
 def _config_to_settings(config: dict) -> SimpleNamespace:
     """Map a fanout config blob to a settings namespace for the CommunityMqttPublisher."""
     return SimpleNamespace(
@@ -72,6 +111,12 @@ def _render_packet_topic(topic_template: str, *, iata: str, public_key: str) -> 
     return template.format(IATA=iata, PUBLIC_KEY=public_key)
 
 
+def _render_neighbor_topic(topic_template: str, *, iata: str, public_key: str) -> str:
+    """Render the configured MQTT topic for one canonical neighbor snapshot."""
+    template = _normalize_neighbor_topic_template(topic_template)
+    return template.format(IATA=iata, PUBLIC_KEY=public_key, TYPE="neighbors")
+
+
 class MqttCommunityModule(FanoutModule):
     """Wraps a CommunityMqttPublisher for community packet sharing."""
 
@@ -83,8 +128,10 @@ class MqttCommunityModule(FanoutModule):
     async def start(self) -> None:
         settings = _config_to_settings(self.config)
         await self._publisher.start(settings)
+        await community_neighbor_reporter.register_module(self)
 
     async def stop(self) -> None:
+        await community_neighbor_reporter.unregister_module(self.config_id)
         await self._publisher.stop()
 
     async def on_message(self, data: dict) -> None:
@@ -92,9 +139,51 @@ class MqttCommunityModule(FanoutModule):
         pass
 
     async def on_raw(self, data: dict) -> None:
+        # Neighbor cache observations are radio facts, not MQTT delivery
+        # attempts.  Keep recording them while this broker reconnects.
+        await community_neighbor_reporter.observe_raw_packet(data)
         if not self._publisher.connected or self._publisher._settings is None:
             return
         await _publish_community_packet(self._publisher, self.config, data)
+
+    @property
+    def neighbor_publisher_connected(self) -> bool:
+        """Whether this slot can accept a completed neighbor snapshot now."""
+        return self._publisher.connected and self._publisher._settings is not None
+
+    async def publish_neighbor_snapshot(self, serialized_snapshot: str) -> bool:
+        """Publish an already-frozen canonical neighbor JSON document at QoS 1."""
+        if not self.neighbor_publisher_connected:
+            return False
+
+        try:
+            from app.keystore import get_public_key
+
+            public_key = get_public_key()
+            if public_key is None or len(public_key) != 32:
+                return False
+
+            iata = str(self.config.get("iata", "")).upper().strip()
+            if not _IATA_RE.fullmatch(iata):
+                logger.debug(
+                    "Community MQTT: skipping neighbor snapshot — no valid IATA code configured"
+                )
+                return False
+
+            topic = _render_neighbor_topic(
+                str(self.config.get("neighbor_topic_template", _DEFAULT_NEIGHBOR_TOPIC_TEMPLATE)),
+                iata=iata,
+                public_key=public_key.hex().upper(),
+            )
+            return await self._publisher.publish(
+                topic,
+                serialized_snapshot,
+                retain=bool(self.config.get("neighbor_retain", False)),
+                qos=1,
+            )
+        except Exception:
+            logger.warning("Community MQTT neighbor snapshot publish error", exc_info=True)
+            return False
 
     @property
     def status(self) -> str:

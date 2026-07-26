@@ -118,12 +118,27 @@ class BaseMqttPublisher(ABC):
         await self.stop()
         await self.start(settings)
 
-    async def publish(self, topic: str, payload: dict[str, Any], *, retain: bool = False) -> None:
-        """Publish a JSON payload. Drops silently if not connected."""
+    async def publish(
+        self,
+        topic: str,
+        payload: dict[str, Any] | str | bytes,
+        *,
+        retain: bool = False,
+        qos: int = 0,
+    ) -> bool:
+        """Publish one payload and report whether the client accepted it.
+
+        Existing fanout publishers send dictionaries and retain the historical
+        QoS-0 default.  Community-neighbor snapshots are already serialized
+        JSON documents and require QoS 1, so this shared boundary also accepts
+        text/bytes without double-encoding them.
+        """
         if self._client is None or not self.connected:
-            return
+            return False
         try:
-            await self._client.publish(topic, json.dumps(payload), retain=retain)
+            encoded_payload = json.dumps(payload) if isinstance(payload, dict) else payload
+            await self._client.publish(topic, encoded_payload, retain=retain, qos=qos)
+            return True
         except Exception as e:
             logger.warning(
                 "%s publish failed on %s. This is usually transient network noise; "
@@ -138,6 +153,7 @@ class BaseMqttPublisher(ABC):
             # Wake the connection loop so it exits the wait and reconnects
             self._settings_version += 1
             self._version_event.set()
+            return False
 
     # ── Abstract hooks ─────────────────────────────────────────────────
 

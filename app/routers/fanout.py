@@ -29,6 +29,7 @@ _VALID_TYPES = {
 
 _IATA_RE = re.compile(r"^[A-Z]{3}$")
 _DEFAULT_COMMUNITY_MQTT_TOPIC_TEMPLATE = "meshcore/{IATA}/{PUBLIC_KEY}/packets"
+_DEFAULT_COMMUNITY_NEIGHBOR_TOPIC_TEMPLATE = "meshcore/{IATA}/{PUBLIC_KEY}/neighbors"
 _DEFAULT_COMMUNITY_MQTT_BROKER_HOST = "mqtt-us-v1.letsmesh.net"
 _DEFAULT_COMMUNITY_MQTT_BROKER_PORT = 443
 _DEFAULT_COMMUNITY_MQTT_TRANSPORT = "websockets"
@@ -36,6 +37,11 @@ _DEFAULT_COMMUNITY_MQTT_AUTH_MODE = "token"
 _COMMUNITY_MQTT_TEMPLATE_FIELD_CANONICAL = {
     "iata": "IATA",
     "public_key": "PUBLIC_KEY",
+}
+_COMMUNITY_NEIGHBOR_TEMPLATE_FIELD_CANONICAL = {
+    **_COMMUNITY_MQTT_TEMPLATE_FIELD_CANONICAL,
+    "device": "PUBLIC_KEY",
+    "type": "TYPE",
 }
 _ALLOWED_COMMUNITY_MQTT_TRANSPORTS = {"tcp", "websockets"}
 _ALLOWED_COMMUNITY_MQTT_AUTH_MODES = {"token", "password", "none"}
@@ -70,6 +76,47 @@ def _normalize_community_topic_template(topic_template: str) -> str:
         raise HTTPException(status_code=400, detail=f"Invalid topic_template: {exc}") from None
 
     return "".join(parts)
+
+
+def _normalize_community_neighbor_topic_template(topic_template: str) -> str:
+    """Normalize Community MQTT neighbor topic fields including ``{TYPE}``."""
+    template = topic_template.strip() or _DEFAULT_COMMUNITY_NEIGHBOR_TOPIC_TEMPLATE
+    parts: list[str] = []
+    try:
+        parsed = string.Formatter().parse(template)
+        for literal_text, field_name, format_spec, conversion in parsed:
+            parts.append(literal_text)
+            if field_name is None:
+                continue
+            normalized_field = _COMMUNITY_NEIGHBOR_TEMPLATE_FIELD_CANONICAL.get(field_name.lower())
+            if normalized_field is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "neighbor_topic_template may only use {IATA}, {PUBLIC_KEY}, "
+                        "{DEVICE}, and {TYPE}; got "
+                        f"{field_name}"
+                    ),
+                )
+            replacement = ["{", normalized_field]
+            if conversion:
+                replacement.extend(["!", conversion])
+            if format_spec:
+                replacement.extend([":", format_spec])
+            replacement.append("}")
+            parts.append("".join(replacement))
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400, detail=f"Invalid neighbor_topic_template: {exc}"
+        ) from None
+
+    normalized = "".join(parts)
+    if not (normalized.endswith("/neighbors") or normalized.endswith("/{TYPE}")):
+        raise HTTPException(
+            status_code=400,
+            detail="neighbor_topic_template must end with /neighbors or /{TYPE}",
+        )
+    return normalized
 
 
 class FanoutConfigCreate(BaseModel):
@@ -177,6 +224,56 @@ def _validate_mqtt_community_config(config: dict) -> None:
         topic_template = _DEFAULT_COMMUNITY_MQTT_TOPIC_TEMPLATE
 
     config["topic_template"] = _normalize_community_topic_template(topic_template)
+
+    # Neighbor reports share the same radio-side coordinator across every
+    # Community MQTT broker.  The configuration is stored per broker because
+    # topic/retain policy is slot-specific; the coordinator freezes one
+    # snapshot and publishes that exact document to all participating slots.
+    reporting_enabled = config.get("neighbor_reporting_enabled", False)
+    if not isinstance(reporting_enabled, bool):
+        raise HTTPException(status_code=400, detail="neighbor_reporting_enabled must be a boolean")
+    config["neighbor_reporting_enabled"] = reporting_enabled
+
+    interval_hours = config.get("neighbor_reporting_interval_hours", 24)
+    if isinstance(interval_hours, bool) or not isinstance(interval_hours, int):
+        raise HTTPException(
+            status_code=400,
+            detail="neighbor_reporting_interval_hours must be an integer between 12 and 336",
+        )
+    if not 12 <= interval_hours <= 336:
+        raise HTTPException(
+            status_code=400,
+            detail="neighbor_reporting_interval_hours must be between 12 and 336",
+        )
+    config["neighbor_reporting_interval_hours"] = interval_hours
+
+    origin = config.get("neighbor_origin", "")
+    if not isinstance(origin, str):
+        raise HTTPException(status_code=400, detail="neighbor_origin must be a string")
+    config["neighbor_origin"] = origin.strip()
+
+    try:
+        from app.fanout.community_neighbors import normalize_self_scopes
+
+        config["neighbor_self_scopes"] = normalize_self_scopes(
+            config.get("neighbor_self_scopes", "")
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+
+    neighbor_topic_template = config.get(
+        "neighbor_topic_template", _DEFAULT_COMMUNITY_NEIGHBOR_TOPIC_TEMPLATE
+    )
+    if not isinstance(neighbor_topic_template, str):
+        raise HTTPException(status_code=400, detail="neighbor_topic_template must be a string")
+    config["neighbor_topic_template"] = _normalize_community_neighbor_topic_template(
+        neighbor_topic_template
+    )
+
+    retain = config.get("neighbor_retain", False)
+    if not isinstance(retain, bool):
+        raise HTTPException(status_code=400, detail="neighbor_retain must be a boolean")
+    config["neighbor_retain"] = retain
 
 
 def _validate_bot_config(config: dict) -> None:
@@ -472,6 +569,73 @@ async def update_fanout_config(config_id: str, body: FanoutConfigUpdate) -> dict
 
     logger.info("Updated fanout config %s", config_id)
     return updated
+
+
+async def _require_community_neighbor_config(config_id: str) -> dict:
+    """Validate that a live config can use the shared Community MQTT reporter."""
+    existing = await FanoutConfigRepository.get(config_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Fanout config not found")
+    if existing["type"] != "mqtt_community":
+        raise HTTPException(
+            status_code=400, detail="Neighbor reporting requires a Community MQTT config"
+        )
+    if not existing["enabled"]:
+        raise HTTPException(status_code=409, detail="Community MQTT integration is disabled")
+    return existing
+
+
+@router.get("/{config_id}/community-neighbors/status")
+async def get_community_neighbor_status(config_id: str) -> dict:
+    """Return cache and shared-workflow state for a Community MQTT slot."""
+    await _require_community_neighbor_config(config_id)
+    from app.fanout.community_neighbors import community_neighbor_reporter
+
+    return community_neighbor_reporter.status_for(config_id)
+
+
+@router.post("/{config_id}/community-neighbors/discover")
+async def discover_community_neighbors(config_id: str) -> dict:
+    """Start or join a non-publishing 60-second zero-hop neighbor refresh."""
+    await _require_community_neighbor_config(config_id)
+    from app.fanout.community_neighbors import NeighborReporterError, community_neighbor_reporter
+
+    try:
+        return await community_neighbor_reporter.start_manual_discovery(config_id)
+    except NeighborReporterError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+
+
+@router.post("/{config_id}/community-neighbors/snapshot")
+async def publish_community_neighbor_snapshot(config_id: str) -> dict:
+    """Query cached direct repeaters and publish one completion snapshot."""
+    await _require_community_neighbor_config(config_id)
+    from app.fanout.community_neighbors import NeighborReporterError, community_neighbor_reporter
+
+    try:
+        return await community_neighbor_reporter.start_manual_snapshot(config_id)
+    except NeighborReporterError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+
+
+@router.delete("/{config_id}/community-neighbors/{public_key}")
+async def remove_community_neighbor(config_id: str, public_key: str) -> dict:
+    """Explicitly remove one cached direct repeater neighbour by public key."""
+    await _require_community_neighbor_config(config_id)
+    from app.fanout.community_neighbors import community_neighbor_reporter
+
+    removed = await community_neighbor_reporter.remove_neighbor(public_key)
+    return {"removed": removed, "public_key": public_key.lower()}
+
+
+@router.delete("/{config_id}/community-neighbors")
+async def clear_community_neighbors(config_id: str) -> dict:
+    """Remove all cached direct repeater neighbours."""
+    await _require_community_neighbor_config(config_id)
+    from app.fanout.community_neighbors import community_neighbor_reporter
+
+    count = await community_neighbor_reporter.clear_neighbors()
+    return {"cleared": count}
 
 
 @router.delete("/{config_id}")
