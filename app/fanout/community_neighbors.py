@@ -6,10 +6,11 @@ therefore owns one bounded neighbour cache and one active report workflow, then
 hands the completed snapshot to every opted-in Community MQTT module.
 
 The radio's companion protocol creates the authenticated anonymous regions
-request for ``CMD_SEND_ANON_REQ``.  The coordinator supplies the target
-identity and an empty path (zero hop), then uses the firmware-generated tag
-from ``MSG_SENT`` to match direct encrypted raw responses (with the generic
-``BINARY_RESPONSE`` event retained as a firmware fallback).
+request for ``CMD_SEND_ANON_REQ``. The coordinator supplies the target identity
+and an empty path (zero hop), then uses the firmware-generated tag from
+``MSG_SENT`` to match direct encrypted raw responses. Raw matching is required
+because the companion exposes only one host-side pending binary response while
+a neighbor snapshot queries several peers as one concurrent batch.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -103,7 +105,9 @@ def _quantize_snr(snr: object) -> int:
     try:
         value = float(cast(Any, snr))
     except (TypeError, ValueError):
-        value = 0.0
+        return 0
+    if not math.isfinite(value):
+        return 0
     return max(-128, min(127, int(value * 4)))
 
 
@@ -113,7 +117,7 @@ def _bounded_scope_text(data: bytes) -> str:
     text = bounded.decode("utf-8", errors="ignore").split("\x00", 1)[0]
     # Scope strings are data, never commands.  Keep normal printable Unicode
     # but reject remaining control characters before JSON serialization.
-    return "".join(char for char in text if char >= " " or char == "\t")
+    return "".join(char for char in text if char >= " ")
 
 
 def normalize_self_scopes(value: object) -> str:
@@ -128,7 +132,9 @@ def normalize_self_scopes(value: object) -> str:
     if isinstance(value, str):
         raw_values = value.split(",")
     elif isinstance(value, list):
-        raw_values = [str(v) for v in value]
+        if not all(isinstance(item, str) for item in value):
+            raise ValueError("neighbor_self_scopes entries must be strings")
+        raw_values = value
     elif value is None:
         raw_values = []
     else:
@@ -136,15 +142,13 @@ def normalize_self_scopes(value: object) -> str:
 
     scopes: list[str] = []
     for raw in raw_values:
-        if not isinstance(raw, str):
-            raise ValueError("neighbor_self_scopes entries must be strings")
-        scope = raw.strip().replace("\x00", "")
+        scope = raw.strip()
+        if any(ord(char) < 32 for char in scope):
+            raise ValueError("neighbor_self_scopes cannot contain control characters")
         if scope.startswith("#"):
             scope = scope[1:]
         if not scope:
             continue
-        if any(ord(char) < 32 for char in scope):
-            raise ValueError("neighbor_self_scopes cannot contain control characters")
         scopes.append(scope)
 
     return ",".join(scopes)
@@ -159,35 +163,14 @@ def normalize_neighbor_origin(value: object) -> str:
     origin = value.strip()
     if len(origin) >= 2 and origin[0] == origin[-1] and origin[0] in {'"', "'"}:
         origin = origin[1:-1].strip()
+    if any(ord(char) < 32 for char in origin):
+        raise ValueError("neighbor_origin cannot contain control characters")
     return origin
 
 
 def _format_snapshot_timestamp(timestamp: int) -> str:
     """Return the strict neighbor-schema UTC timestamp (not the packet ``Z`` form)."""
     return datetime.fromtimestamp(timestamp, UTC).isoformat(timespec="microseconds")
-
-
-async def _derive_self_scopes() -> str:
-    """Derive the observer's flood-allowed scopes from RemoteTerm's active flood scope.
-
-    When a regional flood scope is configured, that scope is reported.
-    When no flood scope restriction is active, wildcard '*' is reported
-    (all scopes are flood-allowed).
-    """
-    try:
-        from app.repository import AppSettingsRepository
-
-        app_settings = await AppSettingsRepository.get()
-        flood_scope = app_settings.flood_scope if app_settings else None
-    except Exception:
-        logger.debug("Could not resolve flood scope for neighbor self_scopes", exc_info=True)
-        return "*"
-
-    if not flood_scope or not isinstance(flood_scope, str) or not flood_scope.strip():
-        return "*"
-
-    normalized = normalize_self_scopes(flood_scope)
-    return normalized or "*"
 
 
 class CommunityNeighborReporter:
@@ -197,8 +180,6 @@ class CommunityNeighborReporter:
         self._cache_limit = max(1, cache_limit)
         self._cache: dict[str, NeighborCacheEntry] = {}
         self._modules: dict[str, CommunityNeighborModule] = {}
-        self._seen_observation_ids: set[object] = set()
-        self._seen_observation_order: list[object] = []
 
         self._transition_lock = asyncio.Lock()
         self._task: asyncio.Task[None] | None = None
@@ -213,13 +194,13 @@ class CommunityNeighborReporter:
         # handoff interval and replay them once the deadline exists.
         self._early_discovery_responses: list[dict[str, Any]] = []
         self._discovery_periodic = False
+        self._discovery_manual = False
         self._discovery_manual_scope = False
         self._discovery_target_ids: set[str] = set()
 
         self._scope_active = False
         self._scope_deadline: float | None = None
         self._scope_entries: list[ScopeQueryEntry] = []
-        self._queries_by_tag: dict[str, ScopeQueryEntry] = {}
         # A very fast zero-hop response can be logged before the companion
         # host reports MSG_SENT and reveals its request tag. Keep a bounded
         # overlay buffer so that race is retried as soon as the tag exists.
@@ -262,12 +243,12 @@ class CommunityNeighborReporter:
             self._discovery_deadline = None
             self._early_discovery_responses = []
             self._discovery_periodic = False
+            self._discovery_manual = False
             self._discovery_manual_scope = False
             self._discovery_target_ids.clear()
             self._scope_active = False
             self._scope_deadline = None
             self._scope_entries = []
-            self._queries_by_tag = {}
             self._early_scope_responses = []
             self._scope_target_ids.clear()
             self._scope_periodic = False
@@ -283,43 +264,14 @@ class CommunityNeighborReporter:
 
     # ── Passive cache population ───────────────────────────────────────
 
-    async def observe_raw_packet(self, data: dict[str, Any]) -> None:
-        """Adapt a fanout raw-packet event into the shared radio observer."""
-        raw_hex = data.get("data")
-        if not isinstance(raw_hex, str):
-            return
-        try:
-            raw = bytes.fromhex(raw_hex)
-        except ValueError:
-            return
-        await self.observe_packet(
-            raw,
-            timestamp=data.get("timestamp"),
-            measured_snr=data.get("snr"),
-            observation_id=data.get("observation_id"),
-        )
-
     async def observe_packet(
         self,
         raw: bytes,
         *,
         timestamp: object = None,
         measured_snr: object = None,
-        observation_id: object = None,
     ) -> None:
-        """Observe one raw RF packet for passive adverts or active responses.
-
-        ``packet_processor`` calls this before asynchronous fanout dispatch so
-        active response matching does not depend on a broker task being
-        scheduled promptly.  ``observe_raw_packet`` calls it too; the bounded
-        observation-id set makes that duplicate delivery harmless.
-        """
-        if observation_id is not None:
-            async with self._transition_lock:
-                if observation_id in self._seen_observation_ids:
-                    return
-                self._remember_observation_id(observation_id)
-
+        """Observe one raw RF packet for passive adverts or active responses."""
         envelope = parse_packet_envelope(raw)
         if envelope is None:
             return
@@ -420,13 +372,6 @@ class CommunityNeighborReporter:
             return None
         return public_key.hex().lower()
 
-    def _remember_observation_id(self, observation_id: object) -> None:
-        self._seen_observation_ids.add(observation_id)
-        self._seen_observation_order.append(observation_id)
-        while len(self._seen_observation_order) > 256:
-            expired = self._seen_observation_order.pop(0)
-            self._seen_observation_ids.discard(expired)
-
     # ── Manual operations ──────────────────────────────────────────────
 
     async def start_manual_discovery(self, config_id: str) -> dict[str, Any]:
@@ -436,6 +381,7 @@ class CommunityNeighborReporter:
             if self._scope_active:
                 return {"status": "active", "message": "A scope snapshot is already in progress"}
             if self._discovery_tag is not None:
+                self._discovery_manual = True
                 return self._refresh_status("joined")
 
         await self._begin_discovery(periodic=False, target_ids=set(self._modules))
@@ -443,8 +389,8 @@ class CommunityNeighborReporter:
 
     async def start_manual_snapshot(self, config_id: str) -> dict[str, Any]:
         """Publish a scope snapshot now, or queue it behind an active refresh."""
-        module = self._require_registered_module(config_id)
-        if not module.neighbor_publisher_connected:
+        self._require_registered_module(config_id)
+        if not self._has_connected_target(set(self._modules)):
             raise NeighborReporterError("Community MQTT bridge is not running")
 
         async with self._transition_lock:
@@ -459,6 +405,7 @@ class CommunityNeighborReporter:
                     "message": "Previous scope snapshot is still publishing",
                 }
             if self._discovery_tag is not None:
+                self._discovery_manual = True
                 self._discovery_manual_scope = True
                 self._discovery_target_ids.update(set(self._modules))
                 return self._refresh_status("queued")
@@ -497,6 +444,12 @@ class CommunityNeighborReporter:
         async with self._transition_lock:
             if self._discovery_tag is not None or self._scope_active:
                 return
+            if periodic and not self._scope_crypto_available():
+                self._last_publish_result = "failed"
+                self._schedule_next_periodic_cycle()
+                raise NeighborReporterError(
+                    "Periodic neighbor reporting requires the radio private key"
+                )
             tag = self._next_tag()
             self._discovery_tag = tag
             # Reserve the workflow while waiting for the shared radio lock,
@@ -505,13 +458,16 @@ class CommunityNeighborReporter:
             self._discovery_deadline = None
             self._early_discovery_responses = []
             self._discovery_periodic = periodic
+            self._discovery_manual = not periodic
             self._discovery_target_ids = set(target_ids)
             self._discovery_manual_scope = False
 
         try:
             from app.services.radio_runtime import radio_runtime
 
-            async with radio_runtime.radio_operation("community_neighbor_discovery") as mc:
+            async with radio_runtime.radio_operation(
+                "community_neighbor_discovery", pause_polling=True, suspend_auto_fetch=True
+            ) as mc:
                 subscription = mc.subscribe(
                     EventType.DISCOVER_RESPONSE, self._on_discovery_response
                 )
@@ -552,6 +508,7 @@ class CommunityNeighborReporter:
                     self._discovery_deadline = None
                     self._early_discovery_responses = []
                     self._discovery_periodic = False
+                    self._discovery_manual = False
                     self._discovery_manual_scope = False
                     self._discovery_target_ids.clear()
                     if periodic:
@@ -584,6 +541,7 @@ class CommunityNeighborReporter:
                 or isinstance(path_byte, bool)
                 or not isinstance(path_byte, int)
                 or not 0 <= path_byte <= 0xFF
+                or path_byte >> 6 == 3
                 or path_byte & 0x3F
             ):
                 return
@@ -640,7 +598,7 @@ class CommunityNeighborReporter:
         accept it only after authenticated decryption and an exact request-tag
         match.  Normal ACL traffic is merely observed, never intercepted.
         """
-        if route_type != 0x02 or hop_count != 0 or len(payload) < 4:
+        if route_type != 0x02 or hop_count != 0 or len(payload) < 20:
             return
 
         try:
@@ -751,16 +709,22 @@ class CommunityNeighborReporter:
                 return
             if self._publishing_snapshot:
                 if periodic:
-                    self._schedule_next_periodic_cycle()
+                    self._next_periodic_at = _monotonic()
                     return
                 raise NeighborReporterError("Previous scope snapshot is still publishing")
 
             eligible_targets = self._eligible_publish_target_ids(target_ids, include_manual=manual)
             if not self._has_connected_target(eligible_targets):
+                if manual:
+                    self._last_publish_result = "failed"
                 if periodic:
-                    self._schedule_next_periodic_cycle()
-                    return
-                raise NeighborReporterError("Community MQTT bridge is not running")
+                    # A periodic run remains due until a broker is available.
+                    # Do not postpone it for a full reporting interval because
+                    # the connection dropped during the discovery window.
+                    self._next_periodic_at = _monotonic()
+                if manual:
+                    raise NeighborReporterError("Community MQTT bridge is not running")
+                return
 
             # Packets may arrive before radio key export completes.  Once the
             # local identity is available, prune any such transient self-advert
@@ -778,6 +742,15 @@ class CommunityNeighborReporter:
                 for entry in self._cache.values()
                 if entry.heard_timestamp > 0
             ]
+            if entries and not self._scope_crypto_available():
+                self._last_publish_result = "failed"
+                if periodic:
+                    self._schedule_next_periodic_cycle()
+                if manual:
+                    raise NeighborReporterError(
+                        "Neighbor scope discovery requires the radio private key"
+                    )
+                return
             self._scope_active = True
             # Reserve entries before the radio lock is acquired so raw replies
             # can be matched as soon as their host-side tags arrive.  The
@@ -785,7 +758,6 @@ class CommunityNeighborReporter:
             # pass has handed every request to the radio.
             self._scope_deadline = None
             self._scope_entries = entries
-            self._queries_by_tag = {}
             self._early_scope_responses = []
             self._scope_periodic = periodic
             # Keep every enabled eligible slot in the frozen handoff.  A slot
@@ -802,7 +774,9 @@ class CommunityNeighborReporter:
         try:
             from app.services.radio_runtime import radio_runtime
 
-            async with radio_runtime.radio_operation("community_neighbor_scopes") as mc:
+            async with radio_runtime.radio_operation(
+                "community_neighbor_scopes", pause_polling=True, suspend_auto_fetch=True
+            ) as mc:
                 # The radio host protocol acknowledges command queueing one at
                 # a time.  Complete this one pass first; only then begin the
                 # shared 30-second response window, so waiting for the radio
@@ -820,23 +794,18 @@ class CommunityNeighborReporter:
                     if not isinstance(expected_ack, (bytes, bytearray)) or len(expected_ack) != 4:
                         entry.status = "send_failed"
                         continue
-                    tag = bytes(expected_ack).hex().lower()
-                    mapped = False
+                    entry.request_tag = bytes(expected_ack).hex().lower()
                     async with self._transition_lock:
-                        # Tags are firmware-generated and should be unique.  A
-                        # collision cannot safely identify a response, so expose
-                        # it as a send failure rather than misattribute data.
-                        if tag in self._queries_by_tag:
-                            entry.status = "send_failed"
-                        else:
-                            entry.request_tag = tag
-                            self._queries_by_tag[tag] = entry
-                            mapped = True
-                    if mapped:
-                        await self._replay_early_scope_responses()
-                        async with self._transition_lock:
-                            if not self._scope_active:
-                                return
+                        if not self._scope_active:
+                            return
+                    # A tag only has to identify the request for this peer. The
+                    # authenticated sender identity disambiguates equal tags
+                    # used by different neighbors, so no global tag map is
+                    # needed.
+                    await self._replay_early_scope_responses()
+                    async with self._transition_lock:
+                        if not self._scope_active:
+                            return
 
                 async with self._transition_lock:
                     if self._scope_active and any(entry.status == "pending" for entry in entries):
@@ -893,7 +862,6 @@ class CommunityNeighborReporter:
             self._scope_active = False
             self._scope_deadline = None
             self._scope_entries = []
-            self._queries_by_tag = {}
             self._early_scope_responses = []
             self._scope_target_ids.clear()
             self._scope_periodic = False
@@ -901,32 +869,32 @@ class CommunityNeighborReporter:
             if periodic:
                 self._schedule_next_periodic_cycle()
 
-        serialized = await self._build_snapshot(entries, target_ids)
-        if serialized is None:
-            async with self._transition_lock:
-                self._last_publish_result = "failed"
-                self._publishing_snapshot = False
-            return
-
         accepted = False
-        for config_id in sorted(target_ids):
-            module = self._modules.get(config_id)
-            if module is None or not module.neighbor_publisher_connected:
-                continue
-            try:
-                accepted = (await module.publish_neighbor_snapshot(serialized)) or accepted
-            except Exception:
-                logger.warning("Community neighbor publish failed for %s", config_id, exc_info=True)
+        try:
+            serialized = self._build_snapshot(entries, target_ids)
+            if serialized is None:
+                return
 
-        async with self._transition_lock:
-            self._last_publish_result = "ok" if accepted else "failed"
-            self._publishing_snapshot = False
+            for config_id in sorted(target_ids):
+                module = self._modules.get(config_id)
+                if module is None or not module.neighbor_publisher_connected:
+                    continue
+                try:
+                    accepted = (await module.publish_neighbor_snapshot(serialized)) or accepted
+                except Exception:
+                    logger.warning(
+                        "Community neighbor publish failed for %s", config_id, exc_info=True
+                    )
+        except Exception:
+            logger.exception("Community neighbor snapshot handoff failed")
+        finally:
+            async with self._transition_lock:
+                self._last_publish_result = "ok" if accepted else "failed"
+                self._publishing_snapshot = False
 
     # ── Snapshot construction ──────────────────────────────────────────
 
-    async def _build_snapshot(
-        self, entries: list[ScopeQueryEntry], target_ids: set[str]
-    ) -> str | None:
+    def _build_snapshot(self, entries: list[ScopeQueryEntry], target_ids: set[str]) -> str | None:
         try:
             from app.keystore import get_public_key
             from app.services.radio_runtime import radio_runtime
@@ -938,12 +906,13 @@ class CommunityNeighborReporter:
                 )
                 return None
 
-            origin = ""
-            if radio_runtime.meshcore and radio_runtime.meshcore.self_info:
-                origin = str(radio_runtime.meshcore.self_info.get("name") or "").strip()
-            origin = normalize_neighbor_origin(origin) or "MeshCore Device"
-
-            self_scopes = await _derive_self_scopes()
+            metadata_module = self._metadata_module(target_ids)
+            config = metadata_module.config if metadata_module is not None else {}
+            origin = normalize_neighbor_origin(config.get("neighbor_origin"))
+            if not origin and radio_runtime.meshcore and radio_runtime.meshcore.self_info:
+                origin = normalize_neighbor_origin(radio_runtime.meshcore.self_info.get("name"))
+            origin = origin or "MeshCore Device"
+            self_scopes = normalize_self_scopes(config.get("neighbor_self_scopes", ""))
         except (ValueError, TypeError):
             logger.warning(
                 "Cannot build Community MQTT neighbor snapshot: invalid local scope config",
@@ -999,9 +968,9 @@ class CommunityNeighborReporter:
     def _serialize_snapshot(snapshot: dict[str, Any]) -> str | None:
         try:
             serialized = json.dumps(snapshot, ensure_ascii=False, separators=(",", ":"))
-        except (TypeError, ValueError):
+            encoded = serialized.encode("utf-8")
+        except (TypeError, ValueError, UnicodeError):
             return None
-        encoded = serialized.encode("utf-8")
         # The fixed-buffer interoperability profile reserves no byte for a
         # document that reaches the buffer boundary: accepted JSON must be
         # strictly smaller than the 10,240-byte snapshot buffer.
@@ -1009,37 +978,70 @@ class CommunityNeighborReporter:
             return None
         return serialized
 
+    def _metadata_module(self, target_ids: set[str]) -> CommunityNeighborModule | None:
+        for config_id in sorted(target_ids):
+            module = self._modules.get(config_id)
+            if module is not None:
+                return module
+        for config_id in sorted(self._modules):
+            return self._modules[config_id]
+        return None
+
+    @staticmethod
+    def _scope_crypto_available() -> bool:
+        """Whether host-side response authentication can be performed."""
+        try:
+            from app.keystore import get_private_key, get_public_key
+
+            private_key = get_private_key()
+            public_key = get_public_key()
+        except Exception:
+            logger.debug("Could not resolve local keys for neighbor scope discovery", exc_info=True)
+            return False
+        return (
+            isinstance(private_key, bytes)
+            and len(private_key) == 64
+            and isinstance(public_key, bytes)
+            and len(public_key) == 32
+        )
+
     # ── Scheduling ─────────────────────────────────────────────────────
 
     async def _run(self) -> None:
-        try:
-            while self._modules:
+        while self._modules:
+            try:
                 await self._tick()
-                await asyncio.sleep(0.5)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception("Community MQTT neighbor reporter stopped unexpectedly")
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Community MQTT neighbor reporter tick failed")
+            await asyncio.sleep(0.5)
 
     async def _tick(self) -> None:
         now = _monotonic()
         start_scope: tuple[set[str], bool, bool] | None = None
         start_periodic = False
+        scope_timed_out = False
         async with self._transition_lock:
             periodic_ids = self._periodic_target_ids()
             if not periodic_ids:
                 self._next_periodic_at = None
-                if (
-                    self._discovery_tag is not None
-                    and self._discovery_periodic
-                    and not self._discovery_manual_scope
-                ):
-                    self._clear_discovery_subscription()
-                    self._discovery_tag = None
-                    self._discovery_deadline = None
-                    self._early_discovery_responses = []
-                    self._discovery_periodic = False
-                    self._discovery_target_ids.clear()
+                if self._discovery_tag is not None and self._discovery_periodic:
+                    if self._discovery_manual:
+                        # Keep a manually owned discovery window alive, but
+                        # remove periodic ownership so disabling reporting does
+                        # not turn a manual discover-only request into a scope
+                        # query and MQTT publication at expiry.
+                        self._discovery_periodic = False
+                    else:
+                        self._clear_discovery_subscription()
+                        self._discovery_tag = None
+                        self._discovery_deadline = None
+                        self._early_discovery_responses = []
+                        self._discovery_periodic = False
+                        self._discovery_manual = False
+                        self._discovery_manual_scope = False
+                        self._discovery_target_ids.clear()
 
             if (
                 self._discovery_tag is not None
@@ -1054,6 +1056,7 @@ class CommunityNeighborReporter:
                 self._discovery_deadline = None
                 self._early_discovery_responses = []
                 self._discovery_periodic = False
+                self._discovery_manual = False
                 self._discovery_manual_scope = False
                 self._discovery_target_ids.clear()
                 if manual_scope or periodic:
@@ -1074,17 +1077,15 @@ class CommunityNeighborReporter:
                 self._discovery_periodic = True
                 self._discovery_target_ids.update(periodic_ids)
 
-            if (
+            scope_timed_out = (
                 self._scope_active
                 and self._scope_deadline is not None
                 and now >= self._scope_deadline
-            ):
-                # Finish outside the lock; it reacquires it and atomically
-                # marks all still-pending entries as timeouts.
-                pass
-            elif (
+            )
+            if not scope_timed_out and (
                 self._discovery_tag is None
                 and not self._scope_active
+                and not self._publishing_snapshot
                 and periodic_ids
                 and self._next_periodic_at is not None
                 and now >= self._next_periodic_at
@@ -1092,7 +1093,7 @@ class CommunityNeighborReporter:
             ):
                 start_periodic = True
 
-        if self._scope_active and self._scope_deadline is not None and now >= self._scope_deadline:
+        if scope_timed_out:
             await self._finish_scope_queries(timeout=True)
             return
         if start_scope is not None:

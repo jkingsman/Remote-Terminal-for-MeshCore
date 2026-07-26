@@ -346,11 +346,9 @@ async def process_raw_packet(
         "sender": None,
     }
 
-    # Community MQTT neighbor reporting has a small temporary decryption
-    # overlay for anonymous region responses.  Feed its radio observations
-    # directly from the primary RX pipeline instead of waiting for the
-    # asynchronous fanout dispatch; this preserves very fast zero-hop replies
-    # and records passive adverts even while an MQTT client reconnects.
+    # Feed neighbor radio observations directly from the primary RX pipeline.
+    # Scope responses must be matched before asynchronous fanout dispatch, and
+    # passive adverts must remain observable while MQTT clients reconnect.
     if payload_type in (PayloadType.ADVERT, PayloadType.RESPONSE):
         try:
             from app.fanout.community_neighbors import community_neighbor_reporter
@@ -359,7 +357,6 @@ async def process_raw_packet(
                 raw_bytes,
                 timestamp=ts,
                 measured_snr=snr,
-                observation_id=observation_id,
             )
         except Exception:
             logger.debug("Community neighbor raw observation failed", exc_info=True)

@@ -34,6 +34,7 @@ OUR_PRIVATE_KEY = bytes.fromhex(
     "77ACADDB84438514022BDB0FC3140C2501859BE1772AC7B8C7E41DC0F40490A1"
 )
 PEER_PUBLIC_KEY = bytes.fromhex("A1B2C3D3BA9F5FA8705B9845FE11CC6F01D1D49CAAF4D122AC7121663C5BEEC7")
+PEER_TWO_PUBLIC_KEY = derive_public_key(bytes(range(64)))
 OUR_PUBLIC_KEY = derive_public_key(OUR_PRIVATE_KEY)
 
 
@@ -49,14 +50,16 @@ class _Module:
         return True
 
 
-def _response_packet(*, tag: bytes, scopes: bytes) -> bytes:
+def _response_packet(
+    *, tag: bytes, scopes: bytes, peer_public_key: bytes = PEER_PUBLIC_KEY
+) -> bytes:
     """Build one authenticated direct PAYLOAD_TYPE_RESPONSE packet."""
     plaintext = tag + (1_700_000_000).to_bytes(4, "little") + scopes
     plaintext += bytes((-len(plaintext)) % 16)
-    secret = derive_shared_secret(OUR_PRIVATE_KEY, PEER_PUBLIC_KEY)
+    secret = derive_shared_secret(OUR_PRIVATE_KEY, peer_public_key)
     ciphertext = AES.new(secret[:16], AES.MODE_ECB).encrypt(plaintext)
     mac = hmac.new(secret, ciphertext, sha256).digest()[:2]
-    payload = bytes((OUR_PUBLIC_KEY[0], PEER_PUBLIC_KEY[0])) + mac + ciphertext
+    payload = bytes((OUR_PUBLIC_KEY[0], peer_public_key[0])) + mac + ciphertext
     # Header: direct route + response payload type, followed by zero hops.
     return bytes(((int(PayloadType.RESPONSE) << 2) | 0x02, 0)) + payload
 
@@ -130,7 +133,6 @@ class TestScopeResponseOverlay:
         )
         reporter._scope_active = True
         reporter._scope_entries = [entry]
-        reporter._queries_by_tag[entry.request_tag] = entry
 
         with (
             patch("app.keystore.get_private_key", return_value=OUR_PRIVATE_KEY),
@@ -140,6 +142,48 @@ class TestScopeResponseOverlay:
 
         assert entry.status == "responded"
         assert entry.scopes == "*,Europe"
+
+    @pytest.mark.asyncio
+    async def test_concurrent_batch_allows_same_tag_for_different_peers(self):
+        reporter = CommunityNeighborReporter()
+        first_tag = bytes.fromhex("01020304")
+        second_tag = first_tag
+        entries = [
+            ScopeQueryEntry(
+                public_key=PEER_PUBLIC_KEY.hex(),
+                heard_timestamp=100,
+                snr_q4=8,
+                request_tag=first_tag.hex(),
+            ),
+            ScopeQueryEntry(
+                public_key=PEER_TWO_PUBLIC_KEY.hex(),
+                heard_timestamp=101,
+                snr_q4=4,
+                request_tag=second_tag.hex(),
+            ),
+        ]
+        reporter._scope_active = True
+        reporter._scope_entries = entries
+
+        with (
+            patch("app.keystore.get_private_key", return_value=OUR_PRIVATE_KEY),
+            patch("app.keystore.get_public_key", return_value=OUR_PUBLIC_KEY),
+        ):
+            await reporter.observe_packet(
+                _response_packet(tag=first_tag, scopes=b"Europe")
+            )
+            await reporter.observe_packet(
+                _response_packet(
+                    tag=second_tag,
+                    scopes=b"Sweden",
+                    peer_public_key=PEER_TWO_PUBLIC_KEY,
+                )
+            )
+
+        assert [(entry.status, entry.scopes) for entry in entries] == [
+            ("responded", "Europe"),
+            ("responded", "Sweden"),
+        ]
 
     @pytest.mark.asyncio
     async def test_wrong_tag_does_not_complete_overlay_entry(self):
@@ -152,7 +196,6 @@ class TestScopeResponseOverlay:
         )
         reporter._scope_active = True
         reporter._scope_entries = [entry]
-        reporter._queries_by_tag[entry.request_tag] = entry
 
         with (
             patch("app.keystore.get_private_key", return_value=OUR_PRIVATE_KEY),
@@ -184,10 +227,12 @@ class TestSnapshotContract:
     def test_self_scope_normalization_preserves_wildcard_and_dollar(self):
         assert normalize_self_scopes(" #*, #$private, Sweden ") == "*,$private,Sweden"
 
-    @pytest.mark.asyncio
-    async def test_snapshot_orders_by_age_then_snr_then_key(self, monkeypatch):
+    def test_snapshot_orders_by_age_then_snr_then_key(self, monkeypatch):
         reporter = CommunityNeighborReporter()
-        reporter._modules["a"] = _Module("a", {})
+        reporter._modules["a"] = _Module(
+            "a",
+            {"neighbor_origin": "' Observer '", "neighbor_self_scopes": "#*, #Sweden"},
+        )
         entries = [
             ScopeQueryEntry("CC" * 32, heard_timestamp=90, snr_q4=4, status="timeout"),
             ScopeQueryEntry("BB" * 32, heard_timestamp=95, snr_q4=4, status="send_failed"),
@@ -197,18 +242,12 @@ class TestSnapshotContract:
         ]
         monkeypatch.setattr("app.fanout.community_neighbors._wall_time", lambda: 100)
 
-        with (
-            patch("app.keystore.get_public_key", return_value=OUR_PUBLIC_KEY),
-            patch(
-                "app.fanout.community_neighbors._derive_self_scopes",
-                new=AsyncMock(return_value="*,Sweden"),
-            ),
-        ):
-            serialized = await reporter._build_snapshot(entries, {"a"})
+        with patch("app.keystore.get_public_key", return_value=OUR_PUBLIC_KEY):
+            serialized = reporter._build_snapshot(entries, {"a"})
 
         assert serialized is not None
         snapshot = json.loads(serialized)
-        assert snapshot["origin"] == "MeshCore Device"
+        assert snapshot["origin"] == "Observer"
         assert snapshot["origin_id"] == OUR_PUBLIC_KEY.hex().upper()
         assert snapshot["self"] == {"scopes": "*,Sweden"}
         assert [neighbor["pubkey"] for neighbor in snapshot["neighbors"]] == [
@@ -217,20 +256,13 @@ class TestSnapshotContract:
             "CC" * 32,
         ]
 
-    @pytest.mark.asyncio
-    async def test_snapshot_never_includes_observer_identity(self, monkeypatch):
+    def test_snapshot_never_includes_observer_identity(self, monkeypatch):
         reporter = CommunityNeighborReporter()
         reporter._modules["a"] = _Module("a", {})
         monkeypatch.setattr("app.fanout.community_neighbors._wall_time", lambda: 100)
 
-        with (
-            patch("app.keystore.get_public_key", return_value=OUR_PUBLIC_KEY),
-            patch(
-                "app.fanout.community_neighbors._derive_self_scopes",
-                new=AsyncMock(return_value="*"),
-            ),
-        ):
-            serialized = await reporter._build_snapshot(
+        with patch("app.keystore.get_public_key", return_value=OUR_PUBLIC_KEY):
+            serialized = reporter._build_snapshot(
                 [
                     ScopeQueryEntry(
                         OUR_PUBLIC_KEY.hex(),
@@ -322,6 +354,27 @@ class TestMqttNeighborDelivery:
     def test_neighbor_template_requires_neighbors_suffix(self):
         with pytest.raises(ValueError, match="must end with /neighbors or /\\{TYPE\\}"):
             _render_neighbor_topic("mesh/{iata}/{device}/packets", iata="STO", public_key="AB" * 32)
+
+    def test_neighbor_template_rejects_placeholder_formatting(self):
+        with pytest.raises(ValueError, match="do not support formatting"):
+            _render_neighbor_topic(
+                "mesh/{iata}/{device:.12}/neighbors",
+                iata="STO",
+                public_key="AB" * 32,
+            )
+
+    def test_neighbor_template_preserves_escaped_literal_braces(self):
+        assert (
+            _render_neighbor_topic(
+                "mesh/{{literal}}/{type}", iata="STO", public_key="AB" * 32
+            )
+            == "mesh/{literal}/neighbors"
+        )
+
+    @pytest.mark.parametrize("template", ["mesh/+/neighbors", "mesh/#/neighbors"])
+    def test_neighbor_template_rejects_publish_wildcards(self, template):
+        with pytest.raises(ValueError, match="cannot contain MQTT wildcards"):
+            _render_neighbor_topic(template, iata="STO", public_key="AB" * 32)
 
 
 class TestNeighborConfigValidation:

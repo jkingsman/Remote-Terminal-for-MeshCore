@@ -31,59 +31,60 @@ _NEIGHBOR_TOPIC_TEMPLATE_FIELD_CANONICAL = {
 }
 
 
-def _normalize_topic_template(topic_template: str) -> str:
-    """Normalize packet topic template fields to canonical uppercase placeholders."""
-    template = topic_template.strip() or _DEFAULT_PACKET_TOPIC_TEMPLATE
+def _normalize_template(
+    topic_template: str,
+    *,
+    default: str,
+    fields: dict[str, str],
+    label: str,
+    required_suffixes: tuple[str, ...] = (),
+) -> str:
+    """Normalize one topic template using a shared placeholder contract."""
+    template = topic_template.strip() or default
     parts: list[str] = []
-    try:
-        parsed = string.Formatter().parse(template)
-        for literal_text, field_name, format_spec, conversion in parsed:
-            parts.append(literal_text)
-            if field_name is None:
-                continue
-            normalized_field = _TOPIC_TEMPLATE_FIELD_CANONICAL.get(field_name.lower())
-            if normalized_field is None:
-                raise ValueError(f"Unsupported topic template field(s): {field_name}")
-            replacement = ["{", normalized_field]
-            if conversion:
-                replacement.extend(["!", conversion])
-            if format_spec:
-                replacement.extend([":", format_spec])
-            replacement.append("}")
-            parts.append("".join(replacement))
-    except ValueError:
-        raise
+    for literal_text, field_name, format_spec, conversion in string.Formatter().parse(template):
+        # Formatter.parse() unescapes doubled braces in literal text. Escape
+        # them again so the normalized template can safely be formatted later.
+        parts.append(literal_text.replace("{", "{{").replace("}", "}}"))
+        if field_name is None:
+            continue
+        normalized_field = fields.get(field_name.lower())
+        if normalized_field is None:
+            raise ValueError(f"Unsupported {label} topic template field(s): {field_name}")
+        if conversion or format_spec:
+            raise ValueError(f"{label.capitalize()} topic placeholders do not support formatting")
+        parts.append(f"{{{normalized_field}}}")
 
-    return "".join(parts)
+    normalized = "".join(parts)
+    if any(ord(char) < 32 for char in normalized):
+        raise ValueError(f"{label.capitalize()} topic templates cannot contain control characters")
+    if "+" in normalized or "#" in normalized:
+        raise ValueError(f"{label.capitalize()} publish topics cannot contain MQTT wildcards")
+    if required_suffixes and not normalized.endswith(required_suffixes):
+        suffix_text = " or ".join(required_suffixes)
+        raise ValueError(f"{label.capitalize()} topic templates must end with {suffix_text}")
+    return normalized
+
+
+def _normalize_topic_template(topic_template: str) -> str:
+    """Normalize packet topic template fields to canonical placeholders."""
+    return _normalize_template(
+        topic_template,
+        default=_DEFAULT_PACKET_TOPIC_TEMPLATE,
+        fields=_TOPIC_TEMPLATE_FIELD_CANONICAL,
+        label="packet",
+    )
 
 
 def _normalize_neighbor_topic_template(topic_template: str) -> str:
     """Normalize neighbor topic fields, including the ``{TYPE}`` suffix hook."""
-    template = topic_template.strip() or _DEFAULT_NEIGHBOR_TOPIC_TEMPLATE
-    parts: list[str] = []
-    try:
-        parsed = string.Formatter().parse(template)
-        for literal_text, field_name, format_spec, conversion in parsed:
-            parts.append(literal_text)
-            if field_name is None:
-                continue
-            normalized_field = _NEIGHBOR_TOPIC_TEMPLATE_FIELD_CANONICAL.get(field_name.lower())
-            if normalized_field is None:
-                raise ValueError(f"Unsupported neighbor topic template field(s): {field_name}")
-            replacement = ["{", normalized_field]
-            if conversion:
-                replacement.extend(["!", conversion])
-            if format_spec:
-                replacement.extend([":", format_spec])
-            replacement.append("}")
-            parts.append("".join(replacement))
-    except ValueError:
-        raise
-
-    normalized = "".join(parts)
-    if not (normalized.endswith("/neighbors") or normalized.endswith("/{TYPE}")):
-        raise ValueError("Neighbor topic templates must end with /neighbors or /{TYPE}")
-    return normalized
+    return _normalize_template(
+        topic_template,
+        default=_DEFAULT_NEIGHBOR_TOPIC_TEMPLATE,
+        fields=_NEIGHBOR_TOPIC_TEMPLATE_FIELD_CANONICAL,
+        label="neighbor",
+        required_suffixes=("/neighbors", "/{TYPE}"),
+    )
 
 
 def _config_to_settings(config: dict) -> SimpleNamespace:
@@ -139,9 +140,6 @@ class MqttCommunityModule(FanoutModule):
         pass
 
     async def on_raw(self, data: dict) -> None:
-        # Neighbor cache observations are radio facts, not MQTT delivery
-        # attempts.  Keep recording them while this broker reconnects.
-        await community_neighbor_reporter.observe_raw_packet(data)
         if not self._publisher.connected or self._publisher._settings is None:
             return
         await _publish_community_packet(self._publisher, self.config, data)

@@ -4,7 +4,6 @@ import ast
 import inspect
 import logging
 import re
-import string
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -34,89 +33,30 @@ _DEFAULT_COMMUNITY_MQTT_BROKER_HOST = "mqtt-us-v1.letsmesh.net"
 _DEFAULT_COMMUNITY_MQTT_BROKER_PORT = 443
 _DEFAULT_COMMUNITY_MQTT_TRANSPORT = "websockets"
 _DEFAULT_COMMUNITY_MQTT_AUTH_MODE = "token"
-_COMMUNITY_MQTT_TEMPLATE_FIELD_CANONICAL = {
-    "iata": "IATA",
-    "public_key": "PUBLIC_KEY",
-}
-_COMMUNITY_NEIGHBOR_TEMPLATE_FIELD_CANONICAL = {
-    **_COMMUNITY_MQTT_TEMPLATE_FIELD_CANONICAL,
-    "device": "PUBLIC_KEY",
-    "type": "TYPE",
-}
 _ALLOWED_COMMUNITY_MQTT_TRANSPORTS = {"tcp", "websockets"}
 _ALLOWED_COMMUNITY_MQTT_AUTH_MODES = {"token", "password", "none"}
 
 
 def _normalize_community_topic_template(topic_template: str) -> str:
-    """Normalize Community MQTT topic template placeholders to canonical uppercase form."""
-    template = topic_template.strip() or _DEFAULT_COMMUNITY_MQTT_TOPIC_TEMPLATE
-    parts: list[str] = []
+    """Validate packet topic templates through the runtime renderer contract."""
+    from app.fanout.mqtt_community import _normalize_topic_template
+
     try:
-        parsed = string.Formatter().parse(template)
-        for literal_text, field_name, format_spec, conversion in parsed:
-            parts.append(literal_text)
-            if field_name is None:
-                continue
-            normalized_field = _COMMUNITY_MQTT_TEMPLATE_FIELD_CANONICAL.get(field_name.lower())
-            if normalized_field is None:
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        f"topic_template may only use {{IATA}} and {{PUBLIC_KEY}}; got {field_name}"
-                    ),
-                )
-            replacement = ["{", normalized_field]
-            if conversion:
-                replacement.extend(["!", conversion])
-            if format_spec:
-                replacement.extend([":", format_spec])
-            replacement.append("}")
-            parts.append("".join(replacement))
+        return _normalize_topic_template(topic_template)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"Invalid topic_template: {exc}") from None
 
-    return "".join(parts)
-
 
 def _normalize_community_neighbor_topic_template(topic_template: str) -> str:
-    """Normalize Community MQTT neighbor topic fields including ``{TYPE}``."""
-    template = topic_template.strip() or _DEFAULT_COMMUNITY_NEIGHBOR_TOPIC_TEMPLATE
-    parts: list[str] = []
+    """Validate neighbor topic templates through the runtime renderer contract."""
+    from app.fanout.mqtt_community import _normalize_neighbor_topic_template
+
     try:
-        parsed = string.Formatter().parse(template)
-        for literal_text, field_name, format_spec, conversion in parsed:
-            parts.append(literal_text)
-            if field_name is None:
-                continue
-            normalized_field = _COMMUNITY_NEIGHBOR_TEMPLATE_FIELD_CANONICAL.get(field_name.lower())
-            if normalized_field is None:
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        "neighbor_topic_template may only use {IATA}, {PUBLIC_KEY}, "
-                        "{DEVICE}, and {TYPE}; got "
-                        f"{field_name}"
-                    ),
-                )
-            replacement = ["{", normalized_field]
-            if conversion:
-                replacement.extend(["!", conversion])
-            if format_spec:
-                replacement.extend([":", format_spec])
-            replacement.append("}")
-            parts.append("".join(replacement))
+        return _normalize_neighbor_topic_template(topic_template)
     except ValueError as exc:
         raise HTTPException(
             status_code=400, detail=f"Invalid neighbor_topic_template: {exc}"
         ) from None
-
-    normalized = "".join(parts)
-    if not (normalized.endswith("/neighbors") or normalized.endswith("/{TYPE}")):
-        raise HTTPException(
-            status_code=400,
-            detail="neighbor_topic_template must end with /neighbors or /{TYPE}",
-        )
-    return normalized
 
 
 class FanoutConfigCreate(BaseModel):
@@ -209,7 +149,10 @@ def _validate_mqtt_community_config(config: dict) -> None:
     token_audience = str(config.get("token_audience", "")).strip()
     config["token_audience"] = token_audience
 
-    iata = config.get("iata", "").upper().strip()
+    raw_iata = config.get("iata", "")
+    if not isinstance(raw_iata, str):
+        raise HTTPException(status_code=400, detail="IATA code must be a string")
+    iata = raw_iata.upper().strip()
     if not iata or not _IATA_RE.fullmatch(iata):
         raise HTTPException(
             status_code=400,
