@@ -452,18 +452,14 @@ class TestScopeQueryPhase:
             patch("app.keystore.get_public_key", return_value=OUR_PUBLIC_KEY),
             pytest.raises(NeighborReporterError, match="requires the radio private key"),
         ):
-            await reporter._begin_scope_queries(
-                target_ids={"x"}, periodic=False, manual=True
-            )
+            await reporter._begin_scope_queries(target_ids={"x"}, periodic=False, manual=True)
 
         assert reporter._scope_active is False
 
     @pytest.mark.asyncio
     async def test_periodic_scope_query_defers_when_private_key_is_missing(self):
         reporter = CommunityNeighborReporter()
-        reporter._modules["x"] = _Module(
-            "x", {"neighbor_reporting_enabled": True}, connected=True
-        )
+        reporter._modules["x"] = _Module("x", {"neighbor_reporting_enabled": True}, connected=True)
         await reporter.put_neighbor(
             "aa" * 32, advert_timestamp=1, measured_snr=1, heard_timestamp=10
         )
@@ -472,9 +468,7 @@ class TestScopeQueryPhase:
             patch("app.keystore.get_private_key", return_value=None),
             patch("app.keystore.get_public_key", return_value=OUR_PUBLIC_KEY),
         ):
-            await reporter._begin_scope_queries(
-                target_ids={"x"}, periodic=True, manual=False
-            )
+            await reporter._begin_scope_queries(target_ids={"x"}, periodic=True, manual=False)
 
         assert reporter._scope_active is False
         assert reporter._last_publish_result == "failed"
@@ -1030,9 +1024,7 @@ class TestScheduling:
     @pytest.mark.asyncio
     async def test_disabling_periodic_does_not_cancel_manual_owner(self):
         reporter = CommunityNeighborReporter()
-        reporter._modules["a"] = _Module(
-            "a", {"neighbor_reporting_enabled": False}
-        )
+        reporter._modules["a"] = _Module("a", {"neighbor_reporting_enabled": False})
         reporter._discovery_tag = 42
         reporter._discovery_deadline = 999999999.0
         reporter._discovery_periodic = True
@@ -1047,9 +1039,7 @@ class TestScheduling:
     @pytest.mark.asyncio
     async def test_disabling_periodic_keeps_manual_scope_ownership(self):
         reporter = CommunityNeighborReporter()
-        reporter._modules["a"] = _Module(
-            "a", {"neighbor_reporting_enabled": False}
-        )
+        reporter._modules["a"] = _Module("a", {"neighbor_reporting_enabled": False})
         reporter._discovery_tag = 42
         reporter._discovery_deadline = 999999999.0
         reporter._discovery_periodic = True
@@ -1064,9 +1054,7 @@ class TestScheduling:
     @pytest.mark.asyncio
     async def test_disabling_periodic_cancels_pure_periodic_refresh(self):
         reporter = CommunityNeighborReporter()
-        reporter._modules["a"] = _Module(
-            "a", {"neighbor_reporting_enabled": False}
-        )
+        reporter._modules["a"] = _Module("a", {"neighbor_reporting_enabled": False})
         reporter._discovery_tag = 42
         reporter._discovery_deadline = 999999999.0
         reporter._discovery_periodic = True
@@ -1241,9 +1229,7 @@ class TestSharedCoordinator:
         reporter._publishing_snapshot = True
         monkeypatch.setattr("app.fanout.community_neighbors._monotonic", lambda: 122.0)
 
-        await reporter._begin_scope_queries(
-            target_ids={"on"}, periodic=True, manual=False
-        )
+        await reporter._begin_scope_queries(target_ids={"on"}, periodic=True, manual=False)
 
         assert reporter._scope_active is False
         assert reporter._next_periodic_at == 122.0
@@ -1256,9 +1242,7 @@ class TestSharedCoordinator:
         )
         monkeypatch.setattr("app.fanout.community_neighbors._monotonic", lambda: 123.0)
 
-        await reporter._begin_scope_queries(
-            target_ids={"off"}, periodic=True, manual=False
-        )
+        await reporter._begin_scope_queries(target_ids={"off"}, periodic=True, manual=False)
 
         assert reporter._scope_active is False
         assert reporter._next_periodic_at == 123.0

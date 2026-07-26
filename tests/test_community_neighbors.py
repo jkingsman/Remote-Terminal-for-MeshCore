@@ -169,9 +169,7 @@ class TestScopeResponseOverlay:
             patch("app.keystore.get_private_key", return_value=OUR_PRIVATE_KEY),
             patch("app.keystore.get_public_key", return_value=OUR_PUBLIC_KEY),
         ):
-            await reporter.observe_packet(
-                _response_packet(tag=first_tag, scopes=b"Europe")
-            )
+            await reporter.observe_packet(_response_packet(tag=first_tag, scopes=b"Europe"))
             await reporter.observe_packet(
                 _response_packet(
                     tag=second_tag,
@@ -365,9 +363,7 @@ class TestMqttNeighborDelivery:
 
     def test_neighbor_template_preserves_escaped_literal_braces(self):
         assert (
-            _render_neighbor_topic(
-                "mesh/{{literal}}/{type}", iata="STO", public_key="AB" * 32
-            )
+            _render_neighbor_topic("mesh/{{literal}}/{type}", iata="STO", public_key="AB" * 32)
             == "mesh/{literal}/neighbors"
         )
 
