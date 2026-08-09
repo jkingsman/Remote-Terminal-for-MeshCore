@@ -114,6 +114,9 @@ beforeEach(() => {
     auto_resend_channel: false,
     telemetry_interval_hours: 8,
     telemetry_routed_hourly: false,
+    ollama_base_url: 'http://localhost:11434',
+    ollama_model: 'phi3:mini',
+    ollama_enabled: true,
   });
   mockedApi.getRadioConfig.mockResolvedValue({
     public_key: 'aa'.repeat(32),
@@ -1157,6 +1160,9 @@ describe('SettingsFanoutSection', () => {
       auto_resend_channel: false,
       telemetry_interval_hours: 8,
       telemetry_routed_hourly: false,
+      ollama_base_url: 'http://localhost:11434',
+      ollama_model: 'phi3:mini',
+      ollama_enabled: true,
     });
 
     renderSection();

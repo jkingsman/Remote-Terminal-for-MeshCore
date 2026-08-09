@@ -393,6 +393,9 @@ export interface AppSettings {
   auto_resend_channel: boolean;
   telemetry_interval_hours: number;
   telemetry_routed_hourly: boolean;
+  ollama_base_url: string;
+  ollama_model: string;
+  ollama_enabled: boolean;
 }
 
 export interface AppSettingsUpdate {
@@ -407,6 +410,16 @@ export interface AppSettingsUpdate {
   discovery_blocked_types?: number[];
   telemetry_interval_hours?: number;
   telemetry_routed_hourly?: boolean;
+  ollama_base_url?: string;
+  ollama_model?: string;
+  ollama_enabled?: boolean;
+}
+
+export interface ChannelUnreadSummary {
+  summary: string | null;
+  message_count: number;
+  skipped: boolean;
+  reason: string | null;
 }
 
 export interface TelemetrySchedule {

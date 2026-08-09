@@ -1054,6 +1054,39 @@ class AppSettings(BaseModel):
             "are automatically byte-perfect resent once (within the 30-second dedup window)"
         ),
     )
+    ollama_base_url: str = Field(
+        default="http://localhost:11434",
+        description="Base URL for a local Ollama server used to summarize unread channel messages",
+    )
+    ollama_model: str = Field(
+        default="phi3:mini",
+        description="Ollama model name for unread channel summaries",
+    )
+    ollama_enabled: bool = Field(
+        default=True,
+        description="When enabled, opening a channel with unreads shows an Ollama summary banner",
+    )
+
+
+class ChannelUnreadSummaryRequest(BaseModel):
+    after: int | None = Field(
+        default=None,
+        description=(
+            "Only summarize channel messages with received_at greater than this Unix timestamp. "
+            "Pass the channel's last_read_at from before mark-read so the summary survives "
+            "the open-channel race."
+        ),
+    )
+
+
+class ChannelUnreadSummaryResponse(BaseModel):
+    summary: str | None = Field(default=None, description="Generated summary text when available")
+    message_count: int = Field(description="Number of unread messages considered")
+    skipped: bool = Field(
+        default=False,
+        description="True when summarization was skipped (disabled, no messages, etc.)",
+    )
+    reason: str | None = Field(default=None, description="Why summarization was skipped or failed")
 
 
 class BusyChannel(BaseModel):

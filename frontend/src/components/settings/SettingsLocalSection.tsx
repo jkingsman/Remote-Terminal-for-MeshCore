@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { ChevronRight, Logs, MessageSquare, Send, Settings, X } from 'lucide-react';
 import { toast } from '../ui/sonner';
 import { usePush } from '../../contexts/PushSubscriptionContext';
-import type { Channel, Contact } from '../../types';
+import type { AppSettings, AppSettingsUpdate, Channel, Contact } from '../../types';
 import { getContactDisplayName } from '../../utils/pubkey';
 import { Button } from '../ui/button';
 import { Checkbox } from '../ui/checkbox';
@@ -226,11 +226,15 @@ export function SettingsLocalSection({
   onLocalLabelChange,
   contacts,
   channels,
+  appSettings,
+  onSaveAppSettings,
   className,
 }: {
   onLocalLabelChange?: (label: LocalLabel) => void;
   contacts?: Contact[];
   channels?: Channel[];
+  appSettings?: AppSettings | null;
+  onSaveAppSettings?: (update: AppSettingsUpdate) => Promise<void>;
   className?: string;
 }) {
   const { distanceUnit, setDistanceUnit } = useDistanceUnit();
@@ -251,6 +255,16 @@ export function SettingsLocalSection({
   const [fontScale, setFontScale] = useState(getSavedFontScale);
   const [fontScaleSlider, setFontScaleSlider] = useState(getSavedFontScale);
   const [fontScaleInput, setFontScaleInput] = useState(() => String(getSavedFontScale()));
+  const [ollamaBaseUrl, setOllamaBaseUrl] = useState('http://localhost:11434');
+  const [ollamaModel, setOllamaModel] = useState('phi3:mini');
+  const [ollamaBusy, setOllamaBusy] = useState(false);
+  const [ollamaError, setOllamaError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!appSettings) return;
+    setOllamaBaseUrl(appSettings.ollama_base_url || 'http://localhost:11434');
+    setOllamaModel(appSettings.ollama_model ?? 'phi3:mini');
+  }, [appSettings]);
 
   const commitFontScale = (nextScale: number) => {
     const normalized = setSavedFontScale(nextScale);
@@ -277,6 +291,31 @@ export function SettingsLocalSection({
     setReopenLastConversationEnabled(enabled);
     if (enabled) {
       captureLastViewedConversationFromHash();
+    }
+  };
+
+  const handleSaveOllamaSettings = async () => {
+    if (!appSettings || !onSaveAppSettings) return;
+    setOllamaError(null);
+    setOllamaBusy(true);
+    try {
+      const nextUrl = ollamaBaseUrl.trim() || 'http://localhost:11434';
+      const nextModel = ollamaModel.trim();
+      const update: AppSettingsUpdate = {};
+      if (nextUrl !== (appSettings.ollama_base_url || 'http://localhost:11434')) {
+        update.ollama_base_url = nextUrl;
+      }
+      if (nextModel !== (appSettings.ollama_model ?? 'phi3:mini')) {
+        update.ollama_model = nextModel;
+      }
+      if (Object.keys(update).length > 0) {
+        await onSaveAppSettings(update);
+      }
+      toast.success('Ollama settings saved');
+    } catch (err) {
+      setOllamaError(err instanceof Error ? err.message : 'Failed to save');
+    } finally {
+      setOllamaBusy(false);
     }
   };
 
@@ -639,6 +678,80 @@ export function SettingsLocalSection({
           </p>
         </div>
       </div>
+
+      <Separator />
+
+      {appSettings && onSaveAppSettings ? (
+        <div className="space-y-3">
+          <div className="space-y-2">
+            <h3 className="text-base font-semibold tracking-tight">Ollama Unread Summaries</h3>
+            <p className="text-[0.8125rem] text-muted-foreground">
+              When enabled, opening a channel with unread messages asks your local Ollama server for
+              a short catch-up summary shown as a banner above the chat. Stored on the RemoteTerm
+              server (not browser-local).
+            </p>
+          </div>
+
+          <div className="flex items-start gap-3 rounded-md border border-border/60 p-3">
+            <Checkbox
+              id="ollama-enabled"
+              checked={appSettings.ollama_enabled}
+              onCheckedChange={(checked) => {
+                void onSaveAppSettings({ ollama_enabled: checked === true });
+              }}
+              className="mt-0.5"
+            />
+            <div className="space-y-1">
+              <Label htmlFor="ollama-enabled">Enable unread summaries</Label>
+              <p className="text-[0.8125rem] text-muted-foreground">
+                Turn off to hide the summary banner when opening channels. URL and model settings
+                are kept.
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="ollama-base-url">Ollama path / URL</Label>
+            <Input
+              id="ollama-base-url"
+              value={ollamaBaseUrl}
+              onChange={(e) => setOllamaBaseUrl(e.target.value)}
+              placeholder="http://localhost:11434"
+              spellCheck={false}
+              disabled={!appSettings.ollama_enabled}
+            />
+            <p className="text-[0.8125rem] text-muted-foreground">
+              Base URL of the Ollama HTTP API reachable from the RemoteTerm server (not your
+              browser).
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="ollama-model">Ollama model</Label>
+            <Input
+              id="ollama-model"
+              value={ollamaModel}
+              onChange={(e) => setOllamaModel(e.target.value)}
+              placeholder="phi3:mini"
+              spellCheck={false}
+              disabled={!appSettings.ollama_enabled}
+            />
+            <p className="text-[0.8125rem] text-muted-foreground">
+              Model name as shown by <code className="text-xs">ollama list</code>. Defaults to{' '}
+              <code className="text-xs">phi3:mini</code>.
+            </p>
+          </div>
+
+          {ollamaError && <p className="text-sm text-destructive">{ollamaError}</p>}
+          <Button
+            type="button"
+            onClick={handleSaveOllamaSettings}
+            disabled={ollamaBusy || !appSettings.ollama_enabled}
+          >
+            {ollamaBusy ? 'Saving…' : 'Save Ollama Settings'}
+          </Button>
+        </div>
+      ) : null}
 
       <Separator />
 

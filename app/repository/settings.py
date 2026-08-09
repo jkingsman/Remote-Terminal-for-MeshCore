@@ -43,7 +43,8 @@ class AppSettingsRepository:
                    blocked_keys, blocked_names, discovery_blocked_types,
                    tracked_telemetry_repeaters, tracked_telemetry_contacts,
                    auto_resend_channel,
-                   telemetry_interval_hours, telemetry_routed_hourly
+                   telemetry_interval_hours, telemetry_routed_hourly,
+                   ollama_base_url, ollama_model, ollama_enabled
             FROM app_settings WHERE id = 1
             """
         ) as cursor:
@@ -138,6 +139,21 @@ class AppSettingsRepository:
         except (KeyError, TypeError):
             telemetry_routed_hourly = False
 
+        try:
+            ollama_base_url = row["ollama_base_url"] or "http://localhost:11434"
+        except (KeyError, TypeError):
+            ollama_base_url = "http://localhost:11434"
+
+        try:
+            ollama_model = row["ollama_model"] if row["ollama_model"] is not None else "phi3:mini"
+        except (KeyError, TypeError):
+            ollama_model = "phi3:mini"
+
+        try:
+            ollama_enabled = bool(row["ollama_enabled"])
+        except (KeyError, TypeError):
+            ollama_enabled = True
+
         return AppSettings(
             max_radio_contacts=row["max_radio_contacts"],
             auto_decrypt_dm_on_advert=bool(row["auto_decrypt_dm_on_advert"]),
@@ -154,6 +170,9 @@ class AppSettingsRepository:
             auto_resend_channel=auto_resend_channel,
             telemetry_interval_hours=telemetry_interval_hours,
             telemetry_routed_hourly=telemetry_routed_hourly,
+            ollama_base_url=ollama_base_url,
+            ollama_model=ollama_model,
+            ollama_enabled=ollama_enabled,
         )
 
     @staticmethod
@@ -175,6 +194,9 @@ class AppSettingsRepository:
         auto_resend_channel: bool | None = None,
         telemetry_interval_hours: int | None = None,
         telemetry_routed_hourly: bool | None = None,
+        ollama_base_url: str | None = None,
+        ollama_model: str | None = None,
+        ollama_enabled: bool | None = None,
     ) -> None:
         """Apply field updates using an already-acquired connection.
 
@@ -244,6 +266,18 @@ class AppSettingsRepository:
             updates.append("telemetry_routed_hourly = ?")
             params.append(1 if telemetry_routed_hourly else 0)
 
+        if ollama_base_url is not None:
+            updates.append("ollama_base_url = ?")
+            params.append(ollama_base_url)
+
+        if ollama_model is not None:
+            updates.append("ollama_model = ?")
+            params.append(ollama_model)
+
+        if ollama_enabled is not None:
+            updates.append("ollama_enabled = ?")
+            params.append(1 if ollama_enabled else 0)
+
         if updates:
             query = f"UPDATE app_settings SET {', '.join(updates)} WHERE id = 1"
             async with conn.execute(query, params):
@@ -275,6 +309,9 @@ class AppSettingsRepository:
         auto_resend_channel: bool | None = None,
         telemetry_interval_hours: int | None = None,
         telemetry_routed_hourly: bool | None = None,
+        ollama_base_url: str | None = None,
+        ollama_model: str | None = None,
+        ollama_enabled: bool | None = None,
     ) -> AppSettings:
         """Update app settings. Only provided fields are updated."""
         async with db.tx() as conn:
@@ -295,9 +332,11 @@ class AppSettingsRepository:
                 auto_resend_channel=auto_resend_channel,
                 telemetry_interval_hours=telemetry_interval_hours,
                 telemetry_routed_hourly=telemetry_routed_hourly,
+                ollama_base_url=ollama_base_url,
+                ollama_model=ollama_model,
+                ollama_enabled=ollama_enabled,
             )
             return await AppSettingsRepository._get_in_conn(conn)
-
     @staticmethod
     async def toggle_blocked_key(key: str) -> AppSettings:
         """Toggle a public key in the blocked list. Keys are normalized to lowercase.
