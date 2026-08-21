@@ -238,62 +238,69 @@ export function BotsView({ botId, channels, contacts, onOpenBot, onCloseBot }: B
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
-      {/* Workspace header */}
-      <div className="flex items-center gap-3 px-4 py-2.5 border-b border-border flex-shrink-0">
-        <BotIcon className="h-[18px] w-[18px]" aria-hidden="true" />
-        <h2 className="font-semibold text-base tracking-tight">Bots</h2>
-        <span className="text-xs text-muted-foreground">
-          {enabledCount} of {bots.length} enabled
-          {engine ? ` · ${engine.runs_24h} runs (24h)` : ''}
-        </span>
-        {erroringCount > 0 && (
-          <span className="text-[0.6875rem] bg-destructive/10 text-destructive rounded-full px-2 py-0.5">
-            {erroringCount} bot{erroringCount === 1 ? '' : 's'} erroring
+      {/* Workspace header — stacks into two rows below md so the actions stay
+          reachable */}
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:gap-3 px-4 py-2.5 border-b border-border flex-shrink-0">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0 md:flex-1">
+          <BotIcon className="h-[18px] w-[18px]" aria-hidden="true" />
+          <h2 className="font-semibold text-base tracking-tight">Bots</h2>
+          <span className="text-xs text-muted-foreground truncate">
+            {enabledCount} of {bots.length} enabled
+            {engine ? ` · ${engine.runs_24h} runs (24h)` : ''}
           </span>
-        )}
-        {(engine?.disabled_until_restart || engine?.disabled_by_env) && (
-          <span className="text-[0.6875rem] bg-warning/10 text-warning rounded-full px-2 py-0.5">
-            {engine.disabled_by_env ? 'disabled by server env' : 'disabled until restart'}
-          </span>
-        )}
-        <div className="flex-1" />
-        <Button
-          variant="outline"
-          size="sm"
-          className="border-warning/50 text-warning hover:bg-warning/10"
-          onClick={() => void handleDisableAll()}
-          disabled={engine?.disabled_until_restart}
-        >
-          Disable all until restart
-        </Button>
-        <Button size="sm" onClick={() => setShowNewBot(true)}>
-          <Plus className="h-3.5 w-3.5 mr-1" aria-hidden="true" />
-          New Bot
-        </Button>
+          {erroringCount > 0 && (
+            <span className="text-[0.6875rem] bg-destructive/10 text-destructive rounded-full px-2 py-0.5 whitespace-nowrap">
+              {erroringCount} bot{erroringCount === 1 ? '' : 's'} erroring
+            </span>
+          )}
+          {(engine?.disabled_until_restart || engine?.disabled_by_env) && (
+            <span className="text-[0.6875rem] bg-warning/10 text-warning rounded-full px-2 py-0.5 whitespace-nowrap">
+              {engine.disabled_by_env ? 'disabled by server env' : 'disabled until restart'}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-3 flex-shrink-0">
+          <Button
+            variant="outline"
+            size="sm"
+            className="border-warning/50 text-warning hover:bg-warning/10"
+            onClick={() => void handleDisableAll()}
+            disabled={engine?.disabled_until_restart}
+          >
+            Disable all until restart
+          </Button>
+          <Button size="sm" onClick={() => setShowNewBot(true)}>
+            <Plus className="h-3.5 w-3.5 mr-1" aria-hidden="true" />
+            New Bot
+          </Button>
+        </div>
       </div>
 
-      {/* Tab bar */}
-      <div className="flex items-center gap-3 px-4 py-2 border-b border-border flex-shrink-0">
-        <div className="inline-flex gap-0.5 bg-muted rounded-lg p-[3px]">
-          {WORKSPACE_TABS.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveTab(tab.id)}
-              className={cn(
-                'px-3.5 py-1 rounded-md text-sm font-medium transition-colors',
-                activeTab === tab.id
-                  ? 'bg-background text-foreground shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground'
-              )}
-            >
-              {tab.label}
-            </button>
-          ))}
+      {/* Tab bar — the tab strip scrolls horizontally when it cannot fit, and
+          the filter drops to its own row below md */}
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:gap-3 px-4 py-2 border-b border-border flex-shrink-0">
+        <div className="max-w-full overflow-x-auto">
+          <div className="inline-flex gap-0.5 bg-muted rounded-lg p-[3px]">
+            {WORKSPACE_TABS.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
+                className={cn(
+                  'px-3.5 py-1 rounded-md text-sm font-medium transition-colors whitespace-nowrap',
+                  activeTab === tab.id
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
         </div>
-        <div className="flex-1" />
+        <div className="hidden md:block flex-1" />
         {activeTab === 'bots' && (
-          <div className="relative w-52">
+          <div className="relative w-full md:w-52">
             <SearchIcon
               className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
               aria-hidden="true"
@@ -349,15 +356,24 @@ export function BotsView({ botId, channels, contacts, onOpenBot, onCloseBot }: B
               {visibleBots.map((bot) => {
                 const dot = botStatusDot(bot);
                 const selected = bot.id === selectedId;
+                // Below lg the detail rail (and its "Open editor" button) does
+                // not exist, so selecting a row has no visible effect — a tap
+                // opens the editor directly instead.
+                const selectOrOpen = () => {
+                  setSelectedId(bot.id);
+                  if (!window.matchMedia('(min-width: 1024px)').matches) {
+                    onOpenBot(bot.id);
+                  }
+                };
                 return (
                   <div
                     key={bot.id}
                     role="button"
                     tabIndex={0}
-                    onClick={() => setSelectedId(bot.id)}
+                    onClick={selectOrOpen}
                     onDoubleClick={() => onOpenBot(bot.id)}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter') setSelectedId(bot.id);
+                      if (e.key === 'Enter') selectOrOpen();
                     }}
                     className={cn(
                       'flex items-center gap-2.5 px-4 py-1.5 border-l-2 border-b border-border/50 cursor-pointer hover:bg-accent/50 transition-colors',
@@ -408,6 +424,17 @@ export function BotsView({ botId, channels, contacts, onOpenBot, onCloseBot }: B
                     <div className="hidden md:block w-14 flex-shrink-0 text-right font-mono text-xs">
                       {bot.enabled ? bot.runs_24h : '—'}
                     </div>
+                    <button
+                      type="button"
+                      className="lg:hidden flex-shrink-0 p-1.5 -my-1 text-muted-foreground"
+                      aria-label={`Edit ${bot.name}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOpenBot(bot.id);
+                      }}
+                    >
+                      <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
                     <div className="w-5 flex-shrink-0 flex justify-center">
                       <div
                         className={cn('w-2 h-2 rounded-full', dot.className)}

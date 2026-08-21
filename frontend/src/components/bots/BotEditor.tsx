@@ -414,122 +414,130 @@ export function BotEditor({ botId, channels, onBack, onDeleted }: BotEditorProps
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
-      {/* Editor header */}
-      <div className="flex items-center gap-2.5 px-4 py-2.5 border-b border-border flex-shrink-0">
-        <button
-          type="button"
-          onClick={onBack}
-          className="text-muted-foreground hover:text-foreground transition-colors"
-          aria-label="Back to bots"
-        >
-          <ArrowLeft className="h-4 w-4" />
-        </button>
-        <button
-          type="button"
-          onClick={onBack}
-          className="text-[0.8125rem] text-muted-foreground hover:text-foreground"
-        >
-          Bots
-        </button>
-        <span className="text-[0.8125rem] text-muted-foreground">/</span>
-        {renaming ? (
-          <Input
-            value={nameDraft}
-            autoFocus
-            onChange={(e) => setNameDraft(e.target.value)}
-            onFocus={(e) => e.currentTarget.select()}
-            onBlur={() => void handleRename()}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                e.currentTarget.blur();
-              }
-              if (e.key === 'Escape') {
-                e.preventDefault();
-                setRenaming(false);
-              }
-            }}
-            aria-label="Bot name"
-            className="h-7 w-44 text-base font-semibold"
-          />
-        ) : (
+      {/* Editor header — stacks into two rows below md so Save and the other
+          actions stay reachable */}
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:gap-2.5 px-4 py-2.5 border-b border-border flex-shrink-0">
+        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 min-w-0 md:flex-1">
           <button
             type="button"
-            onClick={() => {
-              setNameDraft(bot.name);
-              setRenaming(true);
-            }}
-            className="font-semibold text-base tracking-tight hover:text-foreground/80 cursor-text"
-            title="Click to rename"
+            onClick={onBack}
+            className="text-muted-foreground hover:text-foreground transition-colors flex-shrink-0"
+            aria-label="Back to bots"
           >
-            {bot.name}
+            <ArrowLeft className="h-4 w-4" />
           </button>
-        )}
-        <span className="text-[0.625rem] uppercase tracking-wider bg-muted text-muted-foreground rounded px-1.5 py-0.5">
-          {bot.category}
-        </span>
-        {bot.builtin_key && (
-          <span className="text-[0.6875rem] bg-info/15 text-info rounded-full px-2 py-0.5">
-            built-in {bot.builtin_version ?? ''}
-            {bot.modified ? ' · modified' : ''}
-          </span>
-        )}
-        {dirty && <span className="text-[0.6875rem] text-warning">unsaved changes</span>}
-        <div className="flex-1" />
-        <label className="flex items-center gap-2 cursor-pointer text-xs text-muted-foreground">
-          <input
-            type="checkbox"
-            checked={enabled}
-            onChange={(e) => {
-              setEnabled(e.target.checked);
-              markDirty();
-            }}
-            className="w-4 h-4 rounded border-input accent-primary"
-          />
-          Enabled
-        </label>
-        {bot.builtin_key && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 px-2 text-xs"
-            onClick={() => void handleReset()}
+          <button
+            type="button"
+            onClick={onBack}
+            className="text-[0.8125rem] text-muted-foreground hover:text-foreground"
           >
-            Reset to default
+            Bots
+          </button>
+          <span className="text-[0.8125rem] text-muted-foreground">/</span>
+          {renaming ? (
+            <Input
+              value={nameDraft}
+              autoFocus
+              onChange={(e) => setNameDraft(e.target.value)}
+              onFocus={(e) => e.currentTarget.select()}
+              onBlur={() => void handleRename()}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  e.currentTarget.blur();
+                }
+                if (e.key === 'Escape') {
+                  e.preventDefault();
+                  setRenaming(false);
+                }
+              }}
+              aria-label="Bot name"
+              className="h-7 w-44 text-base font-semibold"
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setNameDraft(bot.name);
+                setRenaming(true);
+              }}
+              className="font-semibold text-base tracking-tight hover:text-foreground/80 cursor-text max-w-full truncate"
+              title="Click to rename"
+            >
+              {bot.name}
+            </button>
+          )}
+          <span className="text-[0.625rem] uppercase tracking-wider bg-muted text-muted-foreground rounded px-1.5 py-0.5 whitespace-nowrap">
+            {bot.category}
+          </span>
+          {bot.builtin_key && (
+            <span className="text-[0.6875rem] bg-info/15 text-info rounded-full px-2 py-0.5 whitespace-nowrap">
+              built-in {bot.builtin_version ?? ''}
+              {bot.modified ? ' · modified' : ''}
+            </span>
+          )}
+          {dirty && (
+            <span className="text-[0.6875rem] text-warning whitespace-nowrap">unsaved changes</span>
+          )}
+        </div>
+        <div className="flex items-center gap-2.5 flex-shrink-0">
+          <label className="flex items-center gap-2 cursor-pointer text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(e) => {
+                setEnabled(e.target.checked);
+                markDirty();
+              }}
+              className="w-4 h-4 rounded border-input accent-primary"
+            />
+            Enabled
+          </label>
+          {bot.builtin_key && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={() => void handleReset()}
+            >
+              Reset to default
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 border-destructive/50 text-destructive hover:bg-destructive/10"
+            onClick={() => void handleDelete()}
+            onBlur={() => setConfirmDelete(false)}
+          >
+            {confirmDelete ? 'Confirm delete' : 'Delete'}
           </Button>
-        )}
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-7 border-destructive/50 text-destructive hover:bg-destructive/10"
-          onClick={() => void handleDelete()}
-          onBlur={() => setConfirmDelete(false)}
-        >
-          {confirmDelete ? 'Confirm delete' : 'Delete'}
-        </Button>
-        <Button size="sm" className="h-7" onClick={() => void handleSave()} disabled={saving}>
-          {saving ? 'Saving…' : 'Save'}
-        </Button>
+          <Button size="sm" className="h-7" onClick={() => void handleSave()} disabled={saving}>
+            {saving ? 'Saving…' : 'Save'}
+          </Button>
+        </div>
       </div>
 
-      {/* Sub-tab bar */}
+      {/* Sub-tab bar — the tab strip scrolls horizontally when it cannot fit */}
       <div className="flex items-center gap-3 px-4 py-2 border-b border-border flex-shrink-0">
-        <div className="inline-flex gap-0.5 bg-muted rounded-lg p-[3px]">
-          {EDITOR_TABS.map((entry) => (
-            <button
-              key={entry.id}
-              type="button"
-              onClick={() => setTab(entry.id)}
-              className={cn(
-                'px-3.5 py-1 rounded-md text-sm font-medium transition-colors',
-                tab === entry.id
-                  ? 'bg-background text-foreground shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground'
-              )}
-            >
-              {entry.label}
-            </button>
-          ))}
+        <div className="max-w-full overflow-x-auto">
+          <div className="inline-flex gap-0.5 bg-muted rounded-lg p-[3px]">
+            {EDITOR_TABS.map((entry) => (
+              <button
+                key={entry.id}
+                type="button"
+                onClick={() => setTab(entry.id)}
+                className={cn(
+                  'px-3.5 py-1 rounded-md text-sm font-medium transition-colors whitespace-nowrap',
+                  tab === entry.id
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                {entry.label}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="flex-1" />
         <span className="hidden md:block text-[0.6875rem] text-muted-foreground">
@@ -869,7 +877,7 @@ export function BotEditor({ botId, channels, onBack, onDeleted }: BotEditorProps
       {/* ── Code ── */}
       {tab === 'code' && (
         <div className="flex-1 min-h-0 overflow-y-auto p-4 flex flex-col gap-2">
-          <div className="flex items-center gap-2.5 text-[0.6875rem] text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[0.6875rem] text-muted-foreground">
             <span className="font-mono">{bot.name}.py</span>
             <span>Python 3 · validated on save (syntax + at least one trigger)</span>
             <div className="flex-1" />
@@ -1041,54 +1049,57 @@ export function BotEditor({ botId, channels, onBack, onDeleted }: BotEditorProps
               <div className="font-mono text-[0.6875rem] leading-relaxed">{bot.last_error}</div>
             </div>
           )}
-          <div className="border border-border rounded-lg overflow-hidden max-w-4xl">
-            <div className="flex items-center gap-2.5 px-3 py-2 bg-muted text-[0.625rem] uppercase tracking-wider text-muted-foreground font-medium">
-              <span className="w-32">Time</span>
-              <span className="w-28">Trigger</span>
-              <span className="w-28">From</span>
-              <span className="w-24">Where</span>
-              <span className="w-16">Exec</span>
-              <span className="flex-1">Result</span>
-            </div>
-            {runs.length === 0 && (
-              <div className="px-3 py-4 text-xs text-muted-foreground">No runs recorded yet.</div>
-            )}
-            {runs.map((run) => (
-              <div
-                key={run.id}
-                className="flex items-center gap-2.5 px-3 py-1.5 border-t border-border/50 text-xs"
-              >
-                <span className="w-32 font-mono text-muted-foreground">
-                  {new Date(run.started_at * 1000).toLocaleString([], {
-                    month: 'short',
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
-                </span>
-                <span className="w-28 truncate">
-                  <span className="font-mono text-[0.6875rem] bg-muted rounded px-1.5 py-0.5">
-                    {run.trigger}
-                  </span>
-                </span>
-                <span className="w-28 truncate">{run.sender_name ?? '—'}</span>
-                <span className="w-24 truncate text-muted-foreground">
-                  {run.is_dm ? 'DM' : (run.channel_name ?? run.channel_key?.slice(0, 8) ?? '—')}
-                </span>
-                <span className="w-16 font-mono text-muted-foreground">
-                  {run.duration_ms != null ? `${(run.duration_ms / 1000).toFixed(1)}s` : '—'}
-                </span>
-                <span
-                  className={cn(
-                    'flex-1 truncate',
-                    (run.result === 'error' || run.result === 'timeout') && 'text-destructive'
-                  )}
-                >
-                  {run.error ?? `${run.result}${run.replies ? ` (${run.replies})` : ''}`}
-                  {run.test_run ? ' · test' : ''}
-                </span>
+          {/* Fixed-width columns; the table scrolls horizontally on narrow screens */}
+          <div className="border border-border rounded-lg overflow-x-auto max-w-4xl">
+            <div className="min-w-[44rem]">
+              <div className="flex items-center gap-2.5 px-3 py-2 bg-muted text-[0.625rem] uppercase tracking-wider text-muted-foreground font-medium">
+                <span className="w-32">Time</span>
+                <span className="w-28">Trigger</span>
+                <span className="w-28">From</span>
+                <span className="w-24">Where</span>
+                <span className="w-16">Exec</span>
+                <span className="flex-1">Result</span>
               </div>
-            ))}
+              {runs.length === 0 && (
+                <div className="px-3 py-4 text-xs text-muted-foreground">No runs recorded yet.</div>
+              )}
+              {runs.map((run) => (
+                <div
+                  key={run.id}
+                  className="flex items-center gap-2.5 px-3 py-1.5 border-t border-border/50 text-xs"
+                >
+                  <span className="w-32 font-mono text-muted-foreground">
+                    {new Date(run.started_at * 1000).toLocaleString([], {
+                      month: 'short',
+                      day: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })}
+                  </span>
+                  <span className="w-28 truncate">
+                    <span className="font-mono text-[0.6875rem] bg-muted rounded px-1.5 py-0.5">
+                      {run.trigger}
+                    </span>
+                  </span>
+                  <span className="w-28 truncate">{run.sender_name ?? '—'}</span>
+                  <span className="w-24 truncate text-muted-foreground">
+                    {run.is_dm ? 'DM' : (run.channel_name ?? run.channel_key?.slice(0, 8) ?? '—')}
+                  </span>
+                  <span className="w-16 font-mono text-muted-foreground">
+                    {run.duration_ms != null ? `${(run.duration_ms / 1000).toFixed(1)}s` : '—'}
+                  </span>
+                  <span
+                    className={cn(
+                      'flex-1 truncate',
+                      (run.result === 'error' || run.result === 'timeout') && 'text-destructive'
+                    )}
+                  >
+                    {run.error ?? `${run.result}${run.replies ? ` (${run.replies})` : ''}`}
+                    {run.test_run ? ' · test' : ''}
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}

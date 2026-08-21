@@ -115,10 +115,12 @@ export function LogsTab() {
         </Button>
       </div>
 
+      {/* overflow-auto (not -y-auto): long lines stay on one line and the
+          console scrolls horizontally instead of ellipsizing them away */}
       <div
         ref={consoleRef}
         data-testid="bot-log-console"
-        className="flex-1 min-h-0 bg-console-bg border border-border rounded-lg mx-4 mb-4 p-3 overflow-y-auto font-mono text-[0.71875rem] leading-relaxed"
+        className="flex-1 min-h-0 bg-console-bg border border-border rounded-lg mx-4 mb-4 p-3 overflow-auto font-mono text-[0.71875rem] leading-relaxed"
       >
         {visibleEntries.length === 0 && (
           <div className="text-muted-foreground">
@@ -126,10 +128,7 @@ export function LogsTab() {
           </div>
         )}
         {visibleEntries.map((entry, index) => (
-          <div
-            key={`${entry.timestamp}-${index}`}
-            className="whitespace-nowrap overflow-hidden text-ellipsis"
-          >
+          <div key={`${entry.timestamp}-${index}`} className="whitespace-nowrap">
             <span className="text-muted-foreground">
               {new Date(entry.timestamp * 1000).toLocaleTimeString([], {
                 hour: '2-digit',
