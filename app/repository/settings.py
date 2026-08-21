@@ -529,6 +529,85 @@ class StatisticsRepository:
         return bucket_path_hash_widths(rows), bucket_region_scope(rows)
 
     @staticmethod
+    async def get_mesh_summary() -> dict[str, int]:
+        """Small mesh summary for bot ``ctx.mesh_stats()`` and schedule placeholders."""
+        now = int(time.time())
+        stats: dict[str, int] = {
+            "total_contacts": 0,
+            "total_repeaters": 0,
+            "contacts_24h": 0,
+            "repeaters_24h": 0,
+            "new_contacts_7d": 0,
+            "messages_24h": 0,
+        }
+        async with db.readonly() as conn:
+            async with conn.execute(
+                """
+                SELECT
+                    SUM(CASE WHEN type != 2 THEN 1 ELSE 0 END) AS contacts,
+                    SUM(CASE WHEN type = 2 THEN 1 ELSE 0 END) AS repeaters,
+                    SUM(CASE WHEN type != 2 AND last_seen >= ? THEN 1 ELSE 0 END) AS contacts_24h,
+                    SUM(CASE WHEN type = 2 AND last_seen >= ? THEN 1 ELSE 0 END) AS repeaters_24h,
+                    SUM(CASE WHEN first_seen >= ? THEN 1 ELSE 0 END) AS new_7d
+                FROM contacts
+                """,
+                (now - SECONDS_24H, now - SECONDS_24H, now - SECONDS_7D),
+            ) as cursor:
+                row = await cursor.fetchone()
+            async with conn.execute(
+                "SELECT COUNT(*) AS cnt FROM messages WHERE received_at >= ?",
+                (now - SECONDS_24H,),
+            ) as cursor:
+                msg_row = await cursor.fetchone()
+        if row is not None:
+            stats["total_contacts"] = row["contacts"] or 0
+            stats["total_repeaters"] = row["repeaters"] or 0
+            stats["contacts_24h"] = row["contacts_24h"] or 0
+            stats["repeaters_24h"] = row["repeaters_24h"] or 0
+            stats["new_contacts_7d"] = row["new_7d"] or 0
+        if msg_row is not None:
+            stats["messages_24h"] = msg_row["cnt"] or 0
+        return stats
+
+    @staticmethod
+    async def _multibyte_rollout() -> dict[str, int]:
+        """Contact-level multibyte path adoption, by known direct-route hop width.
+
+        Folded in from meshcore-bot's rollout monitor. Packet-level widths are
+        reported separately (``path_hash_width_24h``); this counts *nodes*, so
+        an operator can see who has upgraded rather than how much traffic has.
+        """
+        async with db.readonly() as conn:
+            async with conn.execute(
+                """
+                SELECT
+                    SUM(CASE WHEN direct_path_hash_mode IN (1, 2, 3) THEN 1 ELSE 0 END)
+                        AS with_route,
+                    SUM(CASE WHEN direct_path_hash_mode IN (2, 3) THEN 1 ELSE 0 END)
+                        AS multibyte,
+                    SUM(CASE WHEN direct_path_hash_mode = 1 THEN 1 ELSE 0 END) AS single_byte,
+                    SUM(CASE WHEN direct_path_hash_mode = 2 THEN 1 ELSE 0 END) AS double_byte,
+                    SUM(CASE WHEN direct_path_hash_mode = 3 THEN 1 ELSE 0 END) AS triple_byte,
+                    SUM(CASE WHEN type = 2 AND direct_path_hash_mode IN (1, 2, 3)
+                             THEN 1 ELSE 0 END) AS repeaters_with_route,
+                    SUM(CASE WHEN type = 2 AND direct_path_hash_mode IN (2, 3)
+                             THEN 1 ELSE 0 END) AS repeaters_multibyte
+                FROM contacts
+                """
+            ) as cursor:
+                row = await cursor.fetchone()
+        assert row is not None
+        return {
+            "contacts_with_route": row["with_route"] or 0,
+            "contacts_multibyte": row["multibyte"] or 0,
+            "single_byte": row["single_byte"] or 0,
+            "double_byte": row["double_byte"] or 0,
+            "triple_byte": row["triple_byte"] or 0,
+            "repeaters_with_route": row["repeaters_with_route"] or 0,
+            "repeaters_multibyte": row["repeaters_multibyte"] or 0,
+        }
+
+    @staticmethod
     async def _region_scope_senders_24h() -> dict[str, int | float]:
         """Count distinct channel-message senders who scoped at least one send.
 
@@ -660,6 +739,7 @@ class StatisticsRepository:
         known_channels_active = await StatisticsRepository._known_channels_active()
         path_hash_width_24h, region_scope = await StatisticsRepository._packet_shape_24h()
         region_scope.update(await StatisticsRepository._region_scope_senders_24h())
+        multibyte_rollout = await StatisticsRepository._multibyte_rollout()
         packets_per_hour_72h = await StatisticsRepository._packets_per_hour_72h()
 
         return {
@@ -678,5 +758,6 @@ class StatisticsRepository:
             "known_channels_active": known_channels_active,
             "path_hash_width_24h": path_hash_width_24h,
             "region_scope_24h": region_scope,
+            "multibyte_rollout": multibyte_rollout,
             "packets_per_hour_72h": packets_per_hour_72h,
         }

@@ -28,6 +28,7 @@ def cleanup_test_db_dir():
 @pytest.fixture
 async def test_db():
     """Create an in-memory test database with schema + migrations."""
+    from app.repository import bots as bots_repo
     from app.repository import (
         channels,
         contact_telemetry,
@@ -49,6 +50,7 @@ async def test_db():
         raw_packets,
         settings,
         fanout_repo,
+        bots_repo,
         repeater_telemetry,
         contact_telemetry,
     ]
