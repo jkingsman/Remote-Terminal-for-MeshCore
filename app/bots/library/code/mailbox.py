@@ -583,7 +583,7 @@ def _cmd_size_test(settings, arg):
 # ------------------------------------------------------------- entrypoint --
 
 
-@bot.on_keyword(BOT_META["settings"]["prefix"])
+@bot.on_message()
 def mailbox(ctx, msg):
     """Runs for every in-scope message (sync -> thread pool). Uncaught
     exceptions never fail silently: error details go only to debug-unlocked
