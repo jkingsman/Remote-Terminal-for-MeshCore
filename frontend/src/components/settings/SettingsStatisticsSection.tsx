@@ -470,6 +470,46 @@ export function SettingsStatisticsSection({ className }: { className?: string })
 
           <Separator />
 
+          {/* Multibyte Rollout (node-level adoption; traffic-level shares are above) */}
+          <div>
+            <h3 className="text-base font-semibold tracking-tight mb-2">Multibyte Rollout</h3>
+            <p className="text-[0.8125rem] text-muted-foreground mb-2">
+              Nodes whose known direct route uses multibyte hop identifiers — who has upgraded, as
+              opposed to how much traffic has (shown above).
+            </p>
+            {stats.multibyte_rollout.contacts_with_route > 0 ? (
+              <div className="space-y-1.5 text-sm">
+                <div>
+                  <span className="font-medium">
+                    {stats.multibyte_rollout.contacts_multibyte} of{' '}
+                    {stats.multibyte_rollout.contacts_with_route}
+                  </span>{' '}
+                  <span className="text-muted-foreground">
+                    nodes with a known route use multibyte hops
+                  </span>
+                </div>
+                <div>
+                  <span className="font-medium">
+                    {stats.multibyte_rollout.repeaters_multibyte} of{' '}
+                    {stats.multibyte_rollout.repeaters_with_route}
+                  </span>{' '}
+                  <span className="text-muted-foreground">repeaters</span>
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  By hop width: {stats.multibyte_rollout.single_byte} × 1-byte ·{' '}
+                  {stats.multibyte_rollout.double_byte} × 2-byte ·{' '}
+                  {stats.multibyte_rollout.triple_byte} × 3-byte
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                No contacts with a known direct-route hop width yet.
+              </p>
+            )}
+          </div>
+
+          <Separator />
+
           {/* Region Scope */}
           <RegionScopeStatsPanel stats={stats.region_scope_24h} />
 

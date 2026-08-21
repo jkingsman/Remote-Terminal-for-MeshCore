@@ -56,6 +56,7 @@ app/
 │   ├── vapid.py                 # VAPID key generation, storage, caching
 │   ├── send.py                  # pywebpush wrapper (async via thread executor)
 │   └── manager.py               # Push dispatch: filter, build payload, concurrent send
+├── bots/                # Bots workspace engine: triggers, cron, feeds, i18n (see bots/AGENTS_bots.md)
 ├── fanout/              # Fanout bus: MQTT, bots, webhooks, Apprise, SQS (see fanout/AGENTS_fanout.md)
 ├── telemetry_interval.py # Shared telemetry interval math for tracked-repeater scheduler
 ├── path_utils.py        # Path hex rendering and hop-width helpers
