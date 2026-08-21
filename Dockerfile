@@ -43,7 +43,13 @@ COPY --from=frontend-builder /build/dist ./frontend/dist
 # Create data directory for SQLite database
 RUN mkdir -p /app/data
 
+RUN apt-get update && apt-get install -y --no-install-recommends jq \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY run.sh ./
+RUN chmod +x run.sh
+
 EXPOSE 8000
 
 # Run the application (we retain root for max compatibility)
-CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["./run.sh"]
