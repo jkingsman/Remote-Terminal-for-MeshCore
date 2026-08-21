@@ -161,6 +161,8 @@ export function BotEditor({ botId, channels, onBack, onDeleted }: BotEditorProps
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
 
   // Draft state
   const [code, setCode] = useState('');
@@ -257,6 +259,23 @@ export function BotEditor({ botId, channels, onBack, onDeleted }: BotEditorProps
       });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleRename = async () => {
+    setRenaming(false);
+    const next = nameDraft.trim();
+    if (!bot || !next || next === bot.name) return;
+    try {
+      const updated = await api.updateBot(bot.id, { name: next });
+      // Adopt only the new name — leave any unsaved code/settings/scope drafts
+      // in this session untouched (a full applyBot would reset them).
+      setBot((prev) => (prev ? { ...prev, name: updated.name } : updated));
+      toast.success(`Renamed to ${updated.name}`);
+    } catch (err) {
+      toast.error('Rename failed', {
+        description: err instanceof Error ? err.message : undefined,
+      });
     }
   };
 
@@ -413,7 +432,39 @@ export function BotEditor({ botId, channels, onBack, onDeleted }: BotEditorProps
           Bots
         </button>
         <span className="text-[0.8125rem] text-muted-foreground">/</span>
-        <h2 className="font-semibold text-base tracking-tight">{bot.name}</h2>
+        {renaming ? (
+          <Input
+            value={nameDraft}
+            autoFocus
+            onChange={(e) => setNameDraft(e.target.value)}
+            onFocus={(e) => e.currentTarget.select()}
+            onBlur={() => void handleRename()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                e.currentTarget.blur();
+              }
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                setRenaming(false);
+              }
+            }}
+            aria-label="Bot name"
+            className="h-7 w-44 text-base font-semibold"
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => {
+              setNameDraft(bot.name);
+              setRenaming(true);
+            }}
+            className="font-semibold text-base tracking-tight hover:text-foreground/80 cursor-text"
+            title="Click to rename"
+          >
+            {bot.name}
+          </button>
+        )}
         <span className="text-[0.625rem] uppercase tracking-wider bg-muted text-muted-foreground rounded px-1.5 py-0.5">
           {bot.category}
         </span>
