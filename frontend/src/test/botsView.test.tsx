@@ -128,6 +128,27 @@ describe('BotsView bot list', () => {
     expect(onOpenBot).toHaveBeenCalledWith('bot-1');
   });
 
+  it('toggles a bot with the enable switch without opening the editor', async () => {
+    setMatchMedia(false);
+    const bot = makeBot();
+    const updateSpy = vi.spyOn(api, 'updateBot').mockResolvedValue({ ...bot, enabled: false });
+    const { onOpenBot, list } = await renderWorkspace([bot]);
+
+    const toggle = within(list).getByRole('switch', { name: 'Enable ping' });
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+
+    fireEvent.click(toggle);
+
+    await waitFor(() => {
+      expect(updateSpy).toHaveBeenCalledWith('bot-1', { enabled: false });
+    });
+    expect(onOpenBot).not.toHaveBeenCalled();
+    expect(within(list).getByRole('switch', { name: 'Enable ping' })).toHaveAttribute(
+      'aria-checked',
+      'false'
+    );
+  });
+
   it('only selects the row on click at the lg breakpoint and up', async () => {
     setMatchMedia(true);
     const { onOpenBot, list } = await renderWorkspace();

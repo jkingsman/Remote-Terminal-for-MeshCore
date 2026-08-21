@@ -5,6 +5,7 @@ import { api } from '../../api';
 import type { Bot, BotEngineStatus, Channel, Contact } from '../../types';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
+import { Switch } from '../ui/switch';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog';
 import { toast } from '../ui/sonner';
 import { cn } from '@/lib/utils';
@@ -380,18 +381,13 @@ export function BotsView({ botId, channels, contacts, onOpenBot, onCloseBot }: B
                       selected ? 'bg-accent border-l-primary' : 'border-l-transparent'
                     )}
                   >
-                    <label
-                      className="flex items-center cursor-pointer"
+                    <Switch
+                      checked={bot.enabled}
+                      onCheckedChange={() => void handleToggleEnabled(bot)}
                       onClick={(e) => e.stopPropagation()}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={bot.enabled}
-                        onChange={() => void handleToggleEnabled(bot)}
-                        className="w-4 h-4 rounded border-input accent-primary"
-                        aria-label={`Enable ${bot.name}`}
-                      />
-                    </label>
+                      onDoubleClick={(e) => e.stopPropagation()}
+                      aria-label={`Enable ${bot.name}`}
+                    />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <span
