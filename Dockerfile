@@ -30,8 +30,9 @@ COPY pyproject.toml uv.lock ./
 # Install dependencies (no dev/test deps)
 RUN uv sync --frozen --no-dev
 
-# Copy application code
+# Copy application code (remoteterm/ is the import surface for DB-stored bots)
 COPY app/ ./app/
+COPY remoteterm/ ./remoteterm/
 
 # Copy license attributions
 COPY LICENSES.md ./
