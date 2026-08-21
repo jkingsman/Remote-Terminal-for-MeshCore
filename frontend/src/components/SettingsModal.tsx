@@ -24,7 +24,6 @@ import { SettingsLocalSection } from './settings/SettingsLocalSection';
 import { SettingsRadioAppSection } from './settings/SettingsRadioAppSection';
 import { SettingsFanoutSection } from './settings/SettingsFanoutSection';
 import { SettingsDatabaseSection } from './settings/SettingsDatabaseSection';
-import { SettingsStatisticsSection } from './settings/SettingsStatisticsSection';
 import { SettingsAboutSection } from './settings/SettingsAboutSection';
 
 interface SettingsModalBaseProps {
@@ -121,7 +120,6 @@ export function SettingsModal(props: SettingsModalProps) {
     'radio-app': false,
     fanout: false,
     database: false,
-    statistics: false,
     about: false,
   });
 
@@ -316,15 +314,6 @@ export function SettingsModal(props: SettingsModalProps) {
               onHealthRefresh={onHealthRefresh}
               className={sectionContentClass}
             />
-          )}
-        </section>
-      )}
-
-      {shouldRenderSection('statistics') && (
-        <section className={sectionWrapperClass}>
-          {renderSectionHeader('statistics')}
-          {isSectionVisible('statistics') && (
-            <SettingsStatisticsSection className={sectionContentClass} />
           )}
         </section>
       )}

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  BarChart3,
   Bot,
   Hash,
   Map,
@@ -60,7 +61,7 @@ interface ToolItem extends Searchable {
   id: string;
   name: string;
   icon: React.ComponentType<{ className?: string }>;
-  type: 'raw' | 'map' | 'visualizer' | 'search' | 'trace' | 'bots';
+  type: 'raw' | 'map' | 'visualizer' | 'search' | 'trace' | 'bots' | 'statistics';
 }
 
 interface SettingItem extends Searchable {
@@ -88,6 +89,13 @@ const TOOL_ITEMS: ToolItem[] = [
   },
   { id: 'trace', name: 'Route Trace', icon: Route, type: 'trace', searchText: 'route trace' },
   { id: 'bots', name: 'Bots', icon: Bot, type: 'bots', searchText: 'bots' },
+  {
+    id: 'statistics',
+    name: 'Statistics',
+    icon: BarChart3,
+    type: 'statistics',
+    searchText: 'statistics',
+  },
 ];
 
 const SETTING_ITEMS: SettingItem[] = SETTINGS_SECTION_ORDER.map((section) => ({

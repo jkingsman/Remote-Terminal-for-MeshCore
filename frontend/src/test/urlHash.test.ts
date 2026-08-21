@@ -77,6 +77,22 @@ describe('parseHashConversation', () => {
     expect(result).toEqual({ type: 'bots', name: 'bots', botId: 'abc-123' });
   });
 
+  it('parses #statistics as statistics type', () => {
+    window.location.hash = '#statistics';
+
+    const result = parseHashConversation();
+
+    expect(result).toEqual({ type: 'statistics', name: 'statistics' });
+  });
+
+  it('redirects the legacy #settings/statistics hash to the statistics tool', () => {
+    window.location.hash = '#settings/statistics';
+
+    const result = parseHashConversation();
+
+    expect(result).toEqual({ type: 'statistics', name: 'statistics' });
+  });
+
   it('parses #map/focus/PUBKEY with focus key', () => {
     window.location.hash = '#map/focus/ABCD1234';
 
@@ -193,6 +209,12 @@ describe('settings URL hashes', () => {
 
   it('returns null for an invalid settings section hash', () => {
     window.location.hash = '#settings/not-a-section';
+
+    expect(parseHashSettingsSection()).toBeNull();
+  });
+
+  it('no longer treats statistics as a settings section', () => {
+    window.location.hash = '#settings/statistics';
 
     expect(parseHashSettingsSection()).toBeNull();
   });
@@ -354,6 +376,14 @@ describe('getConversationHash for bots', () => {
   it('generates #bots/{id} for the editor', () => {
     expect(getConversationHash({ type: 'bots', id: 'bots', name: 'Bots', botId: 'abc-123' })).toBe(
       '#bots/abc-123'
+    );
+  });
+});
+
+describe('getConversationHash for statistics', () => {
+  it('generates #statistics', () => {
+    expect(getConversationHash({ type: 'statistics', id: 'statistics', name: 'Statistics' })).toBe(
+      '#statistics'
     );
   });
 });

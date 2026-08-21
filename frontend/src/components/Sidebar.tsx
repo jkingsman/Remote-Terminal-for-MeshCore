@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  BarChart3,
   Bell,
   BellOff,
   Bot,
@@ -227,10 +228,8 @@ export function Sidebar({
     onSelectConversation(conversation);
   };
 
-  const isActive = (
-    type: 'contact' | 'channel' | 'raw' | 'map' | 'visualizer' | 'search' | 'trace' | 'bots',
-    id: string
-  ) => activeConversation?.type === type && activeConversation?.id === id;
+  const isActive = (type: Conversation['type'], id: string) =>
+    activeConversation?.type === type && activeConversation?.id === id;
 
   // Get unread count for a conversation
   const getUnreadCount = (type: 'channel' | 'contact', id: string): number => {
@@ -819,6 +818,18 @@ export function Sidebar({
               type: 'bots',
               id: 'bots',
               name: 'Bots',
+            }),
+        }),
+        renderSidebarActionRow({
+          key: 'tool-statistics',
+          active: isActive('statistics', 'statistics'),
+          icon: <BarChart3 className="h-4 w-4" />,
+          label: 'Statistics',
+          onClick: () =>
+            handleSelectConversation({
+              type: 'statistics',
+              id: 'statistics',
+              name: 'Statistics',
             }),
         }),
         renderSidebarActionRow({

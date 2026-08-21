@@ -1,5 +1,4 @@
 import {
-  BarChart3,
   Database,
   Info,
   MonitorCog,
@@ -9,14 +8,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 
-export type SettingsSection =
-  | 'radio'
-  | 'local'
-  | 'radio-app'
-  | 'database'
-  | 'fanout'
-  | 'statistics'
-  | 'about';
+export type SettingsSection = 'radio' | 'local' | 'radio-app' | 'database' | 'fanout' | 'about';
 
 export const SETTINGS_SECTION_ORDER: SettingsSection[] = [
   'radio',
@@ -24,7 +16,6 @@ export const SETTINGS_SECTION_ORDER: SettingsSection[] = [
   'fanout',
   'radio-app',
   'database',
-  'statistics',
   'about',
 ];
 
@@ -34,7 +25,6 @@ export const SETTINGS_SECTION_LABELS: Record<SettingsSection, string> = {
   'radio-app': 'Radio-App Management',
   database: 'Database',
   fanout: 'Integrations',
-  statistics: 'Statistics',
   about: 'About',
 };
 
@@ -44,6 +34,5 @@ export const SETTINGS_SECTION_ICONS: Record<SettingsSection, LucideIcon> = {
   'radio-app': SlidersHorizontal,
   database: Database,
   fanout: Share2,
-  statistics: BarChart3,
   about: Info,
 };
