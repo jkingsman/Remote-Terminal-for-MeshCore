@@ -1,13 +1,4 @@
-import {
-  useState,
-  useEffect,
-  useCallback,
-  useMemo,
-  useRef,
-  lazy,
-  Suspense,
-  type ReactNode,
-} from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from 'react';
 import { ChevronDown, Info } from 'lucide-react';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
@@ -26,15 +17,12 @@ import { cn } from '@/lib/utils';
 import { api } from '../../api';
 import type { Channel, Contact, FanoutConfig, HealthStatus } from '../../types';
 
-const BotCodeEditor = lazy(() =>
-  import('../BotCodeEditor').then((m) => ({ default: m.BotCodeEditor }))
-);
-
 const TYPE_LABELS: Record<string, string> = {
   mqtt_private: 'Private MQTT',
   mqtt_community: 'Community Sharing',
   mqtt_ha: 'Home Assistant',
-  bot: 'Python Bot',
+  discord_bridge: 'Discord Bridge',
+  telegram_bridge: 'Telegram Bridge',
   webhook: 'Webhook',
   apprise: 'Apprise',
   sqs: 'Amazon SQS',
@@ -73,61 +61,6 @@ function createCommunityConfigDefaults(
   };
 }
 
-const DEFAULT_BOT_CODE = `def bot(**kwargs) -> str | list[str] | None:
-    """
-    Process messages and optionally return a reply.
-
-    Args:
-        kwargs keys currently provided:
-            sender_name: Display name of sender (may be None)
-            sender_key: 64-char hex public key (None for channel msgs)
-            message_text: The message content
-            is_dm: True for direct messages, False for channel
-            channel_key: 32-char hex key for channels, None for DMs
-            channel_name: Channel name with hash (e.g. "#bot"), None for DMs
-            sender_timestamp: Sender's timestamp (unix seconds, may be None)
-            path: Hex-encoded routing path (may be None)
-            is_outgoing: True if this is our own outgoing message
-            path_bytes_per_hop: Bytes per hop in path (1, 2, or 3) when known
-            scoped: True if the message carried a regional flood scope,
-                False for plain/unscoped flood. Check this first. Set for
-                scoped DMs too.
-            region: Only meaningful when scoped is True (else always None).
-                When scoped, it's the decoded region name, or None if the
-                scope matched none of your known_regions. region alone can't
-                distinguish unscoped from unrecognized — use scoped.
-
-    Returns:
-        None for no reply, a string for a single reply,
-        a list of strings to send multiple messages in order, or a dict
-        {"region": <name or None>, "message": <str or list[str]>} to scope a
-        channel reply to a region for that send only (None/"" = unscoped flood;
-        region is ignored for DM replies).
-    """
-    sender_name = kwargs.get("sender_name")
-    message_text = kwargs.get("message_text", "")
-    channel_name = kwargs.get("channel_name")
-    is_outgoing = kwargs.get("is_outgoing", False)
-    path_bytes_per_hop = kwargs.get("path_bytes_per_hop")
-
-    # Don't reply to our own outgoing messages
-    if is_outgoing:
-        return None
-    
-    # If you want to make use of persistant data between calls to this function, 
-    # you can put that data into the global _bot_globals dictionary, e.g.:
-    #
-    # bot_globals = globals()["_bot_globals"] 
-    # if not "known_sender_names" in bot_globals:
-    #     bot_globals["known_sender_names"] = set()
-    #
-    # bot_globals["known_sender_names"].add(sender_name)
-
-    # Example: Only respond in #bot channel to "!pling" command
-    if channel_name == "#bot" and "!pling" in message_text.lower():
-        return "[BOT] Plong!"
-    return None`;
-
 type DraftType =
   | 'mqtt_private'
   | 'mqtt_ha'
@@ -138,7 +71,8 @@ type DraftType =
   | 'webhook'
   | 'apprise'
   | 'sqs'
-  | 'bot'
+  | 'discord_bridge'
+  | 'telegram_bridge'
   | 'map_upload';
 
 type CreateIntegrationDefinition = {
@@ -336,17 +270,32 @@ const CREATE_INTEGRATION_DEFINITIONS: readonly CreateIntegrationDefinition[] = [
     },
   },
   {
-    value: 'bot',
-    savedType: 'bot',
-    label: 'Python Bot',
-    section: 'Automation',
-    description:
-      'A simple, Python-based interface for basic bots that can respond to DM and channel messages.',
-    defaultName: 'Bot',
+    value: 'discord_bridge',
+    savedType: 'discord_bridge',
+    label: 'Discord Bridge',
+    section: 'Bridges',
+    description: 'One-way bridge: mesh channels → Discord webhooks. DMs are never bridged.',
+    defaultName: 'Discord Bridge',
+    nameMode: 'counted',
+    defaults: {
+      config: { mappings: [], bridge_bot_responses: false, filter_profanity: 'off' },
+      scope: { messages: 'all', raw_packets: 'none' },
+    },
+  },
+  {
+    value: 'telegram_bridge',
+    savedType: 'telegram_bridge',
+    label: 'Telegram Bridge',
+    section: 'Bridges',
+    description: 'One-way bridge: mesh channels → Telegram chats. DMs are never bridged.',
+    defaultName: 'Telegram Bridge',
     nameMode: 'counted',
     defaults: {
       config: {
-        code: DEFAULT_BOT_CODE,
+        api_token: '',
+        mappings: [],
+        bridge_bot_responses: false,
+        filter_profanity: 'off',
       },
       scope: { messages: 'all', raw_packets: 'none' },
     },
@@ -731,7 +680,11 @@ function getDefaultIntegrationName(type: string, configs: FanoutConfig[]) {
 
 function getStatusLabel(status: string | undefined, type?: string) {
   if (status === 'connected')
-    return type === 'bot' || type === 'webhook' || type === 'apprise' || type === 'map_upload'
+    return type === 'webhook' ||
+      type === 'apprise' ||
+      type === 'map_upload' ||
+      type === 'discord_bridge' ||
+      type === 'telegram_bridge'
       ? 'Active'
       : 'Connected';
   if (status === 'error') return 'Error';
@@ -1812,78 +1765,238 @@ function LetsMeshConfigEditor({
   );
 }
 
-function BotConfigEditor({
+/** Shared trailing fields for the Discord/Telegram bridge editors. */
+function BridgeCommonFields({
+  idPrefix,
+  config,
+  onChange,
+}: {
+  idPrefix: string;
+  config: Record<string, unknown>;
+  onChange: (config: Record<string, unknown>) => void;
+}) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="space-y-2">
+        <Label htmlFor={`${idPrefix}-profanity`}>Profanity filter</Label>
+        <select
+          id={`${idPrefix}-profanity`}
+          value={(config.filter_profanity as string) || 'off'}
+          onChange={(e) => onChange({ ...config, filter_profanity: e.target.value })}
+          className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+        >
+          <option value="off">off</option>
+          <option value="censor">censor</option>
+          <option value="drop">drop</option>
+        </select>
+      </div>
+      <label className="flex items-center gap-2.5 cursor-pointer sm:mt-7">
+        <input
+          type="checkbox"
+          checked={Boolean(config.bridge_bot_responses)}
+          onChange={(e) => onChange({ ...config, bridge_bot_responses: e.target.checked })}
+          className="w-4 h-4 rounded border-input accent-primary"
+        />
+        <span className="text-[0.8125rem]">Also bridge this app's own outgoing messages</span>
+      </label>
+    </div>
+  );
+}
+
+function getBridgeMappings(config: Record<string, unknown>): Record<string, unknown>[] {
+  return Array.isArray(config.mappings) ? (config.mappings as Record<string, unknown>[]) : [];
+}
+
+function DiscordBridgeConfigEditor({
   config,
   onChange,
 }: {
   config: Record<string, unknown>;
   onChange: (config: Record<string, unknown>) => void;
 }) {
-  const code = (config.code as string) || '';
+  const [channels, setChannels] = useState<Channel[]>([]);
+
+  useEffect(() => {
+    api.getChannels().then(setChannels).catch(console.error);
+  }, []);
+
+  const mappings = getBridgeMappings(config);
+
+  const updateMapping = (index: number, patch: Record<string, unknown>) => {
+    const next = mappings.map((m, i) => (i === index ? { ...m, ...patch } : m));
+    onChange({ ...config, mappings: next });
+  };
+
   return (
     <div className="space-y-3">
-      <div className="p-3 bg-destructive/10 border border-destructive/30 rounded-md">
-        <p className="text-sm text-destructive">
-          <strong>Experimental:</strong> This is an alpha feature and introduces automated message
-          sending to your radio; unexpected behavior may occur. Use with caution, and please report
-          any bugs!
-        </p>
-      </div>
+      <p className="text-[0.8125rem] text-muted-foreground">
+        One-way: mesh → Discord. DMs are never bridged. Uses the message fanout bus, same as MQTT.
+      </p>
 
-      <div className="p-3 bg-warning/10 border border-warning/30 rounded-md">
-        <p className="text-sm text-warning">
-          <strong>Security Warning:</strong> This feature executes arbitrary Python code on the
-          server. Only run trusted code, and be cautious of arbitrary usage of message parameters.
-        </p>
-      </div>
-
-      <div className="p-3 bg-warning/10 border border-warning/30 rounded-md">
-        <p className="text-sm text-warning">
-          <strong>Don&apos;t wreck the mesh!</strong> Bots process ALL messages, including their
-          own. Be careful of creating infinite loops!
-        </p>
-      </div>
-
-      <div className="flex items-center justify-between">
-        <p className="text-[0.8125rem] text-muted-foreground">
-          Define a <code className="bg-muted px-1 rounded">bot()</code> function that receives
-          message data and optionally returns a reply.
-        </p>
+      <div className="space-y-2">
+        <Label>Bridged channels → Discord webhooks</Label>
+        {mappings.length === 0 && <p className="text-xs text-muted-foreground">No mappings yet.</p>}
+        {mappings.map((mapping, index) => (
+          <div key={index} className="flex items-start gap-2">
+            <select
+              value={(mapping.channel_key as string) || ''}
+              onChange={(e) => updateMapping(index, { channel_key: e.target.value })}
+              className="w-44 rounded-md border border-input bg-background px-3 py-2 text-sm"
+              aria-label={`Mapping ${index + 1} channel`}
+            >
+              <option value="">Select channel…</option>
+              {channels.map((c) => (
+                <option key={c.key} value={c.key}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+            <textarea
+              value={
+                Array.isArray(mapping.webhook_urls)
+                  ? (mapping.webhook_urls as string[]).join('\n')
+                  : ''
+              }
+              onChange={(e) =>
+                updateMapping(index, {
+                  webhook_urls: e.target.value
+                    .split('\n')
+                    .map((line) => line.trim())
+                    .filter(Boolean),
+                })
+              }
+              placeholder={'https://discord.com/api/webhooks/… (one per line)'}
+              className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm font-mono min-h-[60px]"
+              aria-label={`Mapping ${index + 1} webhook URLs`}
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-9 px-2 text-xs text-destructive hover:bg-destructive/10"
+              onClick={() =>
+                onChange({ ...config, mappings: mappings.filter((_, i) => i !== index) })
+              }
+            >
+              Remove
+            </Button>
+          </div>
+        ))}
         <Button
           type="button"
           variant="outline"
           size="sm"
-          onClick={() => onChange({ ...config, code: DEFAULT_BOT_CODE })}
+          onClick={() =>
+            onChange({
+              ...config,
+              mappings: [...mappings, { channel_key: '', webhook_urls: [] }],
+            })
+          }
         >
-          Reset to Example
+          + Add mapping
         </Button>
       </div>
 
-      <Suspense
-        fallback={
-          <div className="h-64 md:h-96 rounded-md border border-input bg-code-editor-bg flex items-center justify-center text-muted-foreground">
-            Loading editor...
-          </div>
-        }
-      >
-        <BotCodeEditor value={code} onChange={(c) => onChange({ ...config, code: c })} />
-      </Suspense>
+      <Separator />
 
-      <div className="text-[0.8125rem] text-muted-foreground space-y-1">
-        <p>
-          <strong>Available:</strong> Standard Python libraries and any modules installed in the
-          server environment.
-        </p>
-        <p>
-          <strong>Limits:</strong> 10 second timeout per bot.
-        </p>
-        <p>
-          <strong>Note:</strong> Bots respond to all messages, including your own. For channel
-          messages, <code>sender_key</code> is <code>None</code>. Multiple enabled bots run
-          concurrently. Outgoing messages are serialized with a two-second delay between sends to
-          prevent repeater collision.
-        </p>
+      <BridgeCommonFields idPrefix="fanout-discord-bridge" config={config} onChange={onChange} />
+    </div>
+  );
+}
+
+function TelegramBridgeConfigEditor({
+  config,
+  onChange,
+}: {
+  config: Record<string, unknown>;
+  onChange: (config: Record<string, unknown>) => void;
+}) {
+  const [channels, setChannels] = useState<Channel[]>([]);
+
+  useEffect(() => {
+    api.getChannels().then(setChannels).catch(console.error);
+  }, []);
+
+  const mappings = getBridgeMappings(config);
+
+  const updateMapping = (index: number, patch: Record<string, unknown>) => {
+    const next = mappings.map((m, i) => (i === index ? { ...m, ...patch } : m));
+    onChange({ ...config, mappings: next });
+  };
+
+  return (
+    <div className="space-y-3">
+      <p className="text-[0.8125rem] text-muted-foreground">
+        One-way: mesh → Telegram. DMs are never bridged. Uses the message fanout bus, same as MQTT.
+      </p>
+
+      <div className="space-y-2">
+        <Label htmlFor="fanout-telegram-bridge-token">Bot API token</Label>
+        <Input
+          id="fanout-telegram-bridge-token"
+          type="password"
+          placeholder="123456:ABC-DEF…"
+          value={(config.api_token as string) || ''}
+          onChange={(e) => onChange({ ...config, api_token: e.target.value })}
+        />
       </div>
+
+      <div className="space-y-2">
+        <Label>Bridged channels → Telegram chats</Label>
+        {mappings.length === 0 && <p className="text-xs text-muted-foreground">No mappings yet.</p>}
+        {mappings.map((mapping, index) => (
+          <div key={index} className="flex items-center gap-2">
+            <select
+              value={(mapping.channel_key as string) || ''}
+              onChange={(e) => updateMapping(index, { channel_key: e.target.value })}
+              className="w-44 rounded-md border border-input bg-background px-3 py-2 text-sm"
+              aria-label={`Mapping ${index + 1} channel`}
+            >
+              <option value="">Select channel…</option>
+              {channels.map((c) => (
+                <option key={c.key} value={c.key}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+            <Input
+              value={(mapping.chat_id as string) || ''}
+              onChange={(e) => updateMapping(index, { chat_id: e.target.value })}
+              placeholder="chat id, e.g. -1001234567890"
+              className="flex-1 font-mono"
+              aria-label={`Mapping ${index + 1} chat id`}
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-9 px-2 text-xs text-destructive hover:bg-destructive/10"
+              onClick={() =>
+                onChange({ ...config, mappings: mappings.filter((_, i) => i !== index) })
+              }
+            >
+              Remove
+            </Button>
+          </div>
+        ))}
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() =>
+            onChange({
+              ...config,
+              mappings: [...mappings, { channel_key: '', chat_id: '' }],
+            })
+          }
+        >
+          + Add mapping
+        </Button>
+      </div>
+
+      <Separator />
+
+      <BridgeCommonFields idPrefix="fanout-telegram-bridge" config={config} onChange={onChange} />
     </div>
   );
 }
@@ -3043,13 +3156,7 @@ export function SettingsFanoutSection({
     loadConfigs();
   }, [loadConfigs]);
 
-  const availableCreateOptions = useMemo(
-    () =>
-      CREATE_INTEGRATION_DEFINITIONS.filter(
-        (definition) => definition.savedType !== 'bot' || !health?.bots_disabled
-      ),
-    [health?.bots_disabled]
-  );
+  const availableCreateOptions = CREATE_INTEGRATION_DEFINITIONS;
 
   useEffect(() => {
     if (!createDialogOpen) return;
@@ -3297,7 +3404,13 @@ export function SettingsFanoutSection({
           />
         )}
 
-        {detailType === 'bot' && <BotConfigEditor config={editConfig} onChange={setEditConfig} />}
+        {detailType === 'discord_bridge' && (
+          <DiscordBridgeConfigEditor config={editConfig} onChange={setEditConfig} />
+        )}
+
+        {detailType === 'telegram_bridge' && (
+          <TelegramBridgeConfigEditor config={editConfig} onChange={setEditConfig} />
+        )}
 
         {detailType === 'apprise' && (
           <AppriseConfigEditor
@@ -3361,18 +3474,19 @@ export function SettingsFanoutSection({
   // List view
   return (
     <div className={cn('mx-auto w-full max-w-[800px] space-y-4', className)}>
+      <div className="rounded-lg border border-primary/20 bg-primary/5 p-4 text-[0.8125rem] leading-relaxed">
+        <span className="font-semibold">Python bots have moved.</span>{' '}
+        <span className="text-muted-foreground">
+          Message bots, cron jobs, feeds and logs now live in the Bots workspace (sidebar › Tools ›
+          Bots). Existing bots were migrated automatically. This page keeps pure forwarding
+          integrations.
+        </span>
+      </div>
+
       <div className="rounded-md border border-warning/50 bg-warning/10 px-4 py-3 text-sm text-warning">
         Integrations are an experimental feature in open beta, and allow you to fanout raw and
         decrypted messages across multiple services for automation, analysis, or archiving.
       </div>
-
-      {health?.bots_disabled && (
-        <div className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-          {health.bots_disabled_source === 'until_restart'
-            ? 'Bot system is disabled until the server restarts. Bot integrations cannot run, be created, or be modified right now.'
-            : 'Bot system is disabled by server configuration (MESHCORE_DISABLE_BOTS). Bot integrations cannot run, be created, or be modified.'}
-        </div>
-      )}
 
       <div className="flex flex-wrap gap-2">
         <Button type="button" size="sm" onClick={() => setCreateDialogOpen(true)}>

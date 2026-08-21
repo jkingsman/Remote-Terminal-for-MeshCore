@@ -19,23 +19,24 @@ class TestDisableBotsFanoutEndpoint:
     """Test that bot creation via fanout router is rejected when bots are disabled."""
 
     @pytest.mark.asyncio
-    async def test_bot_create_returns_403_when_disabled(self, test_db):
-        """POST /api/fanout with type=bot returns 403."""
-        with patch(
-            "app.routers.fanout.fanout_manager.get_bots_disabled_source", return_value="env"
-        ):
-            with pytest.raises(HTTPException) as exc_info:
-                await create_fanout_config(
-                    FanoutConfigCreate(
-                        type="bot",
-                        name="Test Bot",
-                        config={"code": "def bot(**k): pass"},
-                        enabled=False,
-                    )
-                )
+    async def test_bot_create_rejected_as_invalid_type(self, test_db):
+        """POST /api/fanout with type=bot is no longer a valid type.
 
-            assert exc_info.value.status_code == 403
-            assert "disabled" in exc_info.value.detail.lower()
+        Python bots moved to the Bots workspace (/api/bots, migration 064);
+        the fanout API refuses to create new ones regardless of disable state.
+        """
+        with pytest.raises(HTTPException) as exc_info:
+            await create_fanout_config(
+                FanoutConfigCreate(
+                    type="bot",
+                    name="Test Bot",
+                    config={"code": "def bot(**k): pass"},
+                    enabled=False,
+                )
+            )
+
+        assert exc_info.value.status_code == 400
+        assert "invalid type" in exc_info.value.detail.lower()
 
     @pytest.mark.asyncio
     async def test_mqtt_create_allowed_when_bots_disabled(self, test_db):
@@ -55,7 +56,7 @@ class TestDisableBotsFanoutEndpoint:
             assert result["type"] == "mqtt_private"
 
     @pytest.mark.asyncio
-    async def test_bot_create_returns_403_when_disabled_until_restart(self, test_db):
+    async def test_bot_create_rejected_even_when_disabled_until_restart(self, test_db):
         with patch(
             "app.routers.fanout.fanout_manager.get_bots_disabled_source",
             return_value="until_restart",
@@ -70,8 +71,9 @@ class TestDisableBotsFanoutEndpoint:
                     )
                 )
 
-            assert exc_info.value.status_code == 403
-            assert "until the server restarts" in exc_info.value.detail
+            # Invalid-type rejection now precedes the disabled-state check.
+            assert exc_info.value.status_code == 400
+            assert "invalid type" in exc_info.value.detail.lower()
 
     @pytest.mark.asyncio
     async def test_disable_bots_until_restart_endpoint(self, test_db):
