@@ -33,7 +33,7 @@ export const SETTINGS_SECTION_LABELS: Record<SettingsSection, string> = {
   local: 'Local Configuration',
   'radio-app': 'Radio-App Management',
   database: 'Database',
-  fanout: 'MQTT & Automation',
+  fanout: 'Integrations',
   statistics: 'Statistics',
   about: 'About',
 };

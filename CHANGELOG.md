@@ -1,3 +1,15 @@
+## [Unreleased]
+
+* Feature: Bots workspace — a new top-level view (sidebar › Tools › Bots) merging meshcore-bot's functionality: the full meshcore-bot library as 49 built-in bots (weather, solar, mesh info & tracing, sports, fun, emergency alerts, admin tools…) seeded as editable Python scripts in the database, with per-bot settings panels, scope/limits, an in-app code editor, a sandboxed test console, and per-bot run history
+* Feature: One bot, many triggers — keyword commands, cron schedules (5-field crontab + @presets, day-of-week 0=Monday), mesh events (new contact), and token-gated inbound webhooks (`POST /api/hooks/{slug}`); new `ctx` API supports cross-channel sends, DMs, persistent state, HTTP, geocoding, and i18n
+* Feature: Scheduler tab — standalone cron messages to any channel with mesh-stat placeholders and optional region scoping
+* Feature: Feeds tab — RSS/JSON-API subscriptions posting new items to channels, with format templates, previews, and an SSRF guard
+* Feature: Bots dashboard, live engine log view (WebSocket), and Engine settings (command prefix, mentions, rate limits, language auto-detection with 10 ported locales, banned users, profanity filter, global admin list)
+* Feature: Discord and Telegram one-way channel bridges as fanout integrations
+* Feature: Multibyte Rollout panel in Settings › Statistics — node-level multibyte path adoption (contacts and repeaters by direct-route hop width), complementing the packet-level Path Hash Width chart
+* Note: meshcore-bot's channelpause and reload commands are intentionally not ported — the workspace's per-bot enable toggles, the disable-all kill switch, and hot reload on save supersede them
+* Change: Settings › "MQTT & Automation" is now "Integrations"; legacy fanout Python bots migrate automatically into the Bots workspace (migration 064) and keep their exact behavior via the legacy `def bot(**kwargs)` wrapper
+
 ## [3.17.1] - 2026-07-26
 
 * Feature: Auto-retry with flood for no-response-heard repeater login

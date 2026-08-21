@@ -1,3 +1,10 @@
+from app.repository.bots import (
+    BotEngineSettingsRepository,
+    BotFeedRepository,
+    BotRepository,
+    BotRunRepository,
+    BotScheduleRepository,
+)
 from app.repository.channels import ChannelRepository
 from app.repository.contacts import (
     AmbiguousPublicKeyPrefixError,
@@ -14,6 +21,11 @@ from app.repository.settings import AppSettingsRepository, StatisticsRepository
 __all__ = [
     "AmbiguousPublicKeyPrefixError",
     "AppSettingsRepository",
+    "BotEngineSettingsRepository",
+    "BotFeedRepository",
+    "BotRepository",
+    "BotRunRepository",
+    "BotScheduleRepository",
     "ChannelRepository",
     "ContactAdvertPathRepository",
     "ContactNameHistoryRepository",

@@ -104,10 +104,12 @@ def broadcast_event(event_type: str, data: dict, *, realtime: bool = True) -> No
     asyncio.create_task(ws_manager.broadcast(event_type, data))
 
     if realtime:
+        from app.bots.engine import bot_engine
         from app.fanout.manager import fanout_manager
 
         if event_type == "message":
             asyncio.create_task(fanout_manager.broadcast_message(data))
+            bot_engine.handle_message_event(data)
 
             from app.push.manager import push_manager
 
@@ -116,6 +118,7 @@ def broadcast_event(event_type: str, data: dict, *, realtime: bool = True) -> No
             asyncio.create_task(fanout_manager.broadcast_raw(data))
         elif event_type == "contact":
             asyncio.create_task(fanout_manager.broadcast_contact(data))
+            bot_engine.handle_contact_event(data)
 
 
 def broadcast_error(message: str, details: str | None = None) -> None:

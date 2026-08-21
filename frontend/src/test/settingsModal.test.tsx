@@ -777,6 +777,15 @@ describe('SettingsModal', () => {
         double_byte_pct: 30,
         triple_byte_pct: 20,
       },
+      multibyte_rollout: {
+        contacts_with_route: 0,
+        contacts_multibyte: 0,
+        single_byte: 0,
+        double_byte: 0,
+        triple_byte: 0,
+        repeaters_with_route: 0,
+        repeaters_multibyte: 0,
+      },
       region_scope_24h: {
         total_messages: 120,
         scoped_messages: 40,
@@ -870,6 +879,15 @@ describe('SettingsModal', () => {
       },
       // Mirrors real-world data: 70 "scoped" packets against a measured floor of
       // 60 is corrupt-capture noise, not adoption.
+      multibyte_rollout: {
+        contacts_with_route: 0,
+        contacts_multibyte: 0,
+        single_byte: 0,
+        double_byte: 0,
+        triple_byte: 0,
+        repeaters_with_route: 0,
+        repeaters_multibyte: 0,
+      },
       region_scope_24h: {
         total_messages: 391757,
         scoped_messages: 70,
@@ -936,6 +954,15 @@ describe('SettingsModal', () => {
         double_byte_pct: 0,
         triple_byte_pct: 0,
       },
+      multibyte_rollout: {
+        contacts_with_route: 0,
+        contacts_multibyte: 0,
+        single_byte: 0,
+        double_byte: 0,
+        triple_byte: 0,
+        repeaters_with_route: 0,
+        repeaters_multibyte: 0,
+      },
       region_scope_24h: {
         total_messages: 5000,
         scoped_messages: 12,
@@ -998,6 +1025,15 @@ describe('SettingsModal', () => {
         single_byte_pct: 50,
         double_byte_pct: 30,
         triple_byte_pct: 20,
+      },
+      multibyte_rollout: {
+        contacts_with_route: 0,
+        contacts_multibyte: 0,
+        single_byte: 0,
+        double_byte: 0,
+        triple_byte: 0,
+        repeaters_with_route: 0,
+        repeaters_multibyte: 0,
       },
       region_scope_24h: {
         total_messages: 0,

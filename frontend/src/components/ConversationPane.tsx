@@ -28,6 +28,7 @@ const RepeaterDashboard = lazy(() =>
   import('./RepeaterDashboard').then((m) => ({ default: m.RepeaterDashboard }))
 );
 const MapView = lazy(() => import('./MapView').then((m) => ({ default: m.MapView })));
+const BotsView = lazy(() => import('./bots/BotsView').then((m) => ({ default: m.BotsView })));
 const VisualizerView = lazy(() =>
   import('./VisualizerView').then((m) => ({ default: m.VisualizerView }))
 );
@@ -244,6 +245,22 @@ export function ConversationPane({
 
   if (activeConversation.type === 'raw') {
     return <RawPacketFeedView contacts={contacts} channels={channels} />;
+  }
+
+  if (activeConversation.type === 'bots') {
+    return (
+      <Suspense fallback={<LoadingPane label="Loading bots..." />}>
+        <BotsView
+          botId={activeConversation.botId ?? null}
+          channels={channels}
+          contacts={contacts}
+          onOpenBot={(botId) =>
+            onSelectConversation({ type: 'bots', id: 'bots', name: 'Bots', botId })
+          }
+          onCloseBot={() => onSelectConversation({ type: 'bots', id: 'bots', name: 'Bots' })}
+        />
+      </Suspense>
+    );
   }
 
   if (activeConversation.type === 'search') {

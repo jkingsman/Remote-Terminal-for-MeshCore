@@ -43,6 +43,17 @@ import type {
   StatisticsResponse,
   TraceResponse,
   UnreadCounts,
+  Bot,
+  BotEngineSettings,
+  BotEngineStatus,
+  BotFeed,
+  BotLibraryEntry,
+  BotLogEntry,
+  BotRun,
+  BotSchedule,
+  BotStats,
+  BotTestResponse,
+  BotUpdatePayload,
 } from './types';
 
 const API_BASE = './api';
@@ -502,5 +513,114 @@ export const api = {
     fetchJson<string[]>('/push/conversations/toggle', {
       method: 'POST',
       body: JSON.stringify({ key }),
+    }),
+
+  // Bots workspace
+  getBots: () => fetchJson<Bot[]>('/bots'),
+  getBot: (id: string) => fetchJson<Bot>(`/bots/${id}`),
+  createBot: (body: {
+    name: string;
+    category?: string;
+    description?: string;
+    code?: string;
+    enabled?: boolean;
+    from_builtin_key?: string | null;
+  }) => fetchJson<Bot>('/bots', { method: 'POST', body: JSON.stringify(body) }),
+  updateBot: (id: string, body: BotUpdatePayload) =>
+    fetchJson<Bot>(`/bots/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  deleteBot: (id: string) => fetchJson<{ status: string }>(`/bots/${id}`, { method: 'DELETE' }),
+  resetBot: (id: string) => fetchJson<Bot>(`/bots/${id}/reset`, { method: 'POST' }),
+  testBot: (
+    id: string,
+    body: {
+      text: string;
+      is_dm?: boolean;
+      sender_name?: string;
+      sender_key?: string | null;
+      channel_key?: string | null;
+      channel_name?: string | null;
+    }
+  ) =>
+    fetchJson<BotTestResponse>(`/bots/${id}/test`, { method: 'POST', body: JSON.stringify(body) }),
+  getBotLibrary: () => fetchJson<BotLibraryEntry[]>('/bots/library'),
+  getBotRuns: (botId?: string, limit = 50) =>
+    fetchJson<BotRun[]>(
+      `/bots/runs?limit=${limit}${botId ? `&bot_id=${encodeURIComponent(botId)}` : ''}`
+    ),
+  getBotStats: (window: '1h' | '24h' | '7d') => fetchJson<BotStats>(`/bots/stats?window=${window}`),
+  getBotLogs: (limit = 200) => fetchJson<BotLogEntry[]>(`/bots/logs?limit=${limit}`),
+  getBotEngine: () => fetchJson<BotEngineStatus>('/bots/engine'),
+  updateBotEngine: (body: Partial<BotEngineSettings>) =>
+    fetchJson<BotEngineStatus>('/bots/engine', { method: 'PATCH', body: JSON.stringify(body) }),
+  // Bots kill switch: reuses disableBotsUntilRestart() above — the server now
+  // silences BOTH the legacy fanout bot modules and the Bots workspace engine
+  // from either endpoint.
+  getBotSchedules: () => fetchJson<BotSchedule[]>('/bots/schedules/all'),
+  createBotSchedule: (body: {
+    label: string;
+    cron: string;
+    channel_key: string;
+    message: string;
+    flood_scope?: string | null;
+    enabled?: boolean;
+  }) => fetchJson<BotSchedule>('/bots/schedules', { method: 'POST', body: JSON.stringify(body) }),
+  updateBotSchedule: (
+    id: string,
+    body: Partial<{
+      label: string;
+      cron: string;
+      channel_key: string;
+      message: string;
+      flood_scope: string | null;
+      enabled: boolean;
+    }>
+  ) =>
+    fetchJson<BotSchedule>(`/bots/schedules/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  deleteBotSchedule: (id: string) =>
+    fetchJson<{ status: string }>(`/bots/schedules/${id}`, { method: 'DELETE' }),
+  validateCron: (cron: string) =>
+    fetchJson<{ valid: boolean; error: string | null; next_runs: number[] }>(
+      `/bots/schedules/validate-cron?cron=${encodeURIComponent(cron)}`
+    ),
+  getBotFeeds: () => fetchJson<BotFeed[]>('/bots/feeds/all'),
+  createBotFeed: (body: {
+    name: string;
+    feed_type: 'rss' | 'api';
+    url: string;
+    channel_key: string;
+    interval_seconds?: number;
+    format?: string;
+    items_path?: string | null;
+    max_posts_per_check?: number;
+    enabled?: boolean;
+  }) => fetchJson<BotFeed>('/bots/feeds', { method: 'POST', body: JSON.stringify(body) }),
+  updateBotFeed: (
+    id: string,
+    body: Partial<{
+      name: string;
+      feed_type: 'rss' | 'api';
+      url: string;
+      channel_key: string;
+      interval_seconds: number;
+      format: string;
+      items_path: string | null;
+      max_posts_per_check: number;
+      enabled: boolean;
+    }>
+  ) => fetchJson<BotFeed>(`/bots/feeds/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  deleteBotFeed: (id: string) =>
+    fetchJson<{ status: string }>(`/bots/feeds/${id}`, { method: 'DELETE' }),
+  testBotFeed: (body: {
+    url: string;
+    feed_type: 'rss' | 'api';
+    items_path?: string | null;
+    format?: string;
+  }) =>
+    fetchJson<{ item_count: number; preview: string[] }>('/bots/feeds/test', {
+      method: 'POST',
+      body: JSON.stringify(body),
     }),
 };

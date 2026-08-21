@@ -1125,6 +1125,20 @@ class RegionScopeStats(BaseModel):
     scoped_senders_pct: float
 
 
+class MultibyteRolloutStats(BaseModel):
+    """Contact-level multibyte path adoption (folded in from meshcore-bot's
+    rollout monitor). Counts contacts by the hop width of their known direct
+    route; packet-level shares live in ``path_hash_width_24h``."""
+
+    contacts_with_route: int = Field(description="Contacts with a known direct-route hop width")
+    contacts_multibyte: int = Field(description="Of those, contacts using 2- or 3-byte hops")
+    single_byte: int
+    double_byte: int
+    triple_byte: int
+    repeaters_with_route: int
+    repeaters_multibyte: int
+
+
 class StatisticsResponse(BaseModel):
     busiest_channels_24h: list[BusyChannel]
     contact_count: int
@@ -1141,6 +1155,7 @@ class StatisticsResponse(BaseModel):
     known_channels_active: ContactActivityCounts
     path_hash_width_24h: PathHashWidthStats
     region_scope_24h: RegionScopeStats
+    multibyte_rollout: MultibyteRolloutStats
     packets_per_hour_72h: list[PacketsPerHourBucket]
     noise_floor_24h: NoiseFloorHistoryStats
 
@@ -1148,3 +1163,250 @@ class StatisticsResponse(BaseModel):
 class TelemetryHistoryEntry(BaseModel):
     timestamp: int
     data: dict
+
+
+# ---------------------------------------------------------------------------
+# Bots workspace
+# ---------------------------------------------------------------------------
+
+
+class BotUiTrigger(BaseModel):
+    """A trigger added on the bot's Triggers tab (not declared in code).
+
+    ``kind`` is one of ``keyword`` / ``cron``; ``spec`` is the keyword text or
+    the cron expression. Code-declared triggers are derived from the source at
+    load time and are not stored here.
+    """
+
+    kind: str
+    spec: str
+
+
+class Bot(BaseModel):
+    id: str
+    name: str
+    category: str = "Custom"
+    description: str = ""
+    code: str = ""
+    enabled: bool = False
+    admin_only: bool = False
+    respond_to_dms: bool = True
+    scope: dict = Field(default_factory=lambda: {"channels": "all"})
+    cooldown_seconds: float = 0
+    per_user_cooldown_seconds: float = 0
+    queue_threshold_seconds: float = 0
+    settings_schema: list[dict] = Field(default_factory=list)
+    settings: dict = Field(default_factory=dict)
+    ui_triggers: list[dict] = Field(default_factory=list)
+    builtin_key: str | None = None
+    builtin_version: str | None = None
+    modified: bool = False
+    last_error: str | None = None
+    sort_order: int = 0
+    created_at: int = 0
+    updated_at: int = 0
+    # Derived at load time from the code (not stored):
+    declared_keywords: list[str] = Field(default_factory=list)
+    declared_crons: list[str] = Field(default_factory=list)
+    declared_events: list[str] = Field(default_factory=list)
+    declared_webhooks: list[str] = Field(default_factory=list)
+    is_legacy: bool = False
+    load_error: str | None = None
+    runs_24h: int = 0
+
+
+class BotCreateRequest(BaseModel):
+    name: str
+    category: str = "Custom"
+    description: str = ""
+    code: str = ""
+    enabled: bool = False
+    from_builtin_key: str | None = None
+
+
+class BotUpdateRequest(BaseModel):
+    name: str | None = None
+    category: str | None = None
+    description: str | None = None
+    code: str | None = None
+    enabled: bool | None = None
+    admin_only: bool | None = None
+    respond_to_dms: bool | None = None
+    scope: dict | None = None
+    cooldown_seconds: float | None = None
+    per_user_cooldown_seconds: float | None = None
+    queue_threshold_seconds: float | None = None
+    settings: dict | None = None
+    ui_triggers: list[dict] | None = None
+
+
+class BotTestRequest(BaseModel):
+    text: str
+    is_dm: bool = False
+    sender_name: str = "TestUser"
+    sender_key: str | None = None
+    channel_key: str | None = None
+    channel_name: str | None = None
+
+
+class BotTestResponse(BaseModel):
+    matched: bool
+    trigger: str | None = None
+    duration_ms: int = 0
+    replies: list[dict] = Field(default_factory=list)
+    error: str | None = None
+    logs: list[str] = Field(default_factory=list)
+
+
+class BotRun(BaseModel):
+    id: int
+    bot_id: str
+    bot_name: str = ""
+    started_at: int
+    duration_ms: int | None = None
+    trigger: str
+    sender_name: str | None = None
+    sender_key: str | None = None
+    channel_key: str | None = None
+    channel_name: str | None = None
+    is_dm: bool = False
+    result: str
+    replies: int = 0
+    error: str | None = None
+    test_run: bool = False
+
+
+class BotSchedule(BaseModel):
+    id: str
+    label: str
+    cron: str
+    channel_key: str
+    flood_scope: str | None = None
+    message: str
+    enabled: bool = True
+    last_run_at: int | None = None
+    last_result: str | None = None
+    created_at: int = 0
+    next_run_at: int | None = None
+    channel_name: str | None = None
+
+
+class BotScheduleCreateRequest(BaseModel):
+    label: str
+    cron: str
+    channel_key: str
+    message: str
+    flood_scope: str | None = None
+    enabled: bool = True
+
+
+class BotScheduleUpdateRequest(BaseModel):
+    label: str | None = None
+    cron: str | None = None
+    channel_key: str | None = None
+    message: str | None = None
+    flood_scope: str | None = None
+    enabled: bool | None = None
+
+
+class BotFeed(BaseModel):
+    id: str
+    name: str
+    feed_type: str = "rss"
+    url: str
+    channel_key: str
+    interval_seconds: int = 1800
+    format: str
+    items_path: str | None = None
+    enabled: bool = True
+    last_item_id: str | None = None
+    last_check_at: int | None = None
+    last_error: str | None = None
+    error_count: int = 0
+    items_posted: int = 0
+    max_posts_per_check: int = 3
+    created_at: int = 0
+    channel_name: str | None = None
+
+
+class BotFeedCreateRequest(BaseModel):
+    name: str
+    feed_type: str = "rss"
+    url: str
+    channel_key: str
+    interval_seconds: int = 1800
+    format: str = "{title|truncate:120}\n{link}"
+    items_path: str | None = None
+    max_posts_per_check: int = 3
+    enabled: bool = True
+
+
+class BotFeedUpdateRequest(BaseModel):
+    name: str | None = None
+    feed_type: str | None = None
+    url: str | None = None
+    channel_key: str | None = None
+    interval_seconds: int | None = None
+    format: str | None = None
+    items_path: str | None = None
+    max_posts_per_check: int | None = None
+    enabled: bool | None = None
+
+
+class BotFeedTestRequest(BaseModel):
+    url: str
+    feed_type: str = "rss"
+    items_path: str | None = None
+    format: str = "{title|truncate:120}\n{link}"
+
+
+class BotAdminUser(BaseModel):
+    public_key: str
+    name: str = ""
+
+
+class BotEngineSettings(BaseModel):
+    command_prefix: str = "!"
+    require_prefix: bool = False
+    mention_mode: str = "also"
+    global_reply_seconds: float = 10
+    per_user_seconds: float = 30
+    tx_spacing_seconds: float = 2.0
+    max_response_hops: int = 64
+    default_language: str = "en"
+    auto_detect_language: bool = True
+    banned_users: list[str] = Field(default_factory=list)
+    profanity_mode: str = "off"
+    admin_users: list[BotAdminUser] = Field(default_factory=list)
+
+
+class BotEngineSettingsUpdate(BaseModel):
+    command_prefix: str | None = None
+    require_prefix: bool | None = None
+    mention_mode: str | None = None
+    global_reply_seconds: float | None = None
+    per_user_seconds: float | None = None
+    tx_spacing_seconds: float | None = None
+    max_response_hops: int | None = None
+    default_language: str | None = None
+    auto_detect_language: bool | None = None
+    banned_users: list[str] | None = None
+    profanity_mode: str | None = None
+    admin_users: list[BotAdminUser] | None = None
+
+
+class BotEngineStatus(BaseModel):
+    settings: BotEngineSettings
+    disabled_until_restart: bool = False
+    disabled_by_env: bool = False
+    total_bots: int = 0
+    enabled_bots: int = 0
+    erroring_bots: int = 0
+    runs_24h: int = 0
+
+
+class BotLogEntry(BaseModel):
+    timestamp: float
+    level: str
+    source: str
+    message: str

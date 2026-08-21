@@ -150,6 +150,100 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
     failure_count INTEGER DEFAULT 0,
     UNIQUE(endpoint)
 );
+
+CREATE TABLE IF NOT EXISTS bots (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    category TEXT NOT NULL DEFAULT 'Custom',
+    description TEXT NOT NULL DEFAULT '',
+    code TEXT NOT NULL DEFAULT '',
+    enabled INTEGER DEFAULT 0,
+    admin_only INTEGER DEFAULT 0,
+    respond_to_dms INTEGER DEFAULT 1,
+    scope TEXT NOT NULL DEFAULT '{"channels": "all"}',
+    cooldown_seconds REAL DEFAULT 0,
+    per_user_cooldown_seconds REAL DEFAULT 0,
+    queue_threshold_seconds REAL DEFAULT 0,
+    settings_schema TEXT NOT NULL DEFAULT '[]',
+    settings TEXT NOT NULL DEFAULT '{}',
+    ui_triggers TEXT NOT NULL DEFAULT '[]',
+    state TEXT NOT NULL DEFAULT '{}',
+    builtin_key TEXT,
+    builtin_version TEXT,
+    modified INTEGER DEFAULT 0,
+    last_error TEXT,
+    sort_order INTEGER DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS bot_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    bot_id TEXT NOT NULL,
+    started_at INTEGER NOT NULL,
+    duration_ms INTEGER,
+    trigger TEXT NOT NULL,
+    sender_name TEXT,
+    sender_key TEXT,
+    channel_key TEXT,
+    channel_name TEXT,
+    is_dm INTEGER DEFAULT 0,
+    result TEXT NOT NULL,
+    replies INTEGER DEFAULT 0,
+    error TEXT,
+    test_run INTEGER DEFAULT 0,
+    FOREIGN KEY (bot_id) REFERENCES bots(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS bot_schedules (
+    id TEXT PRIMARY KEY,
+    label TEXT NOT NULL,
+    cron TEXT NOT NULL,
+    channel_key TEXT NOT NULL,
+    flood_scope TEXT,
+    message TEXT NOT NULL,
+    enabled INTEGER DEFAULT 1,
+    last_run_at INTEGER,
+    last_result TEXT,
+    created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS bot_feeds (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    feed_type TEXT NOT NULL DEFAULT 'rss',
+    url TEXT NOT NULL,
+    channel_key TEXT NOT NULL,
+    interval_seconds INTEGER DEFAULT 1800,
+    format TEXT NOT NULL DEFAULT '{title|truncate:120}
+{link}',
+    items_path TEXT,
+    enabled INTEGER DEFAULT 1,
+    last_item_id TEXT,
+    last_check_at INTEGER,
+    last_error TEXT,
+    error_count INTEGER DEFAULT 0,
+    items_posted INTEGER DEFAULT 0,
+    max_posts_per_check INTEGER DEFAULT 3,
+    created_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS bot_engine_settings (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    command_prefix TEXT DEFAULT '!',
+    require_prefix INTEGER DEFAULT 0,
+    mention_mode TEXT DEFAULT 'also',
+    global_reply_seconds REAL DEFAULT 10,
+    per_user_seconds REAL DEFAULT 30,
+    tx_spacing_seconds REAL DEFAULT 2.0,
+    max_response_hops INTEGER DEFAULT 64,
+    default_language TEXT DEFAULT 'en',
+    auto_detect_language INTEGER DEFAULT 1,
+    banned_users TEXT DEFAULT '[]',
+    profanity_mode TEXT DEFAULT 'off',
+    admin_users TEXT DEFAULT '[]'
+);
+INSERT OR IGNORE INTO bot_engine_settings (id) VALUES (1);
 """
 
 # Indexes are created after migrations so that legacy databases have all
@@ -180,6 +274,9 @@ CREATE INDEX IF NOT EXISTS idx_contact_name_history_key
     ON contact_name_history(public_key, last_seen DESC);
 CREATE INDEX IF NOT EXISTS idx_repeater_telemetry_pk_ts
     ON repeater_telemetry_history(public_key, timestamp);
+CREATE INDEX IF NOT EXISTS idx_bot_runs_bot_started
+    ON bot_runs(bot_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_bot_runs_started ON bot_runs(started_at);
 """
 
 
