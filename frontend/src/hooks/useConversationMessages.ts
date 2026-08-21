@@ -275,9 +275,7 @@ interface UseConversationMessagesResult {
 }
 
 function isMessageConversation(conversation: Conversation | null): conversation is Conversation {
-  return (
-    !!conversation && !['raw', 'map', 'visualizer', 'search', 'trace'].includes(conversation.type)
-  );
+  return !!conversation && (conversation.type === 'channel' || conversation.type === 'contact');
 }
 
 function isActiveConversationMessage(

@@ -121,6 +121,7 @@ frontend/src/
 │   ├── SecurityWarningModal.tsx # Startup warning for trusted-network / bot execution posture
 │   ├── RawPacketList.tsx
 │   ├── RawPacketFeedView.tsx   # Live raw packet feed + session stats drawer
+│   ├── StatisticsView.tsx      # Read-only mesh network stats tool (incl. region-scope adoption)
 │   ├── RawPacketDetailModal.tsx # On-demand packet inspector dialog
 │   ├── MapView.tsx
 │   ├── TracePane.tsx           # Multi-hop route trace builder/results view
@@ -153,7 +154,6 @@ frontend/src/
 │   │   ├── SettingsFanoutSection.tsx     # Fanout integrations: MQTT, bots, config CRUD
 │   │   ├── SettingsRadioAppSection.tsx    # Radio-App Management: tracked telemetry, contact management, blocked lists
 │   │   ├── SettingsDatabaseSection.tsx   # Database: DB size, storage cleanup, auto-decrypt
-│   │   ├── SettingsStatisticsSection.tsx # Read-only mesh network stats (incl. region-scope adoption)
 │   │   ├── SettingsAboutSection.tsx     # Version, author, license, links
 │   │   ├── ThemeSelector.tsx           # Color theme picker
 │   │   └── BulkDeleteContactsModal.tsx # Bulk contact deletion dialog
@@ -203,6 +203,7 @@ frontend/src/
     ├── messageInput.test.tsx
     ├── newMessageModal.test.tsx
     ├── settingsModal.test.tsx
+    ├── statisticsView.test.tsx
     ├── sidebar.test.tsx
     ├── statusBar.test.tsx
     ├── tracePane.test.tsx
@@ -343,15 +344,17 @@ Supported routes:
 - `#visualizer`
 - `#search`
 - `#trace`
+- `#statistics`
 - `#settings/{section}`
 - `#channel/{channelKey}`
 - `#channel/{channelKey}/{label}`
 - `#contact/{publicKey}`
 - `#contact/{publicKey}/{label}`
 
-Where `{section}` is one of `radio`, `local`, `radio-app`, `database`, `fanout`, `statistics`, or `about`.
+Where `{section}` is one of `radio`, `local`, `radio-app`, `database`, `fanout`, or `about`.
 
-Legacy name-based channel/contact hashes are still accepted for compatibility.
+Legacy name-based channel/contact hashes are still accepted for compatibility, and the
+pre-move `#settings/statistics` hash redirects to the `#statistics` tool.
 
 ## Conversation State Keys (`utils/conversationState.ts`)
 
@@ -500,7 +503,7 @@ Key conventions documented in the reference:
 
 ### Region-scope adoption panel
 
-`SettingsStatisticsSection.tsx` renders `stats.region_scope_24h` via `RegionScopeStatsPanel`. Two presentation rules exist because regional adoption is currently very sparse, and both are deliberate:
+`StatisticsView.tsx` (sidebar › Tools › Statistics) renders `stats.region_scope_24h` via `RegionScopeStatsPanel`. Two presentation rules exist because regional adoption is currently very sparse, and both are deliberate:
 
 - **Fractions, not bare percentages.** "3 of 117" carries the sample size that "2.6%" hides.
 - **The traffic percentage is withheld** when the scoped count is at or below `false_positive_floor` (corrupt-capture noise) or when the share would round to `0.0%`. The floor caveat is always shown alongside a non-zero scoped count. The sender figure is never suppressed — it requires successful decryption and so carries no noise.

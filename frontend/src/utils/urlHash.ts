@@ -4,7 +4,16 @@ import { getContactDisplayName } from './pubkey';
 import type { SettingsSection } from '../components/settings/settingsConstants';
 
 interface ParsedHashConversation {
-  type: 'channel' | 'contact' | 'raw' | 'map' | 'visualizer' | 'search' | 'trace' | 'bots';
+  type:
+    | 'channel'
+    | 'contact'
+    | 'raw'
+    | 'map'
+    | 'visualizer'
+    | 'search'
+    | 'trace'
+    | 'bots'
+    | 'statistics';
   /** Conversation identity token (channel key or contact public key, or legacy name token) */
   name: string;
   /** Optional human-readable label segment (ignored for identity resolution) */
@@ -21,7 +30,6 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   'radio-app',
   'fanout',
   'database',
-  'statistics',
   'about',
 ];
 
@@ -53,6 +61,12 @@ export function parseHashConversation(): ParsedHashConversation | null {
 
   if (hash === 'bots') {
     return { type: 'bots', name: 'bots' };
+  }
+
+  // Statistics lived under Settings before becoming a sidebar tool; keep the
+  // old settings hash working as a redirect.
+  if (hash === 'statistics' || hash === 'settings/statistics') {
+    return { type: 'statistics', name: 'statistics' };
   }
 
   // Bots editor deep link: #bots/{botId}
@@ -167,6 +181,7 @@ export function getConversationHash(conv: Conversation | null): string {
   if (conv.type === 'visualizer') return '#visualizer';
   if (conv.type === 'search') return '#search';
   if (conv.type === 'trace') return '#trace';
+  if (conv.type === 'statistics') return '#statistics';
   if (conv.type === 'bots') {
     return conv.botId ? `#bots/${encodeURIComponent(conv.botId)}` : '#bots';
   }

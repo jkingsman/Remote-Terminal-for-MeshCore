@@ -32,6 +32,9 @@ const BotsView = lazy(() => import('./bots/BotsView').then((m) => ({ default: m.
 const VisualizerView = lazy(() =>
   import('./VisualizerView').then((m) => ({ default: m.VisualizerView }))
 );
+const StatisticsView = lazy(() =>
+  import('./StatisticsView').then((m) => ({ default: m.StatisticsView }))
+);
 
 interface ConversationPaneProps {
   activeConversation: Conversation | null;
@@ -259,6 +262,14 @@ export function ConversationPane({
           }
           onCloseBot={() => onSelectConversation({ type: 'bots', id: 'bots', name: 'Bots' })}
         />
+      </Suspense>
+    );
+  }
+
+  if (activeConversation.type === 'statistics') {
+    return (
+      <Suspense fallback={<LoadingPane label="Loading statistics..." />}>
+        <StatisticsView />
       </Suspense>
     );
   }

@@ -350,7 +350,8 @@ type ConversationType =
   | 'visualizer'
   | 'search'
   | 'trace'
-  | 'bots';
+  | 'bots'
+  | 'statistics';
 
 export interface Conversation {
   type: ConversationType;
