@@ -9,6 +9,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   parseHashConversation,
   parseHashSettingsSection,
+  getConversationHash,
   getSettingsHash,
   getMapFocusHash,
   resolveChannelFromHashToken,
@@ -58,6 +59,22 @@ describe('parseHashConversation', () => {
     const result = parseHashConversation();
 
     expect(result).toEqual({ type: 'trace', name: 'trace' });
+  });
+
+  it('parses #bots as bots type', () => {
+    window.location.hash = '#bots';
+
+    const result = parseHashConversation();
+
+    expect(result).toEqual({ type: 'bots', name: 'bots' });
+  });
+
+  it('parses #bots/{id} with a bot editor deep link', () => {
+    window.location.hash = '#bots/abc-123';
+
+    const result = parseHashConversation();
+
+    expect(result).toEqual({ type: 'bots', name: 'bots', botId: 'abc-123' });
   });
 
   it('parses #map/focus/PUBKEY with focus key', () => {
@@ -326,5 +343,17 @@ describe('getMapFocusHash', () => {
     const result = getMapFocusHash('AB CD/12');
 
     expect(result).toBe('#map/focus/AB%20CD%2F12');
+  });
+});
+
+describe('getConversationHash for bots', () => {
+  it('generates #bots for the workspace', () => {
+    expect(getConversationHash({ type: 'bots', id: 'bots', name: 'Bots' })).toBe('#bots');
+  });
+
+  it('generates #bots/{id} for the editor', () => {
+    expect(getConversationHash({ type: 'bots', id: 'bots', name: 'Bots', botId: 'abc-123' })).toBe(
+      '#bots/abc-123'
+    );
   });
 });

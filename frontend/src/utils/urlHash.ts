@@ -4,13 +4,15 @@ import { getContactDisplayName } from './pubkey';
 import type { SettingsSection } from '../components/settings/settingsConstants';
 
 interface ParsedHashConversation {
-  type: 'channel' | 'contact' | 'raw' | 'map' | 'visualizer' | 'search' | 'trace';
+  type: 'channel' | 'contact' | 'raw' | 'map' | 'visualizer' | 'search' | 'trace' | 'bots';
   /** Conversation identity token (channel key or contact public key, or legacy name token) */
   name: string;
   /** Optional human-readable label segment (ignored for identity resolution) */
   label?: string;
   /** For map view: public key prefix to focus on */
   mapFocusKey?: string;
+  /** For bots view: bot id to open in the editor */
+  botId?: string;
 }
 
 const SETTINGS_SECTIONS: SettingsSection[] = [
@@ -47,6 +49,16 @@ export function parseHashConversation(): ParsedHashConversation | null {
 
   if (hash === 'trace') {
     return { type: 'trace', name: 'trace' };
+  }
+
+  if (hash === 'bots') {
+    return { type: 'bots', name: 'bots' };
+  }
+
+  // Bots editor deep link: #bots/{botId}
+  if (hash.startsWith('bots/')) {
+    const botId = decodeURIComponent(hash.slice('bots/'.length));
+    return { type: 'bots', name: 'bots', ...(botId ? { botId } : {}) };
   }
 
   // Check for map with focus: #map/focus/{pubkey_prefix}
@@ -155,6 +167,9 @@ export function getConversationHash(conv: Conversation | null): string {
   if (conv.type === 'visualizer') return '#visualizer';
   if (conv.type === 'search') return '#search';
   if (conv.type === 'trace') return '#trace';
+  if (conv.type === 'bots') {
+    return conv.botId ? `#bots/${encodeURIComponent(conv.botId)}` : '#bots';
+  }
 
   // Use immutable IDs for identity, append readable label for UX.
   if (conv.type === 'channel') {

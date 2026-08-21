@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Bell,
   BellOff,
+  Bot,
   Cable,
   ChartNetwork,
   CheckCheck,
@@ -227,7 +228,7 @@ export function Sidebar({
   };
 
   const isActive = (
-    type: 'contact' | 'channel' | 'raw' | 'map' | 'visualizer' | 'search' | 'trace',
+    type: 'contact' | 'channel' | 'raw' | 'map' | 'visualizer' | 'search' | 'trace' | 'bots',
     id: string
   ) => activeConversation?.type === type && activeConversation?.id === id;
 
@@ -806,6 +807,18 @@ export function Sidebar({
               type: 'search',
               id: 'search',
               name: 'Message Search',
+            }),
+        }),
+        renderSidebarActionRow({
+          key: 'tool-bots',
+          active: isActive('bots', 'bots'),
+          icon: <Bot className="h-4 w-4" />,
+          label: 'Bots',
+          onClick: () =>
+            handleSelectConversation({
+              type: 'bots',
+              id: 'bots',
+              name: 'Bots',
             }),
         }),
         renderSidebarActionRow({

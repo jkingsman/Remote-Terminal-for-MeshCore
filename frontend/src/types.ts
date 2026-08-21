@@ -342,7 +342,15 @@ export interface ResendChannelMessageResponse {
   message?: Message;
 }
 
-type ConversationType = 'contact' | 'channel' | 'raw' | 'map' | 'visualizer' | 'search' | 'trace';
+type ConversationType =
+  | 'contact'
+  | 'channel'
+  | 'raw'
+  | 'map'
+  | 'visualizer'
+  | 'search'
+  | 'trace'
+  | 'bots';
 
 export interface Conversation {
   type: ConversationType;
@@ -351,6 +359,8 @@ export interface Conversation {
   name: string;
   /** For map view: public key prefix to focus on */
   mapFocusKey?: string;
+  /** For bots view: bot id to open in the editor */
+  botId?: string;
 }
 
 export interface RawPacket {
@@ -718,6 +728,219 @@ export interface StatisticsResponse {
     triple_byte_pct: number;
   };
   region_scope_24h: RegionScopeStats;
+  multibyte_rollout: MultibyteRolloutStats;
   packets_per_hour_72h: PacketsPerHourBucket[];
   noise_floor_24h: NoiseFloorHistoryStats;
+}
+
+/** Contact-level multibyte path adoption (nodes, not traffic). */
+export interface MultibyteRolloutStats {
+  contacts_with_route: number;
+  contacts_multibyte: number;
+  single_byte: number;
+  double_byte: number;
+  triple_byte: number;
+  repeaters_with_route: number;
+  repeaters_multibyte: number;
+}
+
+// ---------------------------------------------------------------------------
+// Bots workspace
+// ---------------------------------------------------------------------------
+
+export interface BotUiTrigger {
+  kind: 'keyword' | 'cron';
+  spec: string;
+}
+
+export interface BotSettingsSchemaField {
+  key: string;
+  label: string;
+  type: 'text' | 'password' | 'int' | 'float' | 'bool' | 'select';
+  default?: unknown;
+  help?: string;
+  min?: number;
+  max?: number;
+  options?: { value: string; label: string }[];
+}
+
+export interface Bot {
+  id: string;
+  name: string;
+  category: string;
+  description: string;
+  code: string;
+  enabled: boolean;
+  admin_only: boolean;
+  respond_to_dms: boolean;
+  scope: { channels: 'all' | 'none' | { only?: string[]; except?: string[] } };
+  cooldown_seconds: number;
+  per_user_cooldown_seconds: number;
+  queue_threshold_seconds: number;
+  settings_schema: BotSettingsSchemaField[];
+  settings: Record<string, unknown>;
+  ui_triggers: BotUiTrigger[];
+  builtin_key: string | null;
+  builtin_version: string | null;
+  modified: boolean;
+  last_error: string | null;
+  sort_order: number;
+  created_at: number;
+  updated_at: number;
+  declared_keywords: string[];
+  declared_crons: string[];
+  declared_events: string[];
+  declared_webhooks: string[];
+  is_legacy: boolean;
+  load_error: string | null;
+  runs_24h: number;
+}
+
+export interface BotUpdatePayload {
+  name?: string;
+  category?: string;
+  description?: string;
+  code?: string;
+  enabled?: boolean;
+  admin_only?: boolean;
+  respond_to_dms?: boolean;
+  scope?: Bot['scope'];
+  cooldown_seconds?: number;
+  per_user_cooldown_seconds?: number;
+  queue_threshold_seconds?: number;
+  settings?: Record<string, unknown>;
+  ui_triggers?: BotUiTrigger[];
+}
+
+export interface BotLibraryEntry {
+  key: string;
+  name: string;
+  category: string;
+  description: string;
+  version: string;
+  installed: boolean;
+}
+
+export interface BotRun {
+  id: number;
+  bot_id: string;
+  bot_name: string;
+  started_at: number;
+  duration_ms: number | null;
+  trigger: string;
+  sender_name: string | null;
+  sender_key: string | null;
+  channel_key: string | null;
+  channel_name: string | null;
+  is_dm: boolean;
+  result: string;
+  replies: number;
+  error: string | null;
+  test_run: boolean;
+}
+
+export interface BotTestResponse {
+  matched: boolean;
+  trigger: string | null;
+  duration_ms: number;
+  replies: {
+    is_dm: boolean;
+    destination: string | null;
+    channel_key: string | null;
+    text: string;
+    region: string | null;
+  }[];
+  error: string | null;
+  logs: string[];
+}
+
+export interface BotSchedule {
+  id: string;
+  label: string;
+  cron: string;
+  channel_key: string;
+  flood_scope: string | null;
+  message: string;
+  enabled: boolean;
+  last_run_at: number | null;
+  last_result: string | null;
+  created_at: number;
+  next_run_at: number | null;
+  channel_name: string | null;
+}
+
+export interface BotFeed {
+  id: string;
+  name: string;
+  feed_type: 'rss' | 'api';
+  url: string;
+  channel_key: string;
+  interval_seconds: number;
+  format: string;
+  items_path: string | null;
+  enabled: boolean;
+  last_item_id: string | null;
+  last_check_at: number | null;
+  last_error: string | null;
+  error_count: number;
+  items_posted: number;
+  max_posts_per_check: number;
+  created_at: number;
+  channel_name: string | null;
+}
+
+export interface BotAdminUser {
+  public_key: string;
+  name: string;
+}
+
+export interface BotEngineSettings {
+  command_prefix: string;
+  require_prefix: boolean;
+  mention_mode: 'also' | 'only' | 'off';
+  global_reply_seconds: number;
+  per_user_seconds: number;
+  tx_spacing_seconds: number;
+  max_response_hops: number;
+  default_language: string;
+  auto_detect_language: boolean;
+  banned_users: string[];
+  profanity_mode: 'off' | 'censor' | 'drop';
+  admin_users: BotAdminUser[];
+}
+
+export interface BotEngineStatus {
+  settings: BotEngineSettings;
+  disabled_until_restart: boolean;
+  disabled_by_env: boolean;
+  total_bots: number;
+  enabled_bots: number;
+  erroring_bots: number;
+  runs_24h: number;
+}
+
+export interface BotLogEntry {
+  timestamp: number;
+  level: string;
+  source: string;
+  message: string;
+}
+
+export interface BotStatsRanked {
+  label: string;
+  count: number;
+}
+
+export interface BotStats {
+  runs: number;
+  replies: number;
+  reply_rate: number;
+  errors: number;
+  unique_users: number;
+  avg_duration_ms: number;
+  top_bots: BotStatsRanked[];
+  top_channels: BotStatsRanked[];
+  top_users: BotStatsRanked[];
+  error_bots: BotStatsRanked[];
+  runs_by_hour: { timestamp: number; count: number }[];
 }
