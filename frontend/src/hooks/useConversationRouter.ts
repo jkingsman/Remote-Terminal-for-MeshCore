@@ -44,6 +44,13 @@ function resolveConversationFromHash(
       return { type: 'trace', id: 'trace', name: 'Trace' };
     case 'statistics':
       return { type: 'statistics', id: 'statistics', name: 'Statistics' };
+    case 'bots':
+      return {
+        type: 'bots',
+        id: 'bots',
+        name: 'Bots',
+        ...(hashConv.botId ? { botId: hashConv.botId } : {}),
+      };
     case 'channel': {
       const channel = resolveChannelFromHashToken(hashConv.name, channels);
       return channel ? { type: 'channel', id: channel.key, name: channel.name } : null;
@@ -152,6 +159,16 @@ export function useConversationRouter({
     }
     if (hashConv?.type === 'statistics') {
       setActiveConversationState({ type: 'statistics', id: 'statistics', name: 'Statistics' });
+      hasSetDefaultConversation.current = true;
+      return;
+    }
+    if (hashConv?.type === 'bots') {
+      setActiveConversationState({
+        type: 'bots',
+        id: 'bots',
+        name: 'Bots',
+        ...(hashConv.botId ? { botId: hashConv.botId } : {}),
+      });
       hasSetDefaultConversation.current = true;
       return;
     }
