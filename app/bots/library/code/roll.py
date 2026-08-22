@@ -9,7 +9,7 @@ BOT_META = {
     "name": "roll",
     "category": "Fun",
     "description": "Rolls a random number 1..N (default 100)",
-    "version": "1.0.0",
+    "version": "1.1.0",
 }
 
 
@@ -23,5 +23,6 @@ async def roll(ctx, msg):
             return
         max_num = int(arg)
     result = random.randint(1, max_num)
-    who = msg.sender_name or "Someone"
+    # @[name] is the mention syntax mesh clients recognize and highlight.
+    who = f"@[{msg.sender_name}]" if msg.sender_name else "Someone"
     await ctx.reply(f"{who} rolled {result} (1-{max_num})")

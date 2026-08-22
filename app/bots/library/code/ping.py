@@ -7,10 +7,15 @@ BOT_META = {
     "name": "ping",
     "category": "Basic",
     "description": "Replies Pong! — liveness check",
-    "version": "1.0.0",
+    "version": "1.1.0",
 }
 
 
 @bot.on_keyword("ping")
 async def ping(ctx, msg):
-    await ctx.reply(ctx.t("rt.pong"))
+    pong = ctx.t("rt.pong")
+    # @[name] is the mention syntax mesh clients recognize and highlight.
+    if msg.sender_name:
+        await ctx.reply(f"@[{msg.sender_name}] {pong}")
+    else:
+        await ctx.reply(pong)

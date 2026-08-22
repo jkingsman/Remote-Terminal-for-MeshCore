@@ -59,7 +59,7 @@ BOT_META = {
     "name": "mailbox",
     "category": "Custom",
     "description": "Store-and-forward mailbox for offline nodes (DM 'mbx help')",
-    "version": "4.1.0",
+    "version": "4.2.0",
     "respond_to_dms": True,
     "settings_schema": [
         {
@@ -616,13 +616,13 @@ async def _redirect_channel_mailbox_to_dm(ctx, sender_name):
                 level="WARNING",
             )
             await ctx.reply(
-                f"@{sender_name} Mailbox is DM-only, but the advert failed. "
+                f"@[{sender_name}] Mailbox is DM-only, but the advert failed. "
                 "Send an advert and try again."
             )
             return
 
         await ctx.reply(
-            f"@{sender_name} Mailbox is private only. Advert sent; "
+            f"@[{sender_name}] Mailbox is private only. Advert sent; "
             "I'll message you in about 30 seconds."
         )
 
@@ -641,7 +641,7 @@ async def _redirect_channel_mailbox_to_dm(ctx, sender_name):
                 reason = "more than one contact has that name"
 
             await ctx.reply(
-                f"@{sender_name} {reason}. Send an advert, then try 'mbx help' again."
+                f"@[{sender_name}] {reason}. Send an advert, then try 'mbx help' again."
             )
             return
 
@@ -714,7 +714,7 @@ async def mailbox(ctx, msg):
 
         if pending_key in _redirect_pending:
             await ctx.reply(
-                f"@{sender_name} Mailbox private redirect is already in progress."
+                f"@[{sender_name}] Mailbox private redirect is already in progress."
             )
             return None
 
