@@ -14,7 +14,7 @@ BOT_META = {
     "name": "multitest",
     "category": "Mesh",
     "description": "Collects unique message paths heard during a 6s window",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "cooldown_seconds": 30,
 }
 
@@ -50,4 +50,5 @@ async def multitest(ctx, msg):
     if direct:
         parts.append(f"direct×{direct}" if direct > 1 else "direct")
     summary = " | ".join(parts)
-    await ctx.reply(f"{len(parts)} unique path(s) in {WINDOW_SECONDS}s: {summary}"[:180])
+    # Busy meshes overflow one RF frame — split instead of truncating.
+    await ctx.reply_split(f"{len(parts)} unique path(s) in {WINDOW_SECONDS}s: {summary}")
