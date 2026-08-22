@@ -53,7 +53,7 @@ BOT_META = {
     "name": "SMS",
     "category": "Communication",
     "description": "VoIP.ms or Twilio SMS with direct RemoteTerm callback and channel/DM conversation routing",
-    "version": "1.5.1",
+    "version": "1.5.2",
     "settings_schema": [
         {
             "key": "provider",
@@ -628,9 +628,10 @@ def _voipms_request(settings: dict[str, Any], destination: str, message: str) ->
     )
 
     try:
-        # Bot handlers have a 10-second execution ceiling. Keep the provider
-        # timeout below it so slow API calls use the normal bot error path.
-        with urllib.request.urlopen(request, timeout=8) as response:
+        # Bot handlers have a 10-second execution ceiling. VoIP.ms can take
+        # longer than eight seconds to return its acceptance JSON, so leave
+        # only the small amount of headroom needed for persistence and reply.
+        with urllib.request.urlopen(request, timeout=9) as response:
             raw = response.read()
             status_code = int(response.status)
     except urllib.error.HTTPError as exc:
