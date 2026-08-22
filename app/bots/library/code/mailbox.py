@@ -21,18 +21,18 @@ DM-only commands (prefix configurable via MAILBOX_PREFIX, default "mbx"):
   mbx test [N]           Size probe of exactly N bytes (debug-gated, raw)
 
 Converted from a legacy `def bot(**kwargs)` fanout script:
-- the bot()/_bot_inner() hook is now one @bot.on_message() catch-all, kept as a
-  plain `def` so its blocking SQLite I/O runs in the engine thread pool and its
-  str / list[str] / None return goes back through the normal reply path;
+- the bot()/_bot_inner() hook is one @bot.on_message() catch-all; blocking
+  SQLite work remains in _bot_inner and is dispatched with asyncio.to_thread;
 - the SQLite handle cache moved from globals()["_bot_globals"] to a module-level
   _cache (persists per load, resets on code edit + save);
 - config still comes from MAILBOX_* env vars, unchanged — nothing to reconfigure;
 - error details still go only to debug-unlocked senders; everyone else gets the
   generic notice, and the operator sees the error in Bots > Logs (ctx.log).
 
-Runs on ALL messages (it passively learns name->key from channel traffic too)
-but only REPLIES in DMs — keep the bot's scope at "All channels" so the name
-directory stays populated.
+Runs on ALL messages. Normal Mailbox commands still execute only in DMs. If an
+`mbx ...` command is sent on a channel, the bot sends a flood advert, waits
+about 30 seconds, then opens Mailbox help in a DM when the contact resolves
+uniquely. Keep scope at "All channels" so passive directory learning works.
 
 Replies are NEVER truncated: anything over the per-message budget is split into
 numbered "(1/n) ..." parts sent in order.
@@ -42,6 +42,7 @@ can lower it (0 = ceiling), never raise it. Retention: unread 7d, kept 30d.
 Identity is KEY-ONLY (full 64-char sender_key). Stdlib only.
 """
 
+import asyncio
 import hmac
 import os
 import re
@@ -58,7 +59,7 @@ BOT_META = {
     "name": "mailbox",
     "category": "Custom",
     "description": "Store-and-forward mailbox for offline nodes (DM 'mbx help')",
-    "version": "4.0.0",
+    "version": "4.1.0",
     "respond_to_dms": True,
     "settings_schema": [
         {
@@ -116,6 +117,11 @@ SCHEMA_VERSION = 4  # bump any time tables/columns change
 # Cross-call cache for this load: the SQLite handle. Persists across handler
 # calls; resets when the code is edited and saved.
 _cache: dict = {}
+
+# Keep strong references to delayed redirect tasks and avoid duplicate 30s
+# timers when the same node sends several mbx commands on a channel.
+_redirect_tasks: set[asyncio.Task] = set()
+_redirect_pending: set[str] = set()
 
 
 def _cfg(settings, key):
@@ -583,14 +589,145 @@ def _cmd_size_test(settings, arg):
 # ------------------------------------------------------------- entrypoint --
 
 
+def _is_mailbox_command(settings, text):
+    """True when text is the configured mailbox prefix or starts with it."""
+    clean = (text or "").strip().lower()
+    prefix = _prefix(settings).lower()
+    return clean == prefix or clean.startswith(prefix + " ")
+
+
+async def _redirect_channel_mailbox_to_dm(ctx, sender_name):
+    """Advertise, wait for contact learning, then open Mailbox help in a DM."""
+    sender_name = (sender_name or "").strip()
+    pending_key = sender_name.lower()
+
+    try:
+        # RemoteTerm's built-in advert path. This is intentionally a flood
+        # advert so the requesting node has a chance to learn this companion.
+        from app.routers.radio import RadioAdvertiseRequest, send_advertisement
+
+        try:
+            await send_advertisement(
+                RadioAdvertiseRequest(mode="flood")
+            )
+        except Exception as exc:
+            ctx.log(
+                f"mailbox DM redirect advert error: {type(exc).__name__}: {exc}",
+                level="WARNING",
+            )
+            await ctx.reply(
+                f"@{sender_name} Mailbox is DM-only, but the advert failed. "
+                "Send an advert and try again."
+            )
+            return
+
+        await ctx.reply(
+            f"@{sender_name} Mailbox is private only. Advert sent; "
+            "I'll message you in about 30 seconds."
+        )
+
+        # Do not block RemoteTerm while the remote node learns our advert.
+        await asyncio.sleep(30)
+
+        from app.repository import ContactRepository
+
+        contacts = await ContactRepository.get_by_name(sender_name)
+
+        # Never guess if duplicate names exist.
+        if len(contacts) != 1:
+            if not contacts:
+                reason = "I still can't find your contact"
+            else:
+                reason = "more than one contact has that name"
+
+            await ctx.reply(
+                f"@{sender_name} {reason}. Send an advert, then try 'mbx help' again."
+            )
+            return
+
+        public_key = contacts[0].public_key
+
+        # Short individual frames are deliberate for MeshCore RF.
+        help_messages = [
+            "MAILBOX PRIVATE: Mailbox commands are used here in DM.",
+            "Start: mbx | mbx ? | mbx help | mbx accept",
+            "Send: mbx msg <key> <text> | mbx to <key|name>",
+            "Draft: mbx add <text> | mbx send [text]",
+            "Read: mbx inbox | mbx play [N] | mbx next [N]",
+            "Manage: mbx del | mbx clear",
+        ]
+
+        for help_text in help_messages:
+            await ctx.send_dm(public_key, help_text)
+
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        ctx.log(
+            f"mailbox DM redirect error: {type(exc).__name__}: {exc}",
+            level="WARNING",
+        )
+    finally:
+        if pending_key:
+            _redirect_pending.discard(pending_key)
+
+
 @bot.on_message()
-def mailbox(ctx, msg):
-    """Runs for every in-scope message (sync -> thread pool). Uncaught
-    exceptions never fail silently: error details go only to debug-unlocked
-    senders, everyone else gets a generic notice, and the operator sees it in
-    Bots > Logs."""
+async def mailbox(ctx, msg):
+    """Runs for every in-scope message.
+
+    Normal Mailbox processing remains synchronous in _bot_inner and is moved to
+    a worker thread. Channel-side ``mbx ...`` requests only start a delayed
+    redirect task; they never block the RemoteTerm bot engine.
+    """
 
     settings = ctx.settings
+
+    # Preserve the original outgoing-message behavior.
+    if msg.is_outgoing:
+        return None
+
+    # Mailbox is still functionally DM-only. The only channel behavior added
+    # here is a UX redirect when a user explicitly types the mailbox prefix.
+    if not msg.is_dm:
+        text = (msg.text or "").strip()
+
+        if not _is_mailbox_command(settings, text):
+            # Preserve passive directory learning when a key is available.
+            if msg.sender_key and msg.sender_name:
+                try:
+                    await asyncio.to_thread(
+                        _learn,
+                        _db(settings),
+                        msg.sender_name,
+                        msg.sender_key.lower(),
+                    )
+                except Exception:
+                    pass
+            return None
+
+        sender_name = (msg.sender_name or "").strip()
+        if not sender_name:
+            return None
+
+        pending_key = sender_name.lower()
+
+        if pending_key in _redirect_pending:
+            await ctx.reply(
+                f"@{sender_name} Mailbox private redirect is already in progress."
+            )
+            return None
+
+        _redirect_pending.add(pending_key)
+
+        task = asyncio.create_task(
+            _redirect_channel_mailbox_to_dm(ctx, sender_name)
+        )
+        _redirect_tasks.add(task)
+        task.add_done_callback(_redirect_tasks.discard)
+
+        return None
+
     kwargs = {
         "sender_name": msg.sender_name,
         "sender_key": msg.sender_key,
@@ -598,19 +735,33 @@ def mailbox(ctx, msg):
         "is_dm": msg.is_dm,
         "is_outgoing": msg.is_outgoing,
     }
+
     try:
-        return _bot_inner(settings, **kwargs)
+        # _bot_inner uses blocking sqlite3. Keep that work off the event loop.
+        return await asyncio.to_thread(
+            _bot_inner,
+            settings,
+            **kwargs,
+        )
     except Exception as e:
         # Checking debug auth must itself never raise (the DB may be the very
         # thing that's broken) — fall back to the generic notice.
         try:
             rid = (msg.sender_key or "").lower() or (msg.sender_name or "").lower()
-            if rid and _db(settings).execute(
-                "SELECT 1 FROM debug_auth WHERE requester=?", (rid,)
-            ).fetchone():
+            authed = await asyncio.to_thread(
+                lambda: bool(
+                    rid
+                    and _db(settings).execute(
+                        "SELECT 1 FROM debug_auth WHERE requester=?",
+                        (rid,),
+                    ).fetchone()
+                )
+            )
+            if authed:
                 return _split_reply(settings, f"MBX ERR: {type(e).__name__}: {e}")
         except Exception:
             pass
+
         ctx.log(f"mailbox error: {type(e).__name__}: {e}", level="WARNING")
         return (
             f"An error occurred. Authenticate with "
@@ -744,3 +895,4 @@ def _bot_inner(settings, **kwargs) -> "str | list[str] | None":
         return _split_reply(settings, _cmd_clear(conn, sender_key))
 
     return _split_reply(settings, f"Unknown command. '{_prefix(settings)} help'")
+
