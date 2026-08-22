@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Play, Plus, X } from 'lucide-react';
+import { ArrowLeft, Copy, Play, Plus, X } from 'lucide-react';
 
 import { api } from '../../api';
 import type {
@@ -176,6 +176,24 @@ export function BotEditor({ botId, channels, onBack, onDeleted }: BotEditorProps
   const [queueThreshold, setQueueThreshold] = useState('0');
   const [settings, setSettings] = useState<Record<string, unknown>>({});
   const [uiTriggers, setUiTriggers] = useState<BotUiTrigger[]>([]);
+  const isSmsBot = bot?.declared_webhooks?.includes('sms') ?? false;
+
+  const smsPublicServer = String(settings.public_server ?? '').trim();
+  const smsWebhookToken = String(settings.webhook_token ?? '').trim();
+  const smsCallbackUrl = useMemo(() => {
+    if (!smsPublicServer || !smsWebhookToken) return '';
+    try {
+      const base = new URL(
+        /^https?:\/\//i.test(smsPublicServer) ? smsPublicServer : `http://${smsPublicServer}`
+      );
+      base.port = '8000';
+      return `${base.origin}/api/hooks/sms?token=${encodeURIComponent(
+        smsWebhookToken
+      )}&to={TO}&from={FROM}&message={MESSAGE}&id={ID}&date={TIMESTAMP}`;
+    } catch {
+      return '';
+    }
+  }, [smsPublicServer, smsWebhookToken]);
   const [newKeyword, setNewKeyword] = useState('');
   const [newCron, setNewCron] = useState('');
   const [cronPreview, setCronPreview] = useState<string | null>(null);
@@ -725,6 +743,54 @@ export function BotEditor({ botId, channels, onBack, onDeleted }: BotEditorProps
                     }}
                   />
                 ))}
+              </div>
+            )}
+
+            {isSmsBot && (
+              <div className="mt-5 border border-border rounded-lg p-3.5">
+                <div className="text-sm font-semibold mb-1">Incoming SMS Callback</div>
+
+                <p className="text-xs text-muted-foreground mb-3">
+                  Enter this URL in your DID configuration under{' '}
+                  <strong>SMS/MMS URL Callback</strong>.
+                </p>
+
+                {smsCallbackUrl ? (
+                  <div className="flex items-start gap-2 rounded-md border border-input bg-muted px-3 py-2">
+                    <code className="min-w-0 flex-1 font-mono text-xs break-all select-all">
+                      {smsCallbackUrl}
+                    </code>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 shrink-0 px-2"
+                      onClick={() => {
+                        void navigator.clipboard.writeText(smsCallbackUrl);
+                        toast.success('Callback URL copied');
+                      }}
+                    >
+                      <Copy className="h-3.5 w-3.5 mr-1" />
+                      Copy
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-input bg-muted px-3 py-2 text-xs text-muted-foreground">
+                    Configure the Public server IP or domain and Incoming webhook token above to
+                    generate the callback URL.
+                  </div>
+                )}
+
+                <div className="mt-3 rounded-md border border-red-500/60 bg-red-500/10 p-3">
+                  <div className="text-xs font-semibold text-red-500 mb-1">
+                    ⚠ Public Internet Warning
+                  </div>
+                  <p className="text-xs text-red-500">
+                    Port 8000 must be open to the Internet for incoming SMS callbacks. Opening port
+                    8000 will also make the RemoteTerm web interface reachable from the public
+                    Internet.
+                  </p>
+                </div>
               </div>
             )}
           </div>

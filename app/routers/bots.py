@@ -6,8 +6,9 @@ import logging
 import time
 from datetime import datetime
 from typing import Any
+from urllib.parse import parse_qs
 
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException, Query, Request, Response
 
 from app.bots.cron import parse_cron, validate_cron
 from app.bots.engine import bot_engine
@@ -518,15 +519,15 @@ async def delete_feed(feed_id: str) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 
-@hooks_router.post("/{slug}")
-async def inbound_hook(
+async def _run_inbound_hook(
     slug: str,
-    payload: dict[str, Any],
+    request: Request,
     x_hook_token: str | None = Header(default=None),
 ) -> dict[str, str]:
     found = bot_engine.find_webhook(slug)
     if found is None:
         raise HTTPException(status_code=404, detail="no enabled bot listens on this hook")
+
     loaded, handler = found
     expected = str(loaded.record.settings.get("webhook_token", "") or "")
     if not expected:
@@ -534,7 +535,58 @@ async def inbound_hook(
             status_code=403,
             detail="webhook token not configured — set webhook_token in the bot's settings",
         )
-    if x_hook_token != expected:
+
+    payload: dict[str, Any] = {}
+
+    if request.method == "GET":
+        payload = dict(request.query_params)
+    else:
+        content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+
+        if content_type == "application/json":
+            try:
+                data = await request.json()
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail="invalid JSON payload") from exc
+            payload = data if isinstance(data, dict) else {"payload": data}
+
+        elif content_type == "application/x-www-form-urlencoded":
+            raw = (await request.body()).decode("utf-8", errors="replace")
+            parsed = parse_qs(raw, keep_blank_values=True)
+            payload = {key: values[-1] if values else "" for key, values in parsed.items()}
+
+        else:
+            raw = await request.body()
+            if raw:
+                payload = {"body": raw.decode("utf-8", errors="replace")}
+
+    supplied_token = (
+        x_hook_token or request.query_params.get("token") or str(payload.get("token", "") or "")
+    )
+
+    if supplied_token != expected:
         raise HTTPException(status_code=403, detail="invalid webhook token")
+
+    payload.pop("token", None)
     await bot_engine.run_webhook(loaded, handler, slug, payload)
     return {"status": "ok"}
+
+
+@hooks_router.post("/{slug}")
+async def inbound_hook(
+    slug: str,
+    request: Request,
+    x_hook_token: str | None = Header(default=None),
+) -> dict[str, str]:
+    return await _run_inbound_hook(slug, request, x_hook_token)
+
+
+@hooks_router.get("/sms")
+async def inbound_sms_hook(
+    request: Request,
+    x_hook_token: str | None = Header(default=None),
+) -> Response:
+    await _run_inbound_hook("sms", request, x_hook_token)
+    # VoIP.ms uses the exact plain-text body "ok" to acknowledge delivery
+    # when URL Callback Retry is enabled.
+    return Response(content="ok", media_type="text/plain")

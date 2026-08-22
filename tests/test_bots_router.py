@@ -188,6 +188,9 @@ class TestInboundHooks:
             '@bot.on_webhook("send")\n'
             "async def f(ctx, payload):\n"
             '    await ctx.send_dm(payload["dm_to"], payload["message"])\n'
+            '@bot.on_webhook("sms")\n'
+            "async def sms(ctx, payload):\n"
+            '    ctx.state["incoming"] = payload\n'
         )
         bot = await BotRepository.create(name="hook-test", code=code, enabled=True)
         await bot_engine.reload_bot(bot.id)
@@ -206,6 +209,19 @@ class TestInboundHooks:
 
                 unknown = await client.post("/api/hooks/nothere", json={})
                 assert unknown.status_code == 404
+
+                sms_get = await client.get(
+                    "/api/hooks/sms",
+                    params={"token": "s3cret", "from": "5145550100", "message": "hello"},
+                )
+                assert sms_get.status_code == 200
+                assert sms_get.text == "ok"
+                assert sms_get.headers["content-type"].startswith("text/plain")
+
+                # GET support is deliberately limited to the VoIP.ms callback;
+                # existing bot webhooks remain POST-only.
+                other_get = await client.get("/api/hooks/send", params={"token": "s3cret"})
+                assert other_get.status_code == 405
         finally:
             bot_engine.remove_bot(bot.id)
 

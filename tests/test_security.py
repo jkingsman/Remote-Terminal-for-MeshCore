@@ -33,6 +33,10 @@ def _build_app(*, username: str = "", password: str = "") -> FastAPI:
     async def protected():
         return {"ok": True}
 
+    @app.get("/api/hooks/sms")
+    async def sms_hook():
+        return {"ok": True}
+
     @app.websocket("/ws")
     async def websocket_endpoint(websocket: WebSocket) -> None:
         await websocket.accept()
@@ -62,6 +66,23 @@ def test_http_request_is_allowed_with_valid_basic_auth_credentials():
 
     assert response.status_code == 200
     assert response.json() == {"ok": True}
+
+
+def test_sms_hook_bypasses_basic_auth():
+    app = _build_app(username="mesh", password="secret")
+
+    with TestClient(app) as client:
+        response = client.get("/api/hooks/sms")
+
+    assert response.status_code == 200
+
+
+def test_basic_auth_bypass_does_not_match_other_hook_paths():
+    app = _build_app(username="mesh", password="secret")
+
+    with TestClient(app) as client:
+        assert client.get("/api/hooks/other").status_code == 401
+        assert client.get("/api/hooks/sms/extra").status_code == 401
 
 
 def test_http_request_accepts_case_insensitive_basic_auth_scheme():

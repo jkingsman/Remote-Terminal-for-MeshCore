@@ -1,4 +1,4 @@
-"""SMS bridge bot for RemoteTerm.
+"""SMS bot for RemoteTerm.
 
 MeshCore commands:
   sms NUMBER MESSAGE
@@ -9,8 +9,13 @@ MeshCore commands:
   smsroute CODE dm USER
 
 Incoming HTTP:
-  POST /api/hooks/sms
-  Header: X-Hook-Token: <configured webhook_token>
+  GET or POST /api/hooks/sms
+  Authentication:
+    - X-Hook-Token: <configured webhook_token>, or
+    - ?token=<configured webhook_token>
+
+For VoIP.ms DID configuration, use the SMS/MMS URL Callback shown in the
+RemoteTerm SMS bot settings. RemoteTerm must be reachable on TCP port 8000.
 
 The incoming JSON payload accepts common field variants:
   id / ID / message_id
@@ -41,34 +46,33 @@ from typing import Any
 
 from remoteterm import bot
 
-
 BOT_META = {
     "key": "sms",
     "name": "SMS",
     "category": "Communication",
-    "description": "Send and receive SMS with channel/DM conversation routing",
-    "version": "1.0.0",
+    "description": "VoIP.ms SMS with direct RemoteTerm callback and channel/DM conversation routing",
+    "version": "1.3.1",
     "settings_schema": [
         {
             "key": "api_username",
-            "label": "SMS API username",
+            "label": "VoIP.ms API username / email",
             "type": "text",
             "default": "",
-            "help": "API account username/email.",
+            "help": "VoIP.ms account email used by the REST/JSON API.",
         },
         {
             "key": "api_password",
-            "label": "SMS API password",
+            "label": "VoIP.ms API password",
             "type": "password",
             "default": "",
-            "help": "API password/secret.",
+            "help": "VoIP.ms API password (not your normal portal password). Create/enable it under SOAP and REST/JSON API.",
         },
         {
             "key": "did",
-            "label": "SMS DID / sender number",
+            "label": "VoIP.ms SMS DID / sender number",
             "type": "text",
             "default": "",
-            "help": "10-digit NANPA SMS-capable number.",
+            "help": "10-digit NANPA SMS-capable VoIP.ms DID.",
         },
         {
             "key": "dialing_mode",
@@ -81,11 +85,18 @@ BOT_META = {
             ],
         },
         {
+            "key": "public_server",
+            "label": "Public server IP or domain",
+            "type": "text",
+            "default": "",
+            "help": "Public hostname or IP used to build the direct callback URL on TCP port 8000, for example example.com or 203.0.113.10.",
+        },
+        {
             "key": "webhook_token",
             "label": "Incoming webhook token",
             "type": "password",
             "default": "",
-            "help": "RemoteTerm requires this value in X-Hook-Token for POST /api/hooks/sms.",
+            "help": "Secret used to protect incoming SMS callbacks. Generate one with: openssl rand -hex 32. The direct callback URL sends it as the token query parameter.",
         },
         {
             "key": "fallback_channel",
@@ -93,6 +104,13 @@ BOT_META = {
             "type": "text",
             "default": "#test",
             "help": "Where routing prompts are sent when no conversation origin is known.",
+        },
+        {
+            "key": "sms_header",
+            "label": "Outgoing SMS header",
+            "type": "text",
+            "default": "MESHCORE BOT CECREVIER.CA",
+            "help": "First line added to every outgoing SMS.",
         },
         {
             "key": "db_path",
@@ -108,7 +126,7 @@ BOT_META = {
         },
         {
             "key": "include_mesh_sender",
-            "label": "Include MeshCore sender in SMS",
+            "label": "Include MeshCore sender in SMS (legacy)",
             "type": "select",
             "default": "yes",
             "options": [
@@ -122,10 +140,12 @@ BOT_META = {
         "api_password": "",
         "did": "",
         "dialing_mode": "nanpa",
+        "public_server": "",
         "webhook_token": "",
         "fallback_channel": "#test",
+        "sms_header": "MESHCORE BOT CECREVIER.CA",
         "db_path": "data/sms.db",
-        "max_sms_chars": 160,
+        "max_sms_chars": 420,
         "include_mesh_sender": "yes",
     },
 }
@@ -259,8 +279,8 @@ def _save_conversation(
     private_contact_key: str | None = None,
     outgoing_message: str | None = None,
 ) -> None:
-    phone = _normalize_nanpa(phone)
-    if not phone:
+    normalized_phone = _normalize_nanpa(phone)
+    if not normalized_phone:
         return
 
     mode = "private" if delivery_mode == "private" else "channel"
@@ -287,7 +307,7 @@ def _save_conversation(
                 updated_at=CURRENT_TIMESTAMP
             """,
             (
-                phone,
+                normalized_phone,
                 mesh_sender,
                 actor_id,
                 mode,
@@ -305,7 +325,7 @@ def _save_conversation(
                 phone=excluded.phone,
                 updated_at=CURRENT_TIMESTAMP
             """,
-            (actor_id, phone),
+            (actor_id, normalized_phone),
         )
         conn.commit()
     finally:
@@ -313,14 +333,14 @@ def _save_conversation(
 
 
 def _get_conversation(settings: dict[str, Any], phone: str) -> dict[str, Any] | None:
-    phone = _normalize_nanpa(phone)
-    if not phone:
+    normalized_phone = _normalize_nanpa(phone)
+    if not normalized_phone:
         return None
     conn = _db(settings)
     try:
         row = conn.execute(
             "SELECT * FROM sms_conversations WHERE phone=? LIMIT 1",
-            (phone,),
+            (normalized_phone,),
         ).fetchone()
         return dict(row) if row else None
     finally:
@@ -481,12 +501,25 @@ def _max_chars(settings: dict[str, Any]) -> int:
     return max(40, min(value, 420))
 
 
+def _sender_label_from_value(value: Any) -> str:
+    label = _compact(value)
+    return label or "MESHCORE"
+
+
 def _format_outgoing(settings: dict[str, Any], sender: str, message: str) -> str:
-    body = _compact(message)
-    include_sender = str(settings.get("include_mesh_sender", "yes")).casefold() == "yes"
-    if include_sender:
-        body = f"MeshCore {sender}: {body}"
-    return body[:_max_chars(settings)]
+    """Keep the original MeshCore SMS presentation, including line breaks."""
+    clean_message = str(message or "").strip().replace("\r\n", "\n").replace("\r", "\n")
+    clean_message = "\n".join(
+        re.sub(r"[ \t]+", " ", line).strip() for line in clean_message.split("\n")
+    ).strip()
+
+    header = str(
+        settings.get("sms_header", "MESHCORE BOT CECREVIER.CA") or "MESHCORE BOT CECREVIER.CA"
+    ).strip()
+    user = _sender_label_from_value(sender).upper()
+
+    body = f"{header}\nUSER: {user}\nMESSAGE: {clean_message}"
+    return body[: _max_chars(settings)]
 
 
 # ----------------------------- SMS API -------------------------------------
@@ -526,7 +559,9 @@ def _provider_request(settings: dict[str, Any], destination: str, message: str) 
     )
 
     try:
-        with urllib.request.urlopen(request, timeout=20) as response:
+        # Bot handlers have a 10-second execution ceiling. Keep the provider
+        # timeout below it so slow API calls use the normal bot error path.
+        with urllib.request.urlopen(request, timeout=8) as response:
             raw = response.read()
             status_code = int(response.status)
         data = json.loads(raw.decode("utf-8", errors="replace"))
@@ -535,22 +570,16 @@ def _provider_request(settings: dict[str, Any], destination: str, message: str) 
 
     status = str(data.get("status") or "").casefold() if isinstance(data, dict) else ""
     if status_code == 200 and status == "success":
-        provider_id = str(
-            data.get("sms")
-            or data.get("id")
-            or data.get("message_id")
-            or ""
-        )
+        provider_id = str(data.get("sms") or data.get("id") or data.get("message_id") or "")
         return {"ok": True, "id": provider_id}
 
     return {
         "ok": False,
         "error": str(
-            data.get("error")
-            or data.get("message")
-            or data.get("status")
-            or "request rejected"
-        ) if isinstance(data, dict) else "invalid response",
+            data.get("error") or data.get("message") or data.get("status") or "request rejected"
+        )
+        if isinstance(data, dict)
+        else "invalid response",
     }
 
 
@@ -629,7 +658,7 @@ async def _send_sms(ctx, msg, destination: str, message: str) -> None:
         "",
     )
 
-    await ctx.reply(f"📱 SMS envoyé à {_display_phone(phone)} ✅")
+    await ctx.reply(f"📱 SMS SENT ✅ | {_display_phone(phone)}")
 
 
 # ----------------------------- commands ------------------------------------
@@ -807,13 +836,57 @@ async def incoming_sms(ctx, payload):
         ctx.log("SMS webhook: payload must be a JSON object", level="WARNING")
         return
 
+    # VoIP.ms can arrive either as a flat JSON object or through its
+    # 3CX-compatible webhook envelope. Support both.
+    event_type = ""
+    source = payload
+
+    data = payload.get("data")
+    if isinstance(data, dict):
+        event_type = str(data.get("event_type") or "").strip().casefold()
+        nested = data.get("payload")
+        if isinstance(nested, dict):
+            source = nested
+
+    if event_type and event_type not in {"message.received", "message_received", "received"}:
+        return
+
+    raw_from = source.get("from") if isinstance(source, dict) else None
+    if isinstance(raw_from, dict):
+        raw_from = raw_from.get("phone_number") or raw_from.get("number")
+
+    raw_to = source.get("to") if isinstance(source, dict) else None
+    if isinstance(raw_to, list) and raw_to:
+        first_to = raw_to[0]
+        if isinstance(first_to, dict):
+            raw_to = first_to.get("phone_number") or first_to.get("number")
+        else:
+            raw_to = first_to
+    elif isinstance(raw_to, dict):
+        raw_to = raw_to.get("phone_number") or raw_to.get("number")
+
     phone = _normalize_nanpa(
-        _payload_value(payload, "from", "FROM", "from_number", "sender")
+        raw_from
+        or _payload_value(source, "FROM", "from_number", "sender")
+        or _payload_value(payload, "from", "FROM", "from_number", "sender")
     )
-    to = _payload_value(payload, "to", "TO", "to_number", "did")
-    message = _payload_value(payload, "message", "MESSAGE", "text", "body")
-    timestamp = _payload_value(payload, "date", "timestamp", "time")
-    provider_id = _payload_value(payload, "id", "ID", "message_id", "sms_id")
+    to = str(
+        raw_to
+        or _payload_value(source, "TO", "to_number", "did")
+        or _payload_value(payload, "to", "TO", "to_number", "did")
+        or ""
+    ).strip()
+    message = _payload_value(source, "message", "MESSAGE", "text", "body") or _payload_value(
+        payload, "message", "MESSAGE", "text", "body"
+    )
+    timestamp = _payload_value(
+        source, "received_at", "date", "timestamp", "time"
+    ) or _payload_value(payload, "occurred_at", "date", "timestamp", "time")
+    provider_id = (
+        _payload_value(source, "id", "ID", "message_id", "sms_id")
+        or _payload_value(payload, "id", "ID", "message_id", "sms_id")
+        or (str(data.get("id") or "").strip() if isinstance(data, dict) else "")
+    )
 
     if not phone:
         ctx.log("SMS webhook: invalid sender number", level="WARNING")
@@ -853,9 +926,7 @@ async def incoming_sms(ctx, payload):
         mode = str(conversation.get("delivery_mode") or "channel").casefold()
 
         if mode == "private":
-            public_key = str(
-                conversation.get("private_contact_key") or ""
-            ).strip().lower()
+            public_key = str(conversation.get("private_contact_key") or "").strip().lower()
 
             if public_key:
                 try:
@@ -930,4 +1001,3 @@ async def incoming_sms(ctx, payload):
         "aucune route connue",
         message,
     )
-
