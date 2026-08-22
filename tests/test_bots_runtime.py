@@ -45,6 +45,24 @@ def echo(ctx, msg):
     return f"echo: {msg.arg_text}"
 """
 
+ASYNC_RETURN = """
+import asyncio
+from remoteterm import bot
+
+@bot.on_keyword("echo")
+async def echo(ctx, msg):
+    # e.g. blocking work pushed to a thread whose result is the reply
+    return await asyncio.to_thread(lambda: f"echo: {msg.arg_text}")
+"""
+
+ASYNC_RETURN_LIST = """
+from remoteterm import bot
+
+@bot.on_keyword("story")
+async def story(ctx, msg):
+    return ["(1/2) part one", "(2/2) part two"]
+"""
+
 
 def make_ctx(**kwargs) -> BotContext:
     return BotContext(
@@ -137,6 +155,29 @@ class TestExecution:
         with ThreadPoolExecutor(max_workers=1) as pool:
             await call_handler(handler, ctx, msg, None, 5.0, pool)
         assert [s["text"] for s in ctx.captured_sends] == ["echo: abc"]
+
+    async def test_async_handler_return_value_sent(self):
+        loaded = load_bot_code(ASYNC_RETURN)
+        ctx = make_ctx(origin_is_dm=True, origin_sender_key="cd" * 32)
+        msg = BotMessage(
+            text="echo abc", keyword="echo", args=["abc"], is_dm=True, sender_key="cd" * 32
+        )
+        handler = loaded.collector.keywords[0].handler
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            await call_handler(handler, ctx, msg, None, 5.0, pool)
+        assert [s["text"] for s in ctx.captured_sends] == ["echo: abc"]
+
+    async def test_async_handler_return_list_sends_each_part(self):
+        loaded = load_bot_code(ASYNC_RETURN_LIST)
+        ctx = make_ctx(origin_is_dm=True, origin_sender_key="cd" * 32)
+        msg = BotMessage(text="story", keyword="story", is_dm=True, sender_key="cd" * 32)
+        handler = loaded.collector.keywords[0].handler
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            await call_handler(handler, ctx, msg, None, 5.0, pool)
+        assert [s["text"] for s in ctx.captured_sends] == [
+            "(1/2) part one",
+            "(2/2) part two",
+        ]
 
     async def test_legacy_call_roundtrip(self):
         loaded = load_bot_code(LEGACY)

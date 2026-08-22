@@ -138,8 +138,11 @@ async def call_handler(
     else:
         args = (ctx,)
 
+    # Sync or async, a handler may return a reply string/list like legacy bots
+    # do — the shapes _apply_return_value knows — instead of calling ctx.reply.
     if asyncio.iscoroutinefunction(handler):
-        await asyncio.wait_for(handler(*args), timeout=timeout_seconds)
+        result = await asyncio.wait_for(handler(*args), timeout=timeout_seconds)
+        await _apply_return_value(result, ctx)
         return
 
     loop = asyncio.get_running_loop()
@@ -148,7 +151,6 @@ async def call_handler(
         return handler(*args)
 
     result = await asyncio.wait_for(loop.run_in_executor(executor, _run_sync), timeout_seconds)
-    # A sync handler may return a reply string/list like legacy bots do.
     await _apply_return_value(result, ctx)
 
 
