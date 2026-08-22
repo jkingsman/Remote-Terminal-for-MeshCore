@@ -110,6 +110,47 @@ class TestWorldcupSummarize:
         assert summarize({"competitions": []}) is None
 
 
+class TestMentionPattern:
+    """Bots that address the sender use the @[name] mention syntax clients recognize."""
+
+    async def _test_run(self, test_db, key: str, request: BotTestRequest):
+        from app.repository.bots import BotRepository
+
+        entry = get_library_entry(key)
+        assert entry is not None
+        bot = await BotRepository.create(name=f"{key}-mentiontest", code=entry["code"])
+        engine = BotEngine()
+        return await engine.test_run(bot, request)
+
+    async def test_ping_mentions_the_sender(self, test_db):
+        response = await self._test_run(
+            test_db, "ping", BotTestRequest(text="ping", sender_name="K0PHX")
+        )
+        assert response.error is None
+        assert response.replies[0]["text"].startswith("@[K0PHX] ")
+
+    async def test_signal_report_prefixes_a_mention(self, test_db):
+        response = await self._test_run(
+            test_db, "test", BotTestRequest(text="test", sender_name="K0PHX")
+        )
+        assert response.error is None
+        assert response.replies[0]["text"].startswith("@[K0PHX]: ")
+
+    async def test_roll_names_the_roller_as_a_mention(self, test_db):
+        response = await self._test_run(
+            test_db, "roll", BotTestRequest(text="roll 20", sender_name="K0PHX")
+        )
+        assert response.error is None
+        assert response.replies[0]["text"].startswith("@[K0PHX] rolled ")
+
+    async def test_missing_sender_name_stays_plain(self, test_db):
+        response = await self._test_run(
+            test_db, "ping", BotTestRequest(text="ping", sender_name="")
+        )
+        assert response.error is None
+        assert "@[" not in response.replies[0]["text"]
+
+
 class TestMultitest:
     async def test_counts_only_the_window_and_collapses_flood_stages(self, test_db):
         conn = test_db.conn

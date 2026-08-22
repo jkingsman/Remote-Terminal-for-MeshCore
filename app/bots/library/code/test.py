@@ -9,7 +9,7 @@ BOT_META = {
     "name": "test",
     "category": "Basic",
     "description": "Signal report: hops, path, region, clock offset",
-    "version": "1.0.0",
+    "version": "1.1.0",
 }
 
 
@@ -29,5 +29,6 @@ async def signal_report(ctx, msg):
     if msg.sender_timestamp:
         offset = int(time.time()) - int(msg.sender_timestamp)
         parts.append(f"clock offset {offset:+d}s")
-    prefix = f"{msg.sender_name}: " if msg.sender_name else ""
+    # @[name] is the mention syntax mesh clients recognize and highlight.
+    prefix = f"@[{msg.sender_name}]: " if msg.sender_name else ""
     await ctx.reply(prefix + " | ".join(parts))
