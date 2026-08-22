@@ -549,9 +549,10 @@ export function BotsView({ botId, channels, contacts, onOpenBot, onCloseBot }: B
         </Suspense>
       )}
 
-      {/* New Bot dialog */}
+      {/* New Bot dialog — height-capped with a scrollable body so the form
+          stays reachable on short/mobile viewports */}
       <Dialog open={showNewBot} onOpenChange={setShowNewBot}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-lg flex max-h-[calc(100%-2rem)] flex-col gap-0 overflow-hidden p-0">
           <DialogHeader className="border-b border-border px-5 py-4">
             <DialogTitle>New Bot</DialogTitle>
             <DialogDescription>
