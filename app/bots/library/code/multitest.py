@@ -1,9 +1,11 @@
 """Collects unique message paths for 6 seconds. Seeded from meshcore-bot's multitest.
 
 Say ``multitest``, then have stations transmit; after 6 seconds it reports the
-distinct routing paths of everything heard in the window. Flood repeats that
-merely extend an already-observed route by more hops are stages of the same
-propagation, not new routes, and are collapsed into the longest observation.
+distinct routing paths of everything heard in the window, each shown as its
+repeater hops separated by commas (``2f52f0,bf61f2,8e31d2``). Flood repeats
+that merely extend an already-observed route by more hops are stages of the
+same propagation, not new routes, and are collapsed into the longest
+observation.
 """
 
 import asyncio
@@ -30,13 +32,20 @@ def _hop_width(message_path) -> int:
     return max(1, (len(message_path.path) // 2) // message_path.path_len)
 
 
+def _format_route(route: str, width: int) -> str:
+    """Hex route -> comma-separated repeater hops, matching the app's display."""
+    step = max(1, width) * 2
+    return ",".join(route[i : i + step] for i in range(0, len(route), step))
+
+
 def _maximal_routes(message) -> tuple[set[str], bool]:
     """Distinct terminal routes for one message, plus whether it arrived direct.
 
     A route that is a hop-aligned prefix of a longer route observed for the
     same message is an intermediate flood stage of that longer route — keep
     only the maximal ones. Prefix comparison stays within one hop width so a
-    1-byte route never swallows an unrelated multibyte one.
+    1-byte route never swallows an unrelated multibyte one. Routes come back
+    already hop-formatted (comma-separated).
     """
     by_width: dict[int, set[str]] = {}
     direct = False
@@ -47,11 +56,11 @@ def _maximal_routes(message) -> tuple[set[str], bool]:
             continue
         by_width.setdefault(_hop_width(message_path), set()).add(route)
     routes: set[str] = set()
-    for group in by_width.values():
+    for width, group in by_width.items():
         for route in group:
             if any(other != route and other.startswith(route) for other in group):
                 continue
-            routes.add(route)
+            routes.add(_format_route(route, width))
     return routes, direct
 
 

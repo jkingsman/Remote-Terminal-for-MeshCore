@@ -170,12 +170,13 @@ class TestMultitest:
         assert len(ctx.captured_sends) == 1
         text = ctx.captured_sends[0]["text"]
         # 2f52 and 2f52f0 are flood stages of 2f52f0bf; aabb and direct stand.
+        # Routes render as comma-separated repeater hops (1-byte hops here).
         assert text.startswith("3 unique path(s)")
-        assert "2f52f0bf" in text
-        assert "aabb" in text
+        assert "2f,52,f0,bf" in text
+        assert "aa,bb" in text
         assert "direct" in text
-        assert "2f52 |" not in text and "2f52f0 |" not in text
-        assert "beef" not in text
+        assert "2f,52 |" not in text and "2f,52,f0 |" not in text
+        assert "be,ef" not in text and "beef" not in text
 
 
 class TestMeshAdminBots:
