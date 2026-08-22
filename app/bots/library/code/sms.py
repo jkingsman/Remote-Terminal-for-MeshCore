@@ -40,6 +40,7 @@ import json
 import re
 import secrets
 import sqlite3
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -52,7 +53,7 @@ BOT_META = {
     "name": "SMS",
     "category": "Communication",
     "description": "VoIP.ms or Twilio SMS with direct RemoteTerm callback and channel/DM conversation routing",
-    "version": "1.5.0",
+    "version": "1.5.1",
     "settings_schema": [
         {
             "key": "provider",
@@ -632,6 +633,9 @@ def _voipms_request(settings: dict[str, Any], destination: str, message: str) ->
         with urllib.request.urlopen(request, timeout=8) as response:
             raw = response.read()
             status_code = int(response.status)
+    except urllib.error.HTTPError as exc:
+        raw = exc.read()
+        status_code = int(exc.code)
     except Exception as exc:
         # The request may already have been accepted before the connection
         # failed or timed out. Retrying here could send a duplicate SMS.
@@ -651,10 +655,19 @@ def _voipms_request(settings: dict[str, Any], destination: str, message: str) ->
             "error": f"{type(exc).__name__}: {exc}",
         }
 
-    status = str(data.get("status") or "").casefold() if isinstance(data, dict) else ""
-    if status_code == 200 and status == "success":
+    status = str(data.get("status") or "").strip().casefold() if isinstance(data, dict) else ""
+    if 200 <= status_code < 300 and status == "success":
         provider_id = str(data.get("sms") or data.get("id") or data.get("message_id") or "")
-        return {"ok": True, "id": provider_id}
+        # sendSMS confirms API acceptance, not handset delivery.  VoIP.ms uses
+        # "success" for that acknowledgement, so expose the lifecycle meaning
+        # instead of treating a missing message id as missing confirmation.
+        return {
+            "ok": True,
+            "provider": "voipms",
+            "id": provider_id,
+            "status": "accepted",
+            "confirmation": "VoIP.ms accepted the message",
+        }
 
     return {
         "ok": False,
@@ -699,6 +712,9 @@ def _twilio_request(settings: dict[str, Any], destination: str, message: str) ->
         with urllib.request.urlopen(request, timeout=8) as response:
             raw = response.read()
             status_code = int(response.status)
+    except urllib.error.HTTPError as exc:
+        raw = exc.read()
+        status_code = int(exc.code)
     except Exception as exc:
         return {"ok": False, "uncertain": True, "error": f"{type(exc).__name__}: {exc}"}
 
@@ -711,11 +727,34 @@ def _twilio_request(settings: dict[str, Any], destination: str, message: str) ->
             "error": f"{type(exc).__name__}: {exc}",
         }
 
+    status = str(data.get("status") or "").strip().casefold() if isinstance(data, dict) else ""
+    failed_statuses = {"failed", "undelivered", "canceled"}
     if 200 <= status_code < 300 and isinstance(data, dict) and data.get("sid"):
-        return {"ok": True, "id": str(data["sid"])}
+        if status in failed_statuses:
+            return {
+                "ok": False,
+                "error": str(data.get("error_message") or data.get("error_code") or status),
+            }
+        # A create response normally says queued (or accepted when a Messaging
+        # Service chooses the sender).  Final delivery arrives asynchronously.
+        initial_status = status or "accepted"
+        return {
+            "ok": True,
+            "provider": "twilio",
+            "id": str(data["sid"]),
+            "status": initial_status,
+            "confirmation": f"Twilio {initial_status} the message",
+        }
     return {
         "ok": False,
-        "error": str(data.get("message") or data.get("code") or "request rejected")
+        "error": str(
+            data.get("message")
+            or data.get("error_message")
+            or data.get("code")
+            or data.get("error_code")
+            or data.get("status")
+            or "request rejected"
+        )
         if isinstance(data, dict)
         else "invalid response",
     }
@@ -786,6 +825,7 @@ async def _send_sms(ctx, msg, destination: str, message: str) -> None:
         private_key = None
         private_name = None
 
+    provider_status = str(result.get("status") or "accepted")
     await asyncio.to_thread(
         _save_conversation,
         ctx.settings,
@@ -806,11 +846,14 @@ async def _send_sms(ctx, msg, destination: str, message: str) -> None:
         sender,
         phone,
         clean,
-        "sent",
+        provider_status,
         "",
     )
 
-    await ctx.reply(f"📱 SMS SENT ✅ | {_display_phone(phone)}")
+    confirmation = str(result.get("confirmation") or f"SMS {provider_status}")
+    provider_id = str(result.get("id") or "")
+    reference = f" | {provider_id}" if provider_id else ""
+    await ctx.reply(f"📱 {confirmation} ✅ | {_display_phone(phone)}{reference}")
 
 
 # ----------------------------- commands ------------------------------------
