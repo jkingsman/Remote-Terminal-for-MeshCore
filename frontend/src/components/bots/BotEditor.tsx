@@ -59,18 +59,111 @@ function SectionTitle({ title, hint }: { title: string; hint?: string }) {
   );
 }
 
+export function resolveGeneratedUrl(
+  template: string,
+  schema: BotSettingsSchemaField[],
+  settings: Record<string, unknown>
+): string {
+  const settingFields = new Map(
+    schema
+      .filter((field) => field.type !== 'generated_url')
+      .map((field) => [field.key, field] as const)
+  );
+  return template.replace(/\{([^{}]+)\}/g, (placeholder, key: string) => {
+    const settingField = settingFields.get(key);
+    if (!settingField) return placeholder;
+    const value = settings[key] ?? settingField.default;
+    return value == null ? '' : String(value).trim();
+  });
+}
+
+export function validateGeneratedUrl(
+  template: string,
+  schema: BotSettingsSchemaField[],
+  settings: Record<string, unknown>
+): string | null {
+  for (const field of schema) {
+    if (field.type === 'generated_url' || !template.includes(`{${field.key}}`)) continue;
+    const value = settings[field.key] ?? field.default;
+    if (value == null || String(value).trim() === '') return `${field.label} is required`;
+  }
+  try {
+    const parsed = new URL(resolveGeneratedUrl(template, schema, settings));
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return 'URL must use HTTP or HTTPS';
+    }
+  } catch {
+    return 'URL is not valid';
+  }
+  return null;
+}
+
 /** Renders one settings_schema field bound to the settings draft. */
 function SchemaField({
   field,
   value,
+  schema,
+  settings,
   onChange,
 }: {
   field: BotSettingsSchemaField;
   value: unknown;
+  schema: BotSettingsSchemaField[];
+  settings: Record<string, unknown>;
   onChange: (value: unknown) => void;
 }) {
   const [revealed, setRevealed] = useState(false);
   const current = value ?? field.default ?? (field.type === 'bool' ? false : '');
+
+  if (field.type === 'generated_url') {
+    const generatedUrl = resolveGeneratedUrl(field.template, schema, settings);
+    return (
+      <div>
+        <div className="text-xs text-muted-foreground mb-1">{field.label}</div>
+        {field.help && (
+          <div className="text-[0.6875rem] text-muted-foreground mb-1.5">{field.help}</div>
+        )}
+        <div className="flex items-start gap-2 rounded-md border border-input bg-muted px-3 py-2">
+          <code className="min-w-0 flex-1 font-mono text-xs break-all select-all">
+            {generatedUrl}
+          </code>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 shrink-0 px-2"
+            onClick={() => {
+              void navigator.clipboard.writeText(generatedUrl);
+              toast.success(`${field.label} copied`);
+            }}
+          >
+            <Copy className="h-3.5 w-3.5 mr-1" />
+            {field.copy_label ?? 'Copy'}
+          </Button>
+          {field.testable && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 shrink-0 px-2"
+              onClick={() => {
+                const error = validateGeneratedUrl(field.template, schema, settings);
+                if (error) toast.error(error);
+                else toast.success('URL is complete and valid; no request was sent');
+              }}
+            >
+              {field.test_label ?? 'Test URL'}
+            </Button>
+          )}
+        </div>
+        {field.warning && (
+          <div className="mt-2 rounded-md border border-red-500/60 bg-red-500/10 p-3 text-xs text-red-500">
+            {field.warning}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   if (field.type === 'bool') {
     return (
@@ -87,10 +180,14 @@ function SchemaField({
   }
 
   if (field.type === 'select') {
+    const inputId = `bot-setting-${field.key}`;
     return (
       <div>
-        <div className="text-xs text-muted-foreground mb-1">{field.label}</div>
+        <label htmlFor={inputId} className="block text-xs text-muted-foreground mb-1">
+          {field.label}
+        </label>
         <select
+          id={inputId}
           value={String(current)}
           onChange={(e) => onChange(e.target.value)}
           className="h-8 w-full rounded-md border border-input bg-transparent px-2.5 text-[0.8125rem]"
@@ -108,13 +205,21 @@ function SchemaField({
     );
   }
 
-  const isNumber = field.type === 'int' || field.type === 'float';
+  const isNumber = field.type === 'int' || field.type === 'float' || field.type === 'number';
   return (
     <div>
       <div className="text-xs text-muted-foreground mb-1">{field.label}</div>
       <div className="flex gap-2">
         <Input
-          type={field.type === 'password' && !revealed ? 'password' : isNumber ? 'number' : 'text'}
+          type={
+            field.type === 'password' && !revealed
+              ? 'password'
+              : isNumber
+                ? 'number'
+                : field.type === 'url'
+                  ? 'url'
+                  : 'text'
+          }
           value={String(current)}
           min={field.min}
           max={field.max}
@@ -122,7 +227,7 @@ function SchemaField({
           onChange={(e) => {
             if (field.type === 'int')
               onChange(e.target.value === '' ? '' : parseInt(e.target.value, 10) || 0);
-            else if (field.type === 'float')
+            else if (field.type === 'float' || field.type === 'number')
               onChange(e.target.value === '' ? '' : parseFloat(e.target.value) || 0);
             else onChange(e.target.value);
           }}
@@ -176,24 +281,6 @@ export function BotEditor({ botId, channels, onBack, onDeleted }: BotEditorProps
   const [queueThreshold, setQueueThreshold] = useState('0');
   const [settings, setSettings] = useState<Record<string, unknown>>({});
   const [uiTriggers, setUiTriggers] = useState<BotUiTrigger[]>([]);
-  const isSmsBot = bot?.declared_webhooks?.includes('sms') ?? false;
-
-  const smsPublicServer = String(settings.public_server ?? '').trim();
-  const smsWebhookToken = String(settings.webhook_token ?? '').trim();
-  const smsCallbackUrl = useMemo(() => {
-    if (!smsPublicServer || !smsWebhookToken) return '';
-    try {
-      const base = new URL(
-        /^https?:\/\//i.test(smsPublicServer) ? smsPublicServer : `http://${smsPublicServer}`
-      );
-      base.port = '8000';
-      return `${base.origin}/api/hooks/sms?token=${encodeURIComponent(
-        smsWebhookToken
-      )}&to={TO}&from={FROM}&message={MESSAGE}&id={ID}&date={TIMESTAMP}`;
-    } catch {
-      return '';
-    }
-  }, [smsPublicServer, smsWebhookToken]);
   const [newKeyword, setNewKeyword] = useState('');
   const [newCron, setNewCron] = useState('');
   const [cronPreview, setCronPreview] = useState<string | null>(null);
@@ -732,65 +819,32 @@ export function BotEditor({ botId, channels, onBack, onDeleted }: BotEditorProps
               </p>
             ) : (
               <div className="flex flex-col gap-3.5">
-                {bot.settings_schema.map((field) => (
-                  <SchemaField
-                    key={field.key}
-                    field={field}
-                    value={settings[field.key]}
-                    onChange={(value) => {
-                      setSettings((prev) => ({ ...prev, [field.key]: value }));
-                      markDirty();
-                    }}
-                  />
-                ))}
-              </div>
-            )}
-
-            {isSmsBot && (
-              <div className="mt-5 border border-border rounded-lg p-3.5">
-                <div className="text-sm font-semibold mb-1">Incoming SMS Callback</div>
-
-                <p className="text-xs text-muted-foreground mb-3">
-                  Enter this URL in your DID configuration under{' '}
-                  <strong>SMS/MMS URL Callback</strong>.
-                </p>
-
-                {smsCallbackUrl ? (
-                  <div className="flex items-start gap-2 rounded-md border border-input bg-muted px-3 py-2">
-                    <code className="min-w-0 flex-1 font-mono text-xs break-all select-all">
-                      {smsCallbackUrl}
-                    </code>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 shrink-0 px-2"
-                      onClick={() => {
-                        void navigator.clipboard.writeText(smsCallbackUrl);
-                        toast.success('Callback URL copied');
+                {bot.settings_schema.map((field) => {
+                  if (
+                    field.show_when &&
+                    String(
+                      settings[field.show_when.key] ??
+                        bot.settings_schema.find((item) => item.key === field.show_when?.key)
+                          ?.default ??
+                        ''
+                    ) !== field.show_when.value
+                  ) {
+                    return null;
+                  }
+                  return (
+                    <SchemaField
+                      key={field.key}
+                      field={field}
+                      value={settings[field.key]}
+                      schema={bot.settings_schema}
+                      settings={settings}
+                      onChange={(value) => {
+                        setSettings((prev) => ({ ...prev, [field.key]: value }));
+                        markDirty();
                       }}
-                    >
-                      <Copy className="h-3.5 w-3.5 mr-1" />
-                      Copy
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="rounded-md border border-input bg-muted px-3 py-2 text-xs text-muted-foreground">
-                    Configure the Public server IP or domain and Incoming webhook token above to
-                    generate the callback URL.
-                  </div>
-                )}
-
-                <div className="mt-3 rounded-md border border-red-500/60 bg-red-500/10 p-3">
-                  <div className="text-xs font-semibold text-red-500 mb-1">
-                    ⚠ Public Internet Warning
-                  </div>
-                  <p className="text-xs text-red-500">
-                    Port 8000 must be open to the Internet for incoming SMS callbacks. Opening port
-                    8000 will also make the RemoteTerm web interface reachable from the public
-                    Internet.
-                  </p>
-                </div>
+                    />
+                  );
+                })}
               </div>
             )}
           </div>

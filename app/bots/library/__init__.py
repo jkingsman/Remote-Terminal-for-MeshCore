@@ -41,6 +41,19 @@ class LibraryError(ValueError):
     """Raised when a library code file is malformed."""
 
 
+def _merge_library_display_fields(
+    current: list[dict[str, Any]], shipped: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Add new read-only library UI fields without replacing operator schema."""
+    existing_keys = {field.get("key") for field in current}
+    additions = [
+        field
+        for field in shipped
+        if field.get("type") == "generated_url" and field.get("key") not in existing_keys
+    ]
+    return [*current, *additions]
+
+
 def _extract_meta(source: str, filename: str) -> dict[str, Any]:
     from app.bots.runtime import BotCodeError, load_bot_code
 
@@ -126,6 +139,13 @@ async def ensure_seeded() -> int:
                 builtin_version=entry["version"],
             )
             changed += 1
+        elif existing.modified:
+            merged_schema = _merge_library_display_fields(
+                existing.settings_schema, entry.get("settings_schema") or []
+            )
+            if merged_schema != existing.settings_schema:
+                await BotRepository.update(existing.id, settings_schema=merged_schema)
+                changed += 1
     if changed:
         logger.info("Bot library seeding applied %d change(s)", changed)
     return changed

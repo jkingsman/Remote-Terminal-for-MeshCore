@@ -34,6 +34,7 @@ Routing:
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import json
 import re
@@ -50,15 +51,27 @@ BOT_META = {
     "key": "sms",
     "name": "SMS",
     "category": "Communication",
-    "description": "VoIP.ms SMS with direct RemoteTerm callback and channel/DM conversation routing",
-    "version": "1.3.1",
+    "description": "VoIP.ms or Twilio SMS with direct RemoteTerm callback and channel/DM conversation routing",
+    "version": "1.5.0",
     "settings_schema": [
+        {
+            "key": "provider",
+            "label": "SMS provider",
+            "type": "select",
+            "default": "voipms",
+            "options": [
+                {"value": "voipms", "label": "VoIP.ms"},
+                {"value": "twilio", "label": "Twilio"},
+            ],
+            "help": "Choose the service used for outgoing and incoming SMS.",
+        },
         {
             "key": "api_username",
             "label": "VoIP.ms API username / email",
             "type": "text",
             "default": "",
             "help": "VoIP.ms account email used by the REST/JSON API.",
+            "show_when": {"key": "provider", "value": "voipms"},
         },
         {
             "key": "api_password",
@@ -66,6 +79,7 @@ BOT_META = {
             "type": "password",
             "default": "",
             "help": "VoIP.ms API password (not your normal portal password). Create/enable it under SOAP and REST/JSON API.",
+            "show_when": {"key": "provider", "value": "voipms"},
         },
         {
             "key": "did",
@@ -73,6 +87,7 @@ BOT_META = {
             "type": "text",
             "default": "",
             "help": "10-digit NANPA SMS-capable VoIP.ms DID.",
+            "show_when": {"key": "provider", "value": "voipms"},
         },
         {
             "key": "dialing_mode",
@@ -83,6 +98,31 @@ BOT_META = {
                 {"value": "nanpa", "label": "NANPA (10 digits)"},
                 {"value": "e164", "label": "E.164 (+1...)"},
             ],
+            "show_when": {"key": "provider", "value": "voipms"},
+        },
+        {
+            "key": "twilio_account_sid",
+            "label": "Twilio Account SID",
+            "type": "text",
+            "default": "",
+            "help": "Account SID beginning with AC from the Twilio Console.",
+            "show_when": {"key": "provider", "value": "twilio"},
+        },
+        {
+            "key": "twilio_auth_token",
+            "label": "Twilio Auth Token",
+            "type": "password",
+            "default": "",
+            "help": "Auth Token from the Twilio Console.",
+            "show_when": {"key": "provider", "value": "twilio"},
+        },
+        {
+            "key": "twilio_from_number",
+            "label": "Twilio sender number",
+            "type": "text",
+            "default": "",
+            "help": "SMS-capable Twilio number in E.164 format, for example +15145550100.",
+            "show_when": {"key": "provider", "value": "twilio"},
         },
         {
             "key": "public_server",
@@ -97,6 +137,30 @@ BOT_META = {
             "type": "password",
             "default": "",
             "help": "Secret used to protect incoming SMS callbacks. Generate one with: openssl rand -hex 32. The direct callback URL sends it as the token query parameter.",
+        },
+        {
+            "key": "callback_url",
+            "label": "VoIP.ms SMS/MMS Callback URL",
+            "type": "generated_url",
+            "template": "http://{public_server}:8000/api/hooks/sms?token={webhook_token}&to={TO}&from={FROM}&message={MESSAGE}&id={ID}&date={TIMESTAMP}",
+            "help": "Enter this URL in the VoIP.ms DID configuration under SMS/MMS URL Callback.",
+            "copy_label": "Copy",
+            "testable": True,
+            "test_label": "Test URL",
+            "warning": "⚠ Public Internet Warning: Port 8000 must be open to the Internet for incoming SMS callbacks. Opening port 8000 will also make the RemoteTerm web interface reachable from the public Internet.",
+            "show_when": {"key": "provider", "value": "voipms"},
+        },
+        {
+            "key": "twilio_callback_url",
+            "label": "Twilio incoming-message webhook URL",
+            "type": "generated_url",
+            "template": "http://{public_server}:8000/api/hooks/sms?token={webhook_token}",
+            "help": "Configure this URL with HTTP POST for the Twilio phone number's incoming messages.",
+            "copy_label": "Copy",
+            "testable": True,
+            "test_label": "Test URL",
+            "warning": "⚠ Public Internet Warning: Port 8000 must be open to the Internet for incoming SMS callbacks. Opening port 8000 will also make the RemoteTerm web interface reachable from the public Internet.",
+            "show_when": {"key": "provider", "value": "twilio"},
         },
         {
             "key": "fallback_channel",
@@ -136,10 +200,14 @@ BOT_META = {
         },
     ],
     "settings": {
+        "provider": "voipms",
         "api_username": "",
         "api_password": "",
         "did": "",
         "dialing_mode": "nanpa",
+        "twilio_account_sid": "",
+        "twilio_auth_token": "",
+        "twilio_from_number": "",
         "public_server": "",
         "webhook_token": "",
         "fallback_channel": "#test",
@@ -525,7 +593,7 @@ def _format_outgoing(settings: dict[str, Any], sender: str, message: str) -> str
 # ----------------------------- SMS API -------------------------------------
 
 
-def _provider_request(settings: dict[str, Any], destination: str, message: str) -> dict[str, Any]:
+def _voipms_request(settings: dict[str, Any], destination: str, message: str) -> dict[str, Any]:
     """Blocking HTTP request. Internal errors are logged/stored, never exposed over RF."""
     username = str(settings.get("api_username", "") or "").strip()
     password = str(settings.get("api_password", "") or "").strip()
@@ -564,9 +632,24 @@ def _provider_request(settings: dict[str, Any], destination: str, message: str) 
         with urllib.request.urlopen(request, timeout=8) as response:
             raw = response.read()
             status_code = int(response.status)
+    except Exception as exc:
+        # The request may already have been accepted before the connection
+        # failed or timed out. Retrying here could send a duplicate SMS.
+        return {
+            "ok": False,
+            "uncertain": True,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+    try:
         data = json.loads(raw.decode("utf-8", errors="replace"))
     except Exception as exc:
-        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        # A 2xx response with an unreadable body also leaves delivery unknown.
+        return {
+            "ok": False,
+            "uncertain": 200 <= status_code < 300,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
 
     status = str(data.get("status") or "").casefold() if isinstance(data, dict) else ""
     if status_code == 200 and status == "success":
@@ -581,6 +664,70 @@ def _provider_request(settings: dict[str, Any], destination: str, message: str) 
         if isinstance(data, dict)
         else "invalid response",
     }
+
+
+def _twilio_request(settings: dict[str, Any], destination: str, message: str) -> dict[str, Any]:
+    """Send one SMS through Twilio's Messages REST resource."""
+    account_sid = str(settings.get("twilio_account_sid", "") or "").strip()
+    auth_token = str(settings.get("twilio_auth_token", "") or "").strip()
+    from_phone = _normalize_nanpa(settings.get("twilio_from_number", ""))
+    dst = _normalize_nanpa(destination)
+
+    if not account_sid or not auth_token or not from_phone:
+        return {"ok": False, "error": "Twilio API configuration incomplete"}
+    if not dst:
+        return {"ok": False, "error": "invalid destination"}
+
+    url = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json"
+    body = urllib.parse.urlencode(
+        {"From": f"+1{from_phone}", "To": f"+1{dst}", "Body": message}
+    ).encode("utf-8")
+    credentials = base64.b64encode(f"{account_sid}:{auth_token}".encode()).decode("ascii")
+    request = urllib.request.Request(
+        url,
+        data=body,
+        method="POST",
+        headers={
+            "Authorization": f"Basic {credentials}",
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "application/json",
+            "User-Agent": "RemoteTerm-SMS/1.0",
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=8) as response:
+            raw = response.read()
+            status_code = int(response.status)
+    except Exception as exc:
+        return {"ok": False, "uncertain": True, "error": f"{type(exc).__name__}: {exc}"}
+
+    try:
+        data = json.loads(raw.decode("utf-8", errors="replace"))
+    except Exception as exc:
+        return {
+            "ok": False,
+            "uncertain": 200 <= status_code < 300,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+    if 200 <= status_code < 300 and isinstance(data, dict) and data.get("sid"):
+        return {"ok": True, "id": str(data["sid"])}
+    return {
+        "ok": False,
+        "error": str(data.get("message") or data.get("code") or "request rejected")
+        if isinstance(data, dict)
+        else "invalid response",
+    }
+
+
+def _provider_request(settings: dict[str, Any], destination: str, message: str) -> dict[str, Any]:
+    provider = str(settings.get("provider", "voipms") or "voipms").strip().casefold()
+    if provider == "twilio":
+        return _twilio_request(settings, destination, message)
+    if provider == "voipms":
+        return _voipms_request(settings, destination, message)
+    return {"ok": False, "error": f"unsupported SMS provider: {provider}"}
 
 
 async def _send_sms(ctx, msg, destination: str, message: str) -> None:
@@ -607,7 +754,9 @@ async def _send_sms(ctx, msg, destination: str, message: str) -> None:
 
     if not result.get("ok"):
         internal_error = str(result.get("error") or "unknown error")
-        ctx.log(f"SMS send failed: {internal_error}", level="WARNING")
+        uncertain = bool(result.get("uncertain"))
+        log_summary = "SMS confirmation unavailable" if uncertain else "SMS send failed"
+        ctx.log(f"{log_summary}: {internal_error}", level="WARNING")
         await asyncio.to_thread(
             _save_outgoing,
             ctx.settings,
@@ -616,11 +765,14 @@ async def _send_sms(ctx, msg, destination: str, message: str) -> None:
             sender,
             phone,
             clean,
-            "error",
+            "unknown" if uncertain else "error",
             internal_error,
         )
         # Keep provider/API details private on MeshCore.
-        await ctx.reply("📱 SMS Center indisponible. Réessaie plus tard.")
+        if uncertain:
+            await ctx.reply("📱 SMS status unknown — provider confirmation unavailable.")
+        else:
+            await ctx.reply("📱 SMS service unavailable. Please try again later.")
         return
 
     if msg.is_dm:
@@ -851,11 +1003,11 @@ async def incoming_sms(ctx, payload):
     if event_type and event_type not in {"message.received", "message_received", "received"}:
         return
 
-    raw_from = source.get("from") if isinstance(source, dict) else None
+    raw_from = (source.get("from") or source.get("From")) if isinstance(source, dict) else None
     if isinstance(raw_from, dict):
         raw_from = raw_from.get("phone_number") or raw_from.get("number")
 
-    raw_to = source.get("to") if isinstance(source, dict) else None
+    raw_to = (source.get("to") or source.get("To")) if isinstance(source, dict) else None
     if isinstance(raw_to, list) and raw_to:
         first_to = raw_to[0]
         if isinstance(first_to, dict):
@@ -867,24 +1019,24 @@ async def incoming_sms(ctx, payload):
 
     phone = _normalize_nanpa(
         raw_from
-        or _payload_value(source, "FROM", "from_number", "sender")
-        or _payload_value(payload, "from", "FROM", "from_number", "sender")
+        or _payload_value(source, "FROM", "From", "from_number", "sender")
+        or _payload_value(payload, "from", "FROM", "From", "from_number", "sender")
     )
     to = str(
         raw_to
-        or _payload_value(source, "TO", "to_number", "did")
-        or _payload_value(payload, "to", "TO", "to_number", "did")
+        or _payload_value(source, "TO", "To", "to_number", "did")
+        or _payload_value(payload, "to", "TO", "To", "to_number", "did")
         or ""
     ).strip()
-    message = _payload_value(source, "message", "MESSAGE", "text", "body") or _payload_value(
-        payload, "message", "MESSAGE", "text", "body"
-    )
+    message = _payload_value(
+        source, "message", "MESSAGE", "text", "body", "Body"
+    ) or _payload_value(payload, "message", "MESSAGE", "text", "body", "Body")
     timestamp = _payload_value(
         source, "received_at", "date", "timestamp", "time"
     ) or _payload_value(payload, "occurred_at", "date", "timestamp", "time")
     provider_id = (
-        _payload_value(source, "id", "ID", "message_id", "sms_id")
-        or _payload_value(payload, "id", "ID", "message_id", "sms_id")
+        _payload_value(source, "id", "ID", "message_id", "sms_id", "MessageSid", "SmsSid")
+        or _payload_value(payload, "id", "ID", "message_id", "sms_id", "MessageSid", "SmsSid")
         or (str(data.get("id") or "").strip() if isinstance(data, dict) else "")
     )
 

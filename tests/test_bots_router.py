@@ -190,7 +190,7 @@ class TestInboundHooks:
             '    await ctx.send_dm(payload["dm_to"], payload["message"])\n'
             '@bot.on_webhook("sms")\n'
             "async def sms(ctx, payload):\n"
-            '    ctx.state["incoming"] = payload\n'
+            "    pass\n"
         )
         bot = await BotRepository.create(name="hook-test", code=code, enabled=True)
         await bot_engine.reload_bot(bot.id)
@@ -217,6 +217,19 @@ class TestInboundHooks:
                 assert sms_get.status_code == 200
                 assert sms_get.text == "ok"
                 assert sms_get.headers["content-type"].startswith("text/plain")
+
+                twilio_post = await client.post(
+                    "/api/hooks/sms?token=s3cret",
+                    data={
+                        "From": "+15145550100",
+                        "To": "+14385550100",
+                        "Body": "hello from Twilio",
+                        "MessageSid": "SM123",
+                    },
+                )
+                assert twilio_post.status_code == 200
+                assert twilio_post.headers["content-type"].startswith("application/xml")
+                assert twilio_post.text.endswith("<Response></Response>")
 
                 # GET support is deliberately limited to the VoIP.ms callback;
                 # existing bot webhooks remain POST-only.

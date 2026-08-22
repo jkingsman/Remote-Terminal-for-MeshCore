@@ -4,6 +4,7 @@ import base64
 import hashlib
 import json
 import os
+from unittest.mock import MagicMock, patch
 
 from app.bots.engine import BotEngine
 from app.bots.library import get_library_entry
@@ -105,6 +106,85 @@ class TestWorldcupSummarize:
         }
         assert summarize(event) == ("401", "ARG 2-1 FRA", "in")
         assert summarize({"competitions": []}) is None
+
+
+class TestSmsProviderResponse:
+    @staticmethod
+    def _settings():
+        return {
+            "api_username": "user@example.com",
+            "api_password": "secret",
+            "did": "5145550100",
+        }
+
+    def test_success_response_is_confirmed(self):
+        request = _load_namespace("sms")["_provider_request"]
+        response = MagicMock()
+        response.status = 200
+        response.read.return_value = b'{"status":"success","sms":"abc123"}'
+        response.__enter__.return_value = response
+
+        with patch("urllib.request.urlopen", return_value=response):
+            result = request(self._settings(), "4385550100", "hello")
+
+        assert result == {"ok": True, "id": "abc123"}
+
+    def test_transport_failure_has_unknown_delivery_status(self):
+        request = _load_namespace("sms")["_provider_request"]
+
+        with patch("urllib.request.urlopen", side_effect=TimeoutError("timed out")):
+            result = request(self._settings(), "4385550100", "hello")
+
+        assert result["ok"] is False
+        assert result["uncertain"] is True
+
+    def test_provider_rejection_is_a_confirmed_failure(self):
+        request = _load_namespace("sms")["_provider_request"]
+        response = MagicMock()
+        response.status = 200
+        response.read.return_value = b'{"status":"invalid_destination"}'
+        response.__enter__.return_value = response
+
+        with patch("urllib.request.urlopen", return_value=response):
+            result = request(self._settings(), "4385550100", "hello")
+
+        assert result == {"ok": False, "error": "invalid_destination"}
+
+    def test_twilio_request_uses_messages_api_and_basic_auth(self):
+        request = _load_namespace("sms")["_provider_request"]
+        response = MagicMock()
+        response.status = 201
+        response.read.return_value = b'{"sid":"SM123","status":"queued"}'
+        response.__enter__.return_value = response
+        settings = {
+            "provider": "twilio",
+            "twilio_account_sid": "AC123",
+            "twilio_auth_token": "token",
+            "twilio_from_number": "+15145550100",
+        }
+
+        with patch("urllib.request.urlopen", return_value=response) as urlopen:
+            result = request(settings, "4385550100", "hello world")
+
+        assert result == {"ok": True, "id": "SM123"}
+        sent_request = urlopen.call_args.args[0]
+        assert sent_request.full_url.endswith("/Accounts/AC123/Messages.json")
+        assert sent_request.get_method() == "POST"
+        assert sent_request.get_header("Authorization") == "Basic QUMxMjM6dG9rZW4="
+        assert sent_request.data == b"From=%2B15145550100&To=%2B14385550100&Body=hello+world"
+
+    def test_provider_defaults_to_voipms_for_existing_settings(self):
+        request = _load_namespace("sms")["_provider_request"]
+        response = MagicMock()
+        response.status = 200
+        response.read.return_value = b'{"status":"success"}'
+        response.__enter__.return_value = response
+
+        with patch("urllib.request.urlopen", return_value=response) as urlopen:
+            result = request(self._settings(), "4385550100", "hello")
+
+        assert result["ok"] is True
+        assert urlopen.call_args.args[0].full_url.startswith("https://voip.ms/")
 
 
 class TestMeshAdminBots:

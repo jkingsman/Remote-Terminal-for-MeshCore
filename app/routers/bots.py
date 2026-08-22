@@ -572,15 +572,6 @@ async def _run_inbound_hook(
     return {"status": "ok"}
 
 
-@hooks_router.post("/{slug}")
-async def inbound_hook(
-    slug: str,
-    request: Request,
-    x_hook_token: str | None = Header(default=None),
-) -> dict[str, str]:
-    return await _run_inbound_hook(slug, request, x_hook_token)
-
-
 @hooks_router.get("/sms")
 async def inbound_sms_hook(
     request: Request,
@@ -590,3 +581,25 @@ async def inbound_sms_hook(
     # VoIP.ms uses the exact plain-text body "ok" to acknowledge delivery
     # when URL Callback Retry is enabled.
     return Response(content="ok", media_type="text/plain")
+
+
+@hooks_router.post("/sms")
+async def inbound_sms_post_hook(
+    request: Request,
+    x_hook_token: str | None = Header(default=None),
+) -> Response:
+    await _run_inbound_hook("sms", request, x_hook_token)
+    # Twilio expects a TwiML document in response to an incoming-message webhook.
+    return Response(
+        content='<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
+        media_type="application/xml",
+    )
+
+
+@hooks_router.post("/{slug}")
+async def inbound_hook(
+    slug: str,
+    request: Request,
+    x_hook_token: str | None = Header(default=None),
+) -> dict[str, str]:
+    return await _run_inbound_hook(slug, request, x_hook_token)
