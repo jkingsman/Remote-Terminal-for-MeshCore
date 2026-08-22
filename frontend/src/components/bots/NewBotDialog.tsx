@@ -82,7 +82,7 @@ export function NewBotDialogBody({ onCreated }: { onCreated: (bot: Bot) => void 
   };
 
   return (
-    <div className="px-5 py-4 flex flex-col gap-4">
+    <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-4">
       <div>
         <div className="text-xs text-muted-foreground mb-1.5">Name</div>
         <Input
