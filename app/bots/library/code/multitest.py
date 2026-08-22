@@ -18,7 +18,7 @@ BOT_META = {
     "name": "multitest",
     "category": "Mesh",
     "description": "Collects unique message paths heard during a 6s window",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "cooldown_seconds": 30,
 }
 
