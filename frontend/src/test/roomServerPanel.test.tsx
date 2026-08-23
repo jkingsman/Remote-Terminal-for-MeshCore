@@ -187,6 +187,12 @@ describe('RoomServerPanel', () => {
     render(<RoomServerPanel contact={roomContact} />);
     fireEvent.click(screen.getByText('Login with Existing Access / Guest'));
 
+    // The sync control now lives inside the Tools sheet.
+    await waitFor(() => {
+      expect(screen.getByText('Show Tools')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText('Show Tools'));
+
     await waitFor(() => {
       expect(screen.getByText('Keep this room synced')).toBeInTheDocument();
     });
@@ -213,6 +219,12 @@ describe('RoomServerPanel', () => {
 
     render(<RoomServerPanel contact={roomContact} />);
     fireEvent.click(screen.getByText('Login with Existing Access / Guest'));
+
+    // The sync control now lives inside the Tools sheet.
+    await waitFor(() => {
+      expect(screen.getByText('Show Tools')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText('Show Tools'));
 
     await waitFor(() => {
       expect(screen.getByText('Keep this room synced')).toBeInTheDocument();
