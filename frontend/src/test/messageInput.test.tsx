@@ -5,16 +5,24 @@
  * behavior for both DM and channel conversations.
  */
 
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 import { MessageInput } from '../components/MessageInput';
+import { api } from '../api';
 import { toast } from '../components/ui/sonner';
 
 // Mock sonner (toast)
 vi.mock('../components/ui/sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
+
+// Mock the API — MessageInput calls api.estimateMcmp for the compressed counter.
+vi.mock('../api', () => ({
+  api: { estimateMcmp: vi.fn() },
+}));
+
+const mockApi = api as unknown as { estimateMcmp: ReturnType<typeof vi.fn> };
 
 const mockToast = toast as unknown as {
   success: ReturnType<typeof vi.fn>;
@@ -38,6 +46,7 @@ describe('MessageInput', () => {
     conversationType?: 'contact' | 'channel' | 'raw';
     senderName?: string;
     disabled?: boolean;
+    mcmpEnabled?: boolean;
   }) {
     return render(
       <MessageInput
@@ -45,6 +54,7 @@ describe('MessageInput', () => {
         disabled={props.disabled ?? false}
         conversationType={props.conversationType}
         senderName={props.senderName}
+        mcmpEnabled={props.mcmpEnabled}
         placeholder="Type a message..."
       />
     );
@@ -186,6 +196,32 @@ describe('MessageInput', () => {
 
       // Button is still enabled — canSubmit only checks non-empty text
       expect(getSendButton()).toBeEnabled();
+    });
+  });
+
+  describe('MCMP compressed counter', () => {
+    it('shows the compressed wire size against the budget when enabled', async () => {
+      // 200 raw chars would be over the 156 budget, but they compress to 40
+      // bytes — the counter must reflect the compressed size so more fits.
+      mockApi.estimateMcmp.mockResolvedValue({ wire_bytes: 40, compressed: true });
+      renderInput({ conversationType: 'contact', mcmpEnabled: true });
+
+      const text = 'x'.repeat(200);
+      fireEvent.change(getInput(), { target: { value: text } });
+
+      // Rendered in both desktop and mobile counter variants.
+      await waitFor(() => expect(screen.getAllByText(/40\/156/).length).toBeGreaterThan(0));
+      expect(mockApi.estimateMcmp).toHaveBeenCalledWith(text);
+      // The raw over-budget count is not shown.
+      expect(screen.queryAllByText(/200\/156/).length).toBe(0);
+    });
+
+    it('does not query the backend when compression is off', () => {
+      renderInput({ conversationType: 'contact', mcmpEnabled: false });
+      fireEvent.change(getInput(), { target: { value: 'Hello there' } });
+      // Raw byte count is shown; no estimate call.
+      expect(screen.getByText(/11\/156/)).toBeTruthy();
+      expect(mockApi.estimateMcmp).not.toHaveBeenCalled();
     });
   });
 

@@ -1,5 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
-import { Bell, BellOff, ChevronsLeftRight, Globe2, Info, Route, Star, Trash2 } from 'lucide-react';
+import {
+  Bell,
+  BellOff,
+  ChevronsLeftRight,
+  Globe2,
+  Info,
+  Route,
+  Shrink,
+  Star,
+  Trash2,
+} from 'lucide-react';
 import { toast } from './ui/sonner';
 import { DirectTraceIcon } from './DirectTraceIcon';
 import { ContactPathDiscoveryModal } from './ContactPathDiscoveryModal';
@@ -33,6 +43,7 @@ interface ChatHeaderProps {
   onOpenPushSettings?: () => void;
   onToggleFavorite: (type: 'channel' | 'contact', id: string) => void;
   onToggleMute?: (key: string) => void;
+  onSetMcmpEnabled?: (type: 'channel' | 'contact', id: string, enabled: boolean) => void;
   onSetChannelFloodScopeOverride?: (key: string, floodScopeOverride: string) => void;
   onSetChannelPathHashModeOverride?: (key: string, pathHashModeOverride: number | null) => void;
   onDeleteChannel: (key: string) => void;
@@ -59,6 +70,7 @@ export function ChatHeader({
   onOpenPushSettings,
   onToggleFavorite,
   onToggleMute,
+  onSetMcmpEnabled,
   onSetChannelFloodScopeOverride,
   onSetChannelPathHashModeOverride,
   onDeleteChannel,
@@ -130,6 +142,19 @@ export function ChatHeader({
       : conversation.type === 'channel'
         ? (activeChannel?.favorite ?? false)
         : false;
+  // MCMP compression opt-in. Offered for regular DMs and channels; not for room
+  // servers (their posts route through the room server and have a tighter budget)
+  // or repeaters (handled by a separate console).
+  const mcmpEnabled =
+    conversation.type === 'contact'
+      ? (activeContact?.mcmp_enabled ?? false)
+      : conversation.type === 'channel'
+        ? (activeChannel?.mcmp_enabled ?? false)
+        : false;
+  const showMcmpToggle =
+    !!onSetMcmpEnabled &&
+    ((conversation.type === 'contact' && !activeContactIsRoomServer) ||
+      conversation.type === 'channel');
   const favoriteTitle =
     conversation.type === 'contact'
       ? isFav
@@ -463,6 +488,30 @@ export function ChatHeader({
           >
             <ChevronsLeftRight
               className={`h-4 w-4 ${activePathHashModeOverride != null ? 'text-status-connected' : 'text-muted-foreground'}`}
+              aria-hidden="true"
+            />
+          </button>
+        )}
+        {showMcmpToggle && (
+          <button
+            className="p-1 rounded hover:bg-accent text-lg leading-none transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            onClick={() =>
+              onSetMcmpEnabled?.(
+                conversation.type as 'channel' | 'contact',
+                conversation.id,
+                !mcmpEnabled
+              )
+            }
+            title={
+              mcmpEnabled
+                ? 'MCMP compression is on — messages are compressed so more text fits in one packet. Turn off if the other side can’t read compressed messages.'
+                : 'Compress messages (MCMP) to fit more text per packet. Both sides must support MCMP (meshcore-open / RemoteTerm).'
+            }
+            aria-label={mcmpEnabled ? 'Disable MCMP compression' : 'Enable MCMP compression'}
+            aria-pressed={mcmpEnabled}
+          >
+            <Shrink
+              className={cn('h-4 w-4', mcmpEnabled ? 'text-primary' : 'text-muted-foreground')}
               aria-hidden="true"
             />
           </button>

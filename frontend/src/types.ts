@@ -163,6 +163,7 @@ export interface Contact {
   last_seen: number | null;
   on_radio: boolean;
   favorite: boolean;
+  mcmp_enabled?: boolean;
   last_contacted: number | null;
   last_read_at: number | null;
   first_seen: number | null;
@@ -247,6 +248,7 @@ export interface Channel {
   last_read_at: number | null;
   favorite: boolean;
   muted: boolean;
+  mcmp_enabled?: boolean;
 }
 
 export interface ChannelMessageCounts {

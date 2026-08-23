@@ -242,6 +242,30 @@ export function App() {
     [setContacts, setChannels]
   );
 
+  const handleSetMcmpEnabled = useCallback(
+    async (type: 'channel' | 'contact', id: string, enabled: boolean) => {
+      const apply = (value: boolean) => {
+        if (type === 'contact') {
+          setContacts((prev) =>
+            prev.map((c) => (c.public_key === id ? { ...c, mcmp_enabled: value } : c))
+          );
+        } else {
+          setChannels((prev) =>
+            prev.map((c) => (c.key === id ? { ...c, mcmp_enabled: value } : c))
+          );
+        }
+      };
+      apply(enabled); // optimistic
+      try {
+        await api.setMcmpEnabled(type, id, enabled);
+      } catch {
+        apply(!enabled); // revert
+        toast.error('Failed to update compression');
+      }
+    },
+    [setContacts, setChannels]
+  );
+
   // useConversationRouter is called second — it receives channels/contacts as inputs
   const {
     activeConversation,
@@ -583,6 +607,7 @@ export function App() {
     onPathDiscovery: handlePathDiscovery,
     onToggleFavorite: handleToggleFavorite,
     onToggleMute: handleToggleMute,
+    onSetMcmpEnabled: handleSetMcmpEnabled,
     onDeleteContact: handleDeleteContact,
     onDeleteChannel: handleDeleteChannel,
     onSetChannelFloodScopeOverride: handleSetChannelFloodScopeOverride,

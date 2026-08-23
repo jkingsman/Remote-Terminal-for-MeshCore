@@ -382,6 +382,19 @@ export const api = {
       body: JSON.stringify({ key }),
     }),
 
+  // MCMP compression (per conversation)
+  setMcmpEnabled: (type: 'channel' | 'contact', id: string, enabled: boolean) =>
+    fetchJson<{ type: 'channel' | 'contact'; id: string; enabled: boolean }>('/settings/mcmp/set', {
+      method: 'POST',
+      body: JSON.stringify({ type, id, enabled }),
+    }),
+
+  estimateMcmp: (text: string) =>
+    fetchJson<{ wire_bytes: number; compressed: boolean }>('/messages/mcmp-estimate', {
+      method: 'POST',
+      body: JSON.stringify({ text }),
+    }),
+
   // Fanout
   getFanoutConfigs: () => fetchJson<FanoutConfig[]>('/fanout'),
   createFanoutConfig: (config: {
@@ -475,10 +488,7 @@ export const api = {
     }),
   contactTelemetryHistory: (publicKey: string) =>
     fetchJson<TelemetryHistoryEntry[]>(`/contacts/${publicKey}/telemetry-history`),
-  roomLogin: (
-    publicKey: string,
-    opts: { password?: string; useStoredCredential?: boolean } = {}
-  ) =>
+  roomLogin: (publicKey: string, opts: { password?: string; useStoredCredential?: boolean } = {}) =>
     fetchJson<RepeaterLoginResponse>(`/contacts/${publicKey}/room/login`, {
       method: 'POST',
       // password may legitimately be "" (guest); only omit it when unset so the
@@ -488,8 +498,7 @@ export const api = {
         use_stored_credential: opts.useStoredCredential ?? false,
       }),
     }),
-  getRoomPoll: (publicKey: string) =>
-    fetchJson<RoomPollStatus>(`/contacts/${publicKey}/room/poll`),
+  getRoomPoll: (publicKey: string) => fetchJson<RoomPollStatus>(`/contacts/${publicKey}/room/poll`),
   setRoomPoll: (publicKey: string, config: RoomPollConfigRequest) =>
     fetchJson<RoomPollStatus>(`/contacts/${publicKey}/room/poll`, {
       method: 'PUT',

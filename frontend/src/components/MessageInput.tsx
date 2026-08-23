@@ -10,9 +10,11 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from 'react';
+import { Shrink } from 'lucide-react';
 import { Button } from './ui/button';
 import { toast } from './ui/sonner';
 import { cn } from '@/lib/utils';
+import { api } from '../api';
 import {
   getTextReplaceEnabled,
   getTextReplaceMapJson,
@@ -44,6 +46,9 @@ interface MessageInputProps {
   conversationType?: 'contact' | 'channel' | 'raw';
   /** Sender name (radio name) for channel message limit calculation */
   senderName?: string;
+  /** When the conversation compresses outbound messages (MCMP), the counter
+   *  reflects the compressed wire size instead of the raw byte length. */
+  mcmpEnabled?: boolean;
 }
 
 type LimitState = 'normal' | 'warning' | 'danger' | 'error';
@@ -54,11 +59,15 @@ export interface MessageInputHandle {
 }
 
 export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(function MessageInput(
-  { onSend, disabled, placeholder, conversationType, senderName },
+  { onSend, disabled, placeholder, conversationType, senderName, mcmpEnabled },
   ref
 ) {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  // Compressed wire size of the current draft, fetched from the backend (the
+  // MCMP codec is server-side). null until the first estimate resolves, or when
+  // compression is off for this conversation.
+  const [compressedBytes, setCompressedBytes] = useState<number | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   /** Resize textarea to fit content, clamped between 1 row and ~6 rows. */
@@ -109,6 +118,37 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
   // UTF-8 byte length of the current text (LoRa packets are byte-constrained)
   const textByteLen = useMemo(() => byteLen(text), [text]);
 
+  // When MCMP is on, poll the backend (which owns the codec) for the compressed
+  // wire size, debounced. That size is what actually rides the packet, so the
+  // effective character capacity grows as compressible text is typed.
+  useEffect(() => {
+    if (!mcmpEnabled || !limits || text.trim().length === 0) {
+      setCompressedBytes(null);
+      return;
+    }
+    let cancelled = false;
+    const handle = setTimeout(() => {
+      api
+        .estimateMcmp(text)
+        .then((res) => {
+          if (!cancelled) setCompressedBytes(res.wire_bytes);
+        })
+        .catch(() => {
+          if (!cancelled) setCompressedBytes(null);
+        });
+    }, 150);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [text, mcmpEnabled, limits]);
+
+  // The byte count the counter and limit thresholds use: the compressed size
+  // when available, otherwise the raw length (conservative until the estimate
+  // resolves, and always for uncompressed conversations).
+  const showCompressed = mcmpEnabled && compressedBytes !== null;
+  const effectiveByteLen = showCompressed ? compressedBytes : textByteLen;
+
   // Determine current limit state
   const { limitState, warningMessage } = useMemo((): {
     limitState: LimitState;
@@ -116,19 +156,19 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
   } => {
     if (!limits) return { limitState: 'normal', warningMessage: null };
 
-    if (textByteLen >= limits.hardLimit) {
+    if (effectiveByteLen >= limits.hardLimit) {
       return { limitState: 'error', warningMessage: 'likely truncated by radio' };
     }
-    if (textByteLen >= limits.dangerAt) {
+    if (effectiveByteLen >= limits.dangerAt) {
       return { limitState: 'danger', warningMessage: 'may impact multi-repeater hop delivery' };
     }
-    if (textByteLen >= limits.warningAt) {
+    if (effectiveByteLen >= limits.warningAt) {
       return { limitState: 'warning', warningMessage: 'may impact multi-repeater hop delivery' };
     }
     return { limitState: 'normal', warningMessage: null };
-  }, [textByteLen, limits]);
+  }, [effectiveByteLen, limits]);
 
-  const remaining = limits ? limits.hardLimit - textByteLen : 0;
+  const remaining = limits ? limits.hardLimit - effectiveByteLen : 0;
 
   const handleSubmit = useCallback(
     async (e: FormEvent) => {
@@ -250,7 +290,13 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
                     : 'text-muted-foreground'
               )}
             >
-              {textByteLen}/{limits!.hardLimit}
+              {showCompressed && (
+                <Shrink
+                  className="inline h-3 w-3 -mt-0.5 mr-0.5 text-primary"
+                  aria-label="compressed size"
+                />
+              )}
+              {effectiveByteLen}/{limits!.hardLimit}
               {remaining < 0 && ` (${remaining})`}
             </span>
             {warningMessage && (
@@ -273,7 +319,13 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
                         : 'text-muted-foreground'
                   )}
                 >
-                  {textByteLen}/{limits!.hardLimit}
+                  {showCompressed && (
+                    <Shrink
+                      className="inline h-3 w-3 -mt-0.5 mr-0.5 text-primary"
+                      aria-label="compressed size"
+                    />
+                  )}
+                  {effectiveByteLen}/{limits!.hardLimit}
                   {remaining < 0 && ` (${remaining})`}
                 </span>
               )}
