@@ -524,62 +524,6 @@ export function RoomServerPanel({ contact, onAuthenticatedChange }: RoomServerPa
             {advancedOpen ? 'Hide Tools' : 'Show Tools'}
           </Button>
         </div>
-        <div className="rounded-md border border-border bg-background/40 px-3 py-2.5">
-          <label className="flex cursor-pointer items-center gap-2.5">
-            <input
-              type="checkbox"
-              checked={pollStatus?.poll_enabled ?? false}
-              disabled={syncSaving}
-              onChange={(e) => void handleToggleSync(e.target.checked)}
-              className="h-4 w-4 rounded border-input accent-primary"
-            />
-            <span className="text-[0.8125rem] font-medium">Keep this room synced</span>
-          </label>
-          <p className="mt-1 text-[0.8125rem] text-muted-foreground">
-            Periodically logs in with the saved credential to pull new room messages while
-            you&apos;re away. The room credential is stored on this server.
-          </p>
-          {pollStatus?.poll_enabled && (
-            <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-              <label className="flex items-center gap-1.5">
-                Every
-                <input
-                  key={pollStatus.interval_seconds}
-                  type="number"
-                  min={5}
-                  defaultValue={Math.round((pollStatus.interval_seconds ?? 1200) / 60)}
-                  disabled={syncSaving}
-                  onBlur={(e) => void handleIntervalChange(Number(e.target.value))}
-                  className="h-7 w-16 rounded-md border border-input bg-transparent px-2 text-xs"
-                  aria-label="Sync interval in minutes"
-                />
-                min
-              </label>
-              {pollStatus.last_poll_at ? (
-                <span>
-                  · last synced{' '}
-                  {new Date(pollStatus.last_poll_at * 1000).toLocaleTimeString([], {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
-                </span>
-              ) : null}
-              {pollStatus.last_error ? (
-                <span className="text-destructive">· {pollStatus.last_error}</span>
-              ) : null}
-            </div>
-          )}
-          {pollStatus?.has_stored_credential ? (
-            <button
-              type="button"
-              onClick={() => void handleForgetCredential()}
-              disabled={syncSaving}
-              className="mt-2 text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
-            >
-              Forget saved credential
-            </button>
-          ) : null}
-        </div>
       </div>
       <Sheet open={advancedOpen} onOpenChange={setAdvancedOpen}>
         <SheetContent side="right" className="w-full sm:max-w-4xl p-0 flex flex-col">
@@ -598,6 +542,62 @@ export function RoomServerPanel({ contact, onAuthenticatedChange }: RoomServerPa
             </div>
           </div>
           <div className="flex-1 overflow-y-auto p-4">
+            <div className="mb-3 rounded-md border border-border bg-background/40 px-3 py-2.5">
+              <label className="flex cursor-pointer items-center gap-2.5">
+                <input
+                  type="checkbox"
+                  checked={pollStatus?.poll_enabled ?? false}
+                  disabled={syncSaving}
+                  onChange={(e) => void handleToggleSync(e.target.checked)}
+                  className="h-4 w-4 rounded border-input accent-primary"
+                />
+                <span className="text-[0.8125rem] font-medium">Keep this room synced</span>
+              </label>
+              <p className="mt-1 text-[0.8125rem] text-muted-foreground">
+                Periodically logs in with the saved credential to pull new room messages while
+                you&apos;re away. The room credential is stored on this server.
+              </p>
+              {pollStatus?.poll_enabled && (
+                <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                  <label className="flex items-center gap-1.5">
+                    Every
+                    <input
+                      key={pollStatus.interval_seconds}
+                      type="number"
+                      min={5}
+                      defaultValue={Math.round((pollStatus.interval_seconds ?? 1200) / 60)}
+                      disabled={syncSaving}
+                      onBlur={(e) => void handleIntervalChange(Number(e.target.value))}
+                      className="h-7 w-16 rounded-md border border-input bg-transparent px-2 text-xs"
+                      aria-label="Sync interval in minutes"
+                    />
+                    min
+                  </label>
+                  {pollStatus.last_poll_at ? (
+                    <span>
+                      · last synced{' '}
+                      {new Date(pollStatus.last_poll_at * 1000).toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </span>
+                  ) : null}
+                  {pollStatus.last_error ? (
+                    <span className="text-destructive">· {pollStatus.last_error}</span>
+                  ) : null}
+                </div>
+              )}
+              {pollStatus?.has_stored_credential ? (
+                <button
+                  type="button"
+                  onClick={() => void handleForgetCredential()}
+                  disabled={syncSaving}
+                  className="mt-2 text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                >
+                  Forget saved credential
+                </button>
+              ) : null}
+            </div>
             <div className="grid gap-3 xl:grid-cols-2">
               <TelemetryPane
                 data={paneData.status}
