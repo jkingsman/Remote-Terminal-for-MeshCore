@@ -15,7 +15,7 @@ BOT_META = {
     "name": "greeter",
     "category": "Basic",
     "description": "Welcomes first-time posters per channel",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "respond_to_dms": False,
     "settings_schema": [
         {
@@ -57,9 +57,11 @@ async def maybe_greet(ctx, msg):
 
     template = (ctx.settings.get("greeting") or "").strip()
     channel = msg.channel_name or "this channel"
+    # @[name] is the mention syntax mesh clients recognize and highlight.
+    mention = f"@[{msg.sender_name}]"
     if template:
-        text = template.replace("{name}", msg.sender_name).replace("{channel}", channel)
+        text = template.replace("{name}", mention).replace("{channel}", channel)
     else:
-        text = ctx.t("rt.welcome", name=msg.sender_name, channel=channel)
+        text = ctx.t("rt.welcome", name=mention, channel=channel)
     ctx.log(f"greeting {msg.sender_name} in {channel}")
     await ctx.reply(text)

@@ -68,6 +68,7 @@ BOT_META = {
 @bot.on_keyword("mybot")
 async def handle(ctx, msg):
     # msg.args holds words after the keyword; ctx.settings holds typed settings.
+    # Replies that may exceed one RF frame: ctx.reply_split(text) sends (i/n) parts.
     await ctx.reply(f"Hello {msg.sender_name or 'there'}!")
 '''
 

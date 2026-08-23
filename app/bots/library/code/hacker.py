@@ -12,7 +12,7 @@ BOT_META = {
     "name": "hacker",
     "category": "Fun",
     "description": "Linux commands get joke supervillain-mainframe errors",
-    "version": "1.0.0",
+    "version": "1.1.0",
 }
 
 KEYWORDS = (
@@ -66,5 +66,6 @@ RESPONSES = (
 @bot.on_keyword(*KEYWORDS)
 async def mainframe(ctx, msg):
     cmd = msg.keyword or "that"
-    name = msg.sender_name or "intruder"
+    # @[name] is the mention syntax mesh clients recognize and highlight.
+    name = f"@[{msg.sender_name}]" if msg.sender_name else "intruder"
     await ctx.reply(random.choice(RESPONSES).format(cmd=cmd, name=name))

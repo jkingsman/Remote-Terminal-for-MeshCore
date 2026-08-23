@@ -31,6 +31,11 @@ logger = logging.getLogger(__name__)
 # Sentinel: distinguishes "region not passed" from an explicit None/"" (unscoped).
 _UNSET = object()
 
+# Default per-message byte budget for ctx.split_text / ctx.reply_split — a safe
+# MeshCore RF payload size once sender-name framing is added (the same default
+# the mailbox bot has always used).
+DEFAULT_SPLIT_BYTES = 155
+
 
 @dataclass(frozen=True)
 class KeywordTrigger:
@@ -420,6 +425,47 @@ class BotContext:
             text=text,
             flood_scope_override=None,
         )
+
+    # -- long replies --------------------------------------------------------
+    def split_text(self, text: str, max_bytes: int = DEFAULT_SPLIT_BYTES) -> list[str]:
+        """Split ``text`` into RF-sized parts, numbered ``(i/n)`` when split.
+
+        Returns ``[text]`` unchanged when it already fits in ``max_bytes``
+        UTF-8 bytes (the default is a safe MeshCore payload budget). Splits
+        prefer word/newline boundaries and never cut inside a multi-byte
+        character.
+        """
+        text = (text or "").strip()
+        if not text:
+            return []
+        if len(text.encode("utf-8")) <= max_bytes:
+            return [text]
+        budget = max(1, max_bytes - 8)  # room for the "(i/n) " prefix
+        parts: list[str] = []
+        remaining = text
+        while remaining:
+            chunk = remaining.encode("utf-8")[:budget].decode("utf-8", "ignore")
+            if not chunk:  # budget smaller than one multi-byte character
+                chunk = remaining[0]
+            elif len(remaining) > len(chunk):
+                cut = max(chunk.rfind(" "), chunk.rfind("\n"))
+                if cut > budget // 2:
+                    chunk = chunk[: cut + 1].rstrip()
+            parts.append(chunk)
+            remaining = remaining[len(chunk) :].lstrip()
+        total = len(parts)
+        return [f"({i}/{total}) {p}" for i, p in enumerate(parts, 1)]
+
+    async def reply_split(
+        self, text: str, *, max_bytes: int = DEFAULT_SPLIT_BYTES, region: Any = _UNSET
+    ) -> None:
+        """Reply like :meth:`reply`, splitting long text into ``(i/n)`` parts.
+
+        Text that fits in ``max_bytes`` is sent as-is in one message; longer
+        text goes out as numbered parts, in order, each within the budget.
+        """
+        for part in self.split_text(text, max_bytes):
+            await self.reply(part, region=region)
 
     # -- geocoding -----------------------------------------------------------
     async def geocode(self, query: str) -> dict[str, Any] | None:

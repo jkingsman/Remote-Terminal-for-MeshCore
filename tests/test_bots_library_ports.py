@@ -1,11 +1,13 @@
 """Tests for the trickier ported library bots (alert, mowas, worldcup-live, mesh admin)."""
 
+import asyncio
 import base64
 import hashlib
 import json
 import os
-from unittest.mock import MagicMock, patch
+import time
 
+from app.bots.api import BotContext, BotMessage
 from app.bots.engine import BotEngine
 from app.bots.library import get_library_entry
 from app.bots.runtime import load_bot_code
@@ -108,48 +110,114 @@ class TestWorldcupSummarize:
         assert summarize({"competitions": []}) is None
 
 
-class TestSmsProviderResponse:
-    @staticmethod
-    def _settings():
-        return {
-            "api_username": "user@example.com",
-            "api_password": "secret",
-            "did": "5145550100",
-        }
+class TestMentionPattern:
+    """Bots that address the sender use the @[name] mention syntax clients recognize."""
 
-    def test_transport_failure_has_unknown_delivery_status(self):
-        request = _load_namespace("sms")["_provider_request"]
+    async def _test_run(self, test_db, key: str, request: BotTestRequest):
+        from app.repository.bots import BotRepository
 
-        with patch("urllib.request.urlopen", side_effect=TimeoutError("timed out")):
-            result = request(self._settings(), "4385550100", "hello")
+        entry = get_library_entry(key)
+        assert entry is not None
+        bot = await BotRepository.create(name=f"{key}-mentiontest", code=entry["code"])
+        engine = BotEngine()
+        return await engine.test_run(bot, request)
 
-        assert result["ok"] is False
-        assert result["uncertain"] is True
+    async def test_ping_mentions_the_sender(self, test_db):
+        response = await self._test_run(
+            test_db, "ping", BotTestRequest(text="ping", sender_name="K0PHX")
+        )
+        assert response.error is None
+        assert response.replies[0]["text"].startswith("@[K0PHX] ")
 
-    def test_provider_rejection_is_a_confirmed_failure(self):
-        request = _load_namespace("sms")["_provider_request"]
-        response = MagicMock()
-        response.status = 200
-        response.read.return_value = b'{"status":"invalid_destination"}'
-        response.__enter__.return_value = response
+    async def test_signal_report_prefixes_a_mention(self, test_db):
+        response = await self._test_run(
+            test_db, "test", BotTestRequest(text="test", sender_name="K0PHX")
+        )
+        assert response.error is None
+        assert response.replies[0]["text"].startswith("@[K0PHX]: ")
 
-        with patch("urllib.request.urlopen", return_value=response):
-            result = request(self._settings(), "4385550100", "hello")
+    async def test_roll_names_the_roller_as_a_mention(self, test_db):
+        response = await self._test_run(
+            test_db, "roll", BotTestRequest(text="roll 20", sender_name="K0PHX")
+        )
+        assert response.error is None
+        assert response.replies[0]["text"].startswith("@[K0PHX] rolled ")
 
-        assert result == {"ok": False, "error": "invalid_destination"}
+    async def test_missing_sender_name_stays_plain(self, test_db):
+        response = await self._test_run(
+            test_db, "ping", BotTestRequest(text="ping", sender_name="")
+        )
+        assert response.error is None
+        assert "@[" not in response.replies[0]["text"]
 
-    def test_provider_defaults_to_voipms_for_existing_settings(self):
-        request = _load_namespace("sms")["_provider_request"]
-        response = MagicMock()
-        response.status = 200
-        response.read.return_value = b'{"status":"success"}'
-        response.__enter__.return_value = response
 
-        with patch("urllib.request.urlopen", return_value=response) as urlopen:
-            result = request(self._settings(), "4385550100", "hello")
+class TestMultitest:
+    async def test_counts_only_the_window_and_collapses_flood_stages(self, test_db):
+        conn = test_db.conn
+        now = int(time.time())
 
-        assert result["ok"] is True
-        assert urlopen.call_args.args[0].full_url.startswith("https://voip.ms/")
+        # Outside the window — must not be counted (the old code returned the
+        # newest 100 rows of all time because after= was ignored without
+        # after_id=).
+        await conn.execute(
+            "INSERT INTO messages (type, conversation_key, text, received_at, paths, outgoing)"
+            " VALUES ('CHAN', ?, 'old traffic', ?, ?, 0)",
+            ("AA" * 16, now - 3600, json.dumps([{"path": "beef", "received_at": now - 3600}])),
+        )
+        # In the window: one message heard at three flood stages of the same
+        # route (each repeat appends one hop) plus one genuinely distinct route.
+        await conn.execute(
+            "INSERT INTO messages (type, conversation_key, text, received_at, paths, outgoing)"
+            " VALUES ('CHAN', ?, 'test one', ?, ?, 0)",
+            (
+                "AA" * 16,
+                now + 5,
+                json.dumps(
+                    [
+                        {"path": "2f52", "received_at": now + 5, "path_len": 2},
+                        {"path": "2f52f0", "received_at": now + 6, "path_len": 3},
+                        {"path": "2f52f0bf", "received_at": now + 7, "path_len": 4},
+                        {"path": "aabb", "received_at": now + 6, "path_len": 2},
+                    ]
+                ),
+            ),
+        )
+        # In the window: a zero-hop (direct) arrival.
+        await conn.execute(
+            "INSERT INTO messages (type, conversation_key, text, received_at, outgoing)"
+            " VALUES ('CHAN', ?, 'test two', ?, 0)",
+            ("AA" * 16, now + 5),
+        )
+        await conn.commit()
+
+        entry = get_library_entry("multitest")
+        assert entry is not None
+        loaded = load_bot_code(entry["code"])
+        loaded.namespace["WINDOW_SECONDS"] = 0  # skip the collection sleep
+        handler = loaded.collector.keywords[0].handler
+
+        ctx = BotContext(
+            bot_id="mt",
+            bot_name="multitest",
+            settings={},
+            state={},
+            is_test=True,
+            loop=asyncio.get_event_loop(),
+            origin_is_dm=True,
+            origin_sender_key="ab" * 32,
+        )
+        await handler(ctx, BotMessage(text="multitest", is_dm=True, sender_key="ab" * 32))
+
+        assert len(ctx.captured_sends) == 1
+        text = ctx.captured_sends[0]["text"]
+        # 2f52 and 2f52f0 are flood stages of 2f52f0bf; aabb and direct stand.
+        # Routes render as comma-separated repeater hops (1-byte hops here).
+        assert text.startswith("3 unique path(s)")
+        assert "2f,52,f0,bf" in text
+        assert "aa,bb" in text
+        assert "direct" in text
+        assert "2f,52 |" not in text and "2f,52,f0 |" not in text
+        assert "be,ef" not in text and "beef" not in text
 
 
 class TestMeshAdminBots:

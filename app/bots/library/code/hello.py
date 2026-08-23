@@ -9,7 +9,7 @@ BOT_META = {
     "name": "hello",
     "category": "Basic",
     "description": "Greets back anyone who says hello, hi, hola, bonjour, ...",
-    "version": "1.0.0",
+    "version": "1.1.0",
 }
 
 KEYWORDS = (
@@ -55,5 +55,6 @@ SUFFIXES = (
 
 @bot.on_keyword(*KEYWORDS)
 async def hello(ctx, msg):
-    name = msg.sender_name or "human"
+    # @[name] is the mention syntax mesh clients recognize and highlight.
+    name = f"@[{msg.sender_name}]" if msg.sender_name else "human"
     await ctx.reply(f"{ctx.t('rt.greeting', name=name)} {random.choice(SUFFIXES)}")

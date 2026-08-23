@@ -1061,6 +1061,10 @@ export function BotEditor({ botId, channels, onBack, onDeleted }: BotEditorProps
               triggered
             </span>
             <span>
+              <span className="font-mono text-foreground">ctx.reply_split(text)</span> long text as
+              (i/n) parts
+            </span>
+            <span>
               <span className="font-mono text-foreground">ctx.send("#any", text)</span>{' '}
               cross-channel
             </span>

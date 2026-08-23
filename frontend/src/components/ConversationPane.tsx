@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState, type Ref } from 'react';
+import { lazy, Suspense, useMemo, useRef, useState, type Ref } from 'react';
 
 import { ChatHeader } from './ChatHeader';
 import { MessageInput, type MessageInputHandle } from './MessageInput';
@@ -187,9 +187,17 @@ export function ConversationPane({
     return contacts.find((candidate) => candidate.public_key === activeConversation.id) ?? null;
   }, [activeConversation, contacts]);
   const activeContactIsRoom = activeContact?.type === CONTACT_TYPE_ROOM;
-  useEffect(() => {
-    setRoomAuthenticated(false);
-  }, [activeConversation?.id]);
+  // Reset the room-auth gate when the conversation changes, but do it during
+  // render (guarded by the previous id) rather than in an effect. An effect here
+  // races the keyed RoomServerPanel's own onAuthenticatedChange mount report:
+  // React runs the child's effect before the parent's, so an effect reset would
+  // clobber the child's "authenticated" with false and hide the chat until a
+  // full reload. Resetting during render lets the child's post-commit report win.
+  const prevConversationIdRef = useRef(activeConversation?.id);
+  if (prevConversationIdRef.current !== activeConversation?.id) {
+    prevConversationIdRef.current = activeConversation?.id;
+    if (roomAuthenticated) setRoomAuthenticated(false);
+  }
   const isPrefixOnlyActiveContact = activeContact
     ? isPrefixOnlyContact(activeContact.public_key)
     : false;
@@ -346,7 +354,17 @@ export function ConversationPane({
         <ContactResolutionBanner variant="unknown-full-key" />
       )}
       {activeContactIsRoom && activeContact && (
-        <RoomServerPanel contact={activeContact} onAuthenticatedChange={setRoomAuthenticated} />
+        // Key by conversation so switching rooms remounts the panel and restores
+        // that room's own state (via its cache) instead of leaking the previous
+        // room's login/failed-login view. The key is namespaced (`room-`) so it
+        // does NOT collide with the sibling MessageList's key={activeConversation.id}
+        // — an authenticated room renders both, and duplicate sibling keys break
+        // React reconciliation.
+        <RoomServerPanel
+          key={`room-${activeConversation.id}`}
+          contact={activeContact}
+          onAuthenticatedChange={setRoomAuthenticated}
+        />
       )}
       {showRoomChat && <div data-toast-anchor="conversation" aria-hidden="true" />}
       {showRoomChat && (

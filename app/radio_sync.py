@@ -200,6 +200,18 @@ _telemetry_collect_task: asyncio.Task | None = None
 # the shortest-legal interval for the current tracked-repeater count.
 TELEMETRY_COLLECT_INITIAL_DELAY = 60
 
+# Room-poll task handle.
+_room_poll_task: asyncio.Task | None = None
+
+# How often the room poller wakes to look for due subscriptions. Individual
+# rooms are polled on their own per-room interval; this is just the scan tick.
+ROOM_POLL_CHECK_INTERVAL = 60
+
+# Cap on the exponential backoff multiplier applied to a room's interval after
+# consecutive failures (interval * min(2**errors, cap)). Bounds how far a
+# flaky/offline room drifts out before it is retried again.
+ROOM_POLL_MAX_BACKOFF = 8
+
 # Counter to pause polling during repeater operations (supports nested pauses)
 _polling_pause_count: int = 0
 
@@ -2180,3 +2192,142 @@ async def stop_telemetry_collect() -> None:
             pass
         _telemetry_collect_task = None
         logger.info("Stopped periodic telemetry collection")
+
+
+def _room_poll_effective_interval(sub) -> int:
+    """Per-room interval widened by exponential backoff on consecutive failures.
+
+    A healthy room polls on its configured interval; a failing one backs off up
+    to ROOM_POLL_MAX_BACKOFF× so an offline or misconfigured room does not burn
+    airtime every cycle.
+    """
+    backoff = min(2**sub.consecutive_errors, ROOM_POLL_MAX_BACKOFF)
+    return sub.interval_seconds * backoff
+
+
+def _room_poll_is_due(sub, now: float) -> bool:
+    if sub.last_poll_at is None:
+        return True
+    return (now - sub.last_poll_at) >= _room_poll_effective_interval(sub)
+
+
+async def _poll_one_room(sub) -> None:
+    """Log in to one room with its stored credential and drain its delta.
+
+    The login is what makes the room server enqueue the messages posted since
+    our last sync; the existing drain then captures them and dm_ingest stores
+    them, deduped. We never trust a cursor — re-pulling an overlapping delta is
+    made safe by the incoming-message dedup, so over-polling only wastes airtime,
+    never duplicates a message.
+    """
+    from app.repository import ContactRepository
+    from app.repository.room_poll import RoomPollRepository
+    from app.routers.server_control import prepare_authenticated_contact_connection
+
+    contact = await ContactRepository.get_by_key(sub.room_key)
+    if contact is None:
+        await RoomPollRepository.record_result(
+            sub.room_key, ok=False, result="error", error="room contact not found"
+        )
+        return
+
+    try:
+        async with radio_manager.radio_operation(
+            f"room_poll:{sub.room_key[:12]}",
+            blocking=False,
+            suspend_auto_fetch=True,
+        ) as mc:
+            # sub.credential is three-state; only pollable rows (credential IS
+            # NOT NULL) reach here, and "" is a valid guest login. Never gate on
+            # truthiness.
+            login = await prepare_authenticated_contact_connection(
+                mc,
+                contact,
+                sub.credential,
+                label="room server",
+            )
+            if not login.authenticated:
+                # An explicit rejection means the stored credential is wrong;
+                # disable so we stop hammering the room with bad auth. A timeout
+                # is transient — leave it enabled and let backoff space retries.
+                if login.status == "error":
+                    await RoomPollRepository.set_enabled(sub.room_key, False)
+                    await RoomPollRepository.record_result(
+                        sub.room_key,
+                        ok=False,
+                        result="login_failed",
+                        error=(login.message or "login failed") + " — polling disabled",
+                    )
+                    logger.warning(
+                        "Room poll login rejected for %s; disabled polling",
+                        sub.room_key[:12],
+                    )
+                else:
+                    await RoomPollRepository.record_result(
+                        sub.room_key,
+                        ok=False,
+                        result=login.status,
+                        error=login.message,
+                    )
+                return
+
+            count = await poll_for_messages(mc)
+            await RoomPollRepository.record_result(
+                sub.room_key, ok=True, result=f"ok ({count} drained)", error=None
+            )
+            if count > 0:
+                logger.info("Room poll %s drained %d message(s)", sub.room_key[:12], count)
+    except RadioOperationBusyError:
+        # Radio busy this cycle; do not count it as a failure — just retry next
+        # scan without advancing backoff.
+        logger.debug("Room poll skipped for %s: radio busy", sub.room_key[:12])
+    except Exception as exc:
+        await RoomPollRepository.record_result(
+            sub.room_key, ok=False, result="error", error=f"{type(exc).__name__}: {exc}"
+        )
+        logger.warning("Room poll error for %s: %s", sub.room_key[:12], exc, exc_info=True)
+
+
+async def _room_poll_loop() -> None:
+    """Background task: periodically log in to subscribed rooms to pull deltas."""
+    from app.repository.room_poll import RoomPollRepository
+
+    while True:
+        try:
+            await asyncio.sleep(ROOM_POLL_CHECK_INTERVAL)
+
+            if not radio_manager.is_connected or is_polling_paused():
+                continue
+
+            subs = await RoomPollRepository.get_pollable()
+            now = time.time()
+            for sub in subs:
+                if not _room_poll_is_due(sub, now):
+                    continue
+                await _poll_one_room(sub)
+
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.warning("Error in room poll loop: %s", e, exc_info=True)
+
+
+def start_room_polling() -> None:
+    """Start the periodic room-poll background task."""
+    global _room_poll_task
+    if _room_poll_task is None or _room_poll_task.done():
+        _room_poll_task = asyncio.create_task(_room_poll_loop())
+        logger.info("Started room poll task (scan interval: %ds)", ROOM_POLL_CHECK_INTERVAL)
+
+
+async def stop_room_polling() -> None:
+    """Stop the periodic room-poll background task."""
+    global _room_poll_task
+    if _room_poll_task and not _room_poll_task.done():
+        _room_poll_task.cancel()
+        try:
+            await _room_poll_task
+        except asyncio.CancelledError:
+            pass
+        _room_poll_task = None
+        logger.info("Stopped room poll task")
