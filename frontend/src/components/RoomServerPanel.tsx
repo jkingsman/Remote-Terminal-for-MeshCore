@@ -224,10 +224,12 @@ export function RoomServerPanel({ contact, onAuthenticatedChange }: RoomServerPa
 
       setLoginLoading(true);
       setLoginError(null);
+      // Remember the credential the user provided so "keep synced" can store it,
+      // even if the login request itself errors (the panel still authenticates
+      // optimistically). "" is a valid guest credential.
+      setSessionCredential(nextPassword);
       try {
         const result = await api.roomLogin(contact.public_key, { password: nextPassword });
-        // Remember the credential this session so "keep synced" can store it.
-        setSessionCredential(nextPassword);
         setLastLoginAttempt(buildServerLoginAttemptFromResponse(method, result, 'room server'));
         setAuthenticated(true);
         if (result.authenticated) {

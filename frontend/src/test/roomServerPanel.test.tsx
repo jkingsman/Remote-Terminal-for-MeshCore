@@ -173,6 +173,35 @@ describe('RoomServerPanel', () => {
     expect(screen.queryByText('Login with Password')).not.toBeInTheDocument();
   });
 
+  it('still captures the credential for sync when the login request errors', async () => {
+    // Radio-down: the login request throws, but the panel authenticates
+    // optimistically. Enabling sync must still store the entered credential.
+    mockApi.roomLogin.mockRejectedValueOnce(new Error('Radio not connected'));
+    mockApi.setRoomPoll.mockResolvedValueOnce({
+      ...NO_STORED_CREDENTIAL,
+      has_stored_credential: true,
+      is_guest_credential: true,
+      poll_enabled: true,
+    });
+
+    render(<RoomServerPanel contact={roomContact} />);
+    fireEvent.click(screen.getByText('Login with Existing Access / Guest'));
+
+    await waitFor(() => {
+      expect(screen.getByText('Keep this room synced')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText('Keep this room synced'));
+
+    await waitFor(() => {
+      expect(mockApi.setRoomPoll).toHaveBeenCalledWith(roomContact.public_key, {
+        enabled: true,
+        credential_action: 'set',
+        credential: '',
+      });
+    });
+  });
+
   it('stores a guest ("") credential when enabling sync after a guest login', async () => {
     mockApi.roomLogin.mockResolvedValueOnce({ status: 'ok', authenticated: true, message: null });
     mockApi.setRoomPoll.mockResolvedValueOnce({
