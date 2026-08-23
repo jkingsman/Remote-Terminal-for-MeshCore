@@ -3,6 +3,7 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from app.compression import try_decode_incoming
 from app.models import Message, MessagePath
 from app.repository import ContactRepository, MessageRepository, RawPacketRepository
 
@@ -285,6 +286,20 @@ async def create_message_from_decrypted(
 ) -> int | None:
     """Store and broadcast a decrypted channel message."""
     received = received_at or int(time.time())
+    # MCMP-compressed bodies ride as ordinary text behind an ``mcmp2:``/``mcmp3:``
+    # prefix; decode to plaintext before it is stored so the DB, search and bots
+    # see the real message. Decoding happens here (the shared implementation for
+    # every channel ingest route) so content dedup stays consistent. Non-MCMP
+    # text is returned unchanged.
+    decoded = try_decode_incoming(message_text)
+    if decoded is not None:
+        logger.debug(
+            "Decoded MCMP %s channel message (%d -> %d chars)",
+            decoded.version,
+            len(message_text),
+            len(decoded.text),
+        )
+        message_text = decoded.text
     text = f"{sender}: {message_text}" if sender else message_text
     channel_key_normalized = channel_key.upper()
 
