@@ -1,24 +1,22 @@
-from app.bots.library import _merge_library_display_fields
+async def test_seeding_preserves_operator_modified_bot_schema(test_db):
+    from app.bots.library import ensure_seeded, get_library_entry
+    from app.repository.bots import BotRepository
 
+    entry = get_library_entry("sms")
+    assert entry is not None
+    custom_schema = [{"key": "operator_field", "type": "text"}]
+    record = await BotRepository.create(
+        name="SMS customized",
+        code=entry["code"],
+        settings_schema=custom_schema,
+        builtin_key="sms",
+        builtin_version="0.0.1",
+        modified=True,
+    )
 
-def test_merge_library_display_fields_adds_only_missing_generated_urls():
-    current = [{"key": "token", "type": "password"}]
-    generated = {
-        "key": "callback_url",
-        "type": "generated_url",
-        "template": "https://example.test/{token}/{EXTERNAL}",
-    }
-    shipped = [
-        {"key": "token", "type": "text"},
-        generated,
-        {"key": "new_setting", "type": "text"},
-    ]
+    await ensure_seeded()
 
-    assert _merge_library_display_fields(current, shipped) == [*current, generated]
-
-
-def test_merge_library_display_fields_preserves_operator_field_with_same_key():
-    custom = {"key": "callback_url", "type": "url", "label": "My callback"}
-    shipped = [{"key": "callback_url", "type": "generated_url", "template": "https://new"}]
-
-    assert _merge_library_display_fields([custom], shipped) == [custom]
+    refreshed = await BotRepository.get(record.id)
+    assert refreshed is not None
+    assert refreshed.settings_schema == custom_schema
+    assert refreshed.builtin_version == "0.0.1"

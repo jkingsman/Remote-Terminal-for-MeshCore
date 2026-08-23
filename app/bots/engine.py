@@ -633,7 +633,7 @@ class BotEngine:
         legacy: bool = False,
         delay: float = 0.0,
         user_id: str | None = None,
-    ) -> None:
+    ) -> str:
         from app.repository.bots import BotRepository, BotRunRepository
 
         bot = loaded.record
@@ -707,6 +707,7 @@ class BotEngine:
                 bot.name,
                 f"{trigger} → {ctx.replies_sent} repl{'y' if ctx.replies_sent == 1 else 'ies'} ({where}, {duration_ms / 1000:.1f}s)",
             )
+        return result
 
     # ------------------------------------------------------------------
     # Webhooks
@@ -720,8 +721,9 @@ class BotEngine:
                     return loaded, trig.handler
         return None
 
-    async def run_webhook(self, loaded: LoadedBot, handler: Any, slug: str, payload: dict) -> None:
-        await self._run_bot(loaded, f"webhook /{slug}", event=payload, handler=handler)
+    async def run_webhook(self, loaded: LoadedBot, handler: Any, slug: str, payload: dict) -> bool:
+        result = await self._run_bot(loaded, f"webhook /{slug}", event=payload, handler=handler)
+        return result not in {"error", "timeout"}
 
     # ------------------------------------------------------------------
     # Ticker: cron triggers, schedules, feeds

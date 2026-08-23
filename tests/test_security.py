@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import base64
+import logging
 
 import pytest
 from fastapi import FastAPI, WebSocket
 from fastapi.testclient import TestClient
 from starlette.testclient import WebSocketDenialResponse
 
-from app.config import Settings
+from app.config import Settings, _SecretQueryFilter
 from app.security import add_optional_basic_auth_middleware
 
 
@@ -35,6 +36,10 @@ def _build_app(*, username: str = "", password: str = "") -> FastAPI:
 
     @app.get("/api/hooks/sms")
     async def sms_hook():
+        return {"ok": True}
+
+    @app.get("/api/hooks/operator-slug")
+    async def operator_hook():
         return {"ok": True}
 
     @app.websocket("/ws")
@@ -77,12 +82,27 @@ def test_sms_hook_bypasses_basic_auth():
     assert response.status_code == 200
 
 
-def test_basic_auth_bypass_does_not_match_other_hook_paths():
+def test_basic_auth_bypass_covers_operator_hook_slugs_but_not_extra_paths():
     app = _build_app(username="mesh", password="secret")
 
     with TestClient(app) as client:
-        assert client.get("/api/hooks/other").status_code == 401
-        assert client.get("/api/hooks/sms/extra").status_code == 401
+        assert client.get("/api/hooks/operator-slug").status_code == 200
+        assert client.get("/api/hooks/sms/extra").status_code == 404
+
+
+def test_hook_query_token_is_redacted_from_log_records():
+    record = logging.LogRecord(
+        "uvicorn.access",
+        logging.INFO,
+        __file__,
+        1,
+        "GET /api/hooks/sms?token=top+secret&from=123 HTTP/1.1",
+        (),
+        None,
+    )
+    assert _SecretQueryFilter().filter(record)
+    assert "top+secret" not in record.getMessage()
+    assert "token=[REDACTED]" in record.getMessage()
 
 
 def test_http_request_accepts_case_insensitive_basic_auth_scheme():

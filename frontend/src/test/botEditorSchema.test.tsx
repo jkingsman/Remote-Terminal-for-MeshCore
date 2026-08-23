@@ -102,6 +102,52 @@ describe('BotEditor settings schema URL fields', () => {
     );
   });
 
+  it('URL-encodes setting values while preserving provider placeholders', () => {
+    const token = 'a+b & c#d? space';
+    expect(
+      resolveGeneratedUrl(schema[3].type === 'generated_url' ? schema[3].template : '', schema, {
+        public_server: 'mesh.example.test',
+        webhook_token: token,
+      })
+    ).toBe(
+      'http://mesh.example.test:8000/api/hooks/provider?token=a%2Bb%20%26%20c%23d%3F%20space&to={TO}'
+    );
+  });
+
+  it('tests and copies the same encoded special-character URL', async () => {
+    const bot = makeBot();
+    bot.settings.webhook_token = 'a+b & c#d? space';
+    vi.spyOn(api, 'getBot').mockResolvedValue(bot);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    render(<BotEditor botId="bot-1" channels={[]} onBack={vi.fn()} onDeleted={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Test callback' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Copy callback' }));
+
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith(
+        'http://mesh.example.test:8000/api/hooks/provider?token=a%2Bb%20%26%20c%23d%3F%20space&to={TO}'
+      )
+    );
+  });
+
+  it('copies through execCommand when the Clipboard API is unavailable', async () => {
+    vi.spyOn(api, 'getBot').mockResolvedValue(makeBot());
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
+    const execCommand = vi.fn().mockReturnValue(true);
+    Object.defineProperty(document, 'execCommand', { configurable: true, value: execCommand });
+
+    render(<BotEditor botId="bot-1" channels={[]} onBack={vi.fn()} onDeleted={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy callback' }));
+
+    await waitFor(() => expect(execCommand).toHaveBeenCalledWith('copy'));
+    expect(document.querySelector('textarea')).toBeNull();
+  });
+
   it('validates generated URLs locally without resolving external placeholders', () => {
     expect(
       validateGeneratedUrl(schema[3].type === 'generated_url' ? schema[3].template : '', schema, {

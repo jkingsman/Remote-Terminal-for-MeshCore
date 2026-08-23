@@ -105,7 +105,10 @@ class BasicAuthMiddleware:
             await self.app(scope, receive, send)
             return
 
-        if scope_type == "http" and scope.get("path") == "/api/hooks/sms":
+        # Every HTTP hook is independently gated by its enabled bot's
+        # webhook_token. Slugs are operator-editable, so exempt the namespace
+        # rather than one hard-coded SMS slug.
+        if scope_type == "http" and str(scope.get("path", "")).startswith("/api/hooks/"):
             await self.app(scope, receive, send)
             return
 

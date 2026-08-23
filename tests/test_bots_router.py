@@ -1,5 +1,9 @@
 """API tests for the /api/bots router."""
 
+import base64
+import hashlib
+import hmac
+
 VALID_CODE = (
     "from remoteterm import bot\n"
     '@bot.on_keyword("hi")\n'
@@ -32,6 +36,35 @@ class TestBotsCrud:
             deleted = await client.delete(f"/api/bots/{created['id']}")
             assert deleted.status_code == 200
             assert (await client.get(f"/api/bots/{created['id']}")).status_code == 404
+
+    async def test_password_settings_are_redacted_and_preserved_on_unrelated_edit(
+        self, test_db, client
+    ):
+        from app.repository.bots import BotRepository
+
+        record = await BotRepository.create(
+            name="secret-bot",
+            code=VALID_CODE,
+            settings_schema=[
+                {"key": "api_password", "label": "API password", "type": "password"},
+                {"key": "label", "label": "Label", "type": "text"},
+            ],
+            settings={"api_password": "original-secret", "label": "before"},
+        )
+        async with client:
+            fetched = (await client.get(f"/api/bots/{record.id}")).json()
+            assert fetched["settings"]["api_password"] == "__REMOTE_TERM_REDACTED__"
+            assert "original-secret" not in str(fetched)
+
+            fetched["settings"]["label"] = "after"
+            updated = (
+                await client.patch(f"/api/bots/{record.id}", json={"settings": fetched["settings"]})
+            ).json()
+            assert updated["settings"]["api_password"] == "__REMOTE_TERM_REDACTED__"
+
+        stored = await BotRepository.get(record.id)
+        assert stored is not None
+        assert stored.settings == {"api_password": "original-secret", "label": "after"}
 
     async def test_create_rejects_bad_code(self, test_db, client):
         async with client:
@@ -179,6 +212,39 @@ class TestEngineSettings:
 
 
 class TestInboundHooks:
+    async def test_generic_webhook_rejects_missing_or_empty_configured_token(
+        self, test_db, client
+    ):
+        from app.bots.engine import bot_engine
+        from app.repository.bots import BotRepository
+
+        code = (
+            "from remoteterm import bot\n"
+            '@bot.on_webhook("generic-empty-token")\n'
+            "async def f(ctx, payload):\n"
+            "    pass\n"
+        )
+        record = await BotRepository.create(name="generic-empty-token", code=code, enabled=True)
+        await bot_engine.reload_bot(record.id)
+        try:
+            async with client:
+                missing = await client.post("/api/hooks/generic-empty-token", json={})
+                assert missing.status_code == 403
+                assert "not configured" in missing.json()["detail"]
+
+                await BotRepository.update(record.id, settings={"webhook_token": ""})
+                await bot_engine.reload_bot(record.id)
+
+                empty = await client.post(
+                    "/api/hooks/generic-empty-token",
+                    json={},
+                    headers={"X-Hook-Token": ""},
+                )
+                assert empty.status_code == 403
+                assert "not configured" in empty.json()["detail"]
+        finally:
+            bot_engine.remove_bot(record.id)
+
     async def test_hook_requires_configured_token(self, test_db, client):
         from app.bots.engine import bot_engine
         from app.repository.bots import BotRepository
@@ -199,7 +265,14 @@ class TestInboundHooks:
                 missing = await client.post("/api/hooks/send", json={"message": "x"})
                 assert missing.status_code == 403  # token not configured
 
-                await BotRepository.update(bot.id, settings={"webhook_token": "s3cret"})
+                await BotRepository.update(
+                    bot.id,
+                    settings={
+                        "webhook_token": "s3cret",
+                        "provider": "twilio",
+                        "twilio_auth_token": "twilio-secret",
+                    },
+                )
                 await bot_engine.reload_bot(bot.id)
 
                 wrong = await client.post(
@@ -218,14 +291,22 @@ class TestInboundHooks:
                 assert sms_get.text == "ok"
                 assert sms_get.headers["content-type"].startswith("text/plain")
 
+                twilio_payload = {
+                    "From": "+15145550100",
+                    "To": "+14385550100",
+                    "Body": "hello from Twilio",
+                    "MessageSid": "SM123",
+                }
+                signed = "http://test/api/hooks/sms?token=s3cret" + "".join(
+                    f"{key}{twilio_payload[key]}" for key in sorted(twilio_payload)
+                )
+                signature = base64.b64encode(
+                    hmac.new(b"twilio-secret", signed.encode(), hashlib.sha1).digest()
+                ).decode()
                 twilio_post = await client.post(
                     "/api/hooks/sms?token=s3cret",
-                    data={
-                        "From": "+15145550100",
-                        "To": "+14385550100",
-                        "Body": "hello from Twilio",
-                        "MessageSid": "SM123",
-                    },
+                    data=twilio_payload,
+                    headers={"X-Twilio-Signature": signature},
                 )
                 assert twilio_post.status_code == 200
                 assert twilio_post.headers["content-type"].startswith("application/xml")
@@ -237,6 +318,32 @@ class TestInboundHooks:
                 assert other_get.status_code == 405
         finally:
             bot_engine.remove_bot(bot.id)
+
+    async def test_non_sms_webhook_keeps_body_token_field(self, test_db, client):
+        from app.bots.engine import bot_engine
+        from app.repository.bots import BotRepository
+
+        code = (
+            "from remoteterm import bot\n"
+            '@bot.on_webhook("own-token")\n'
+            "async def f(ctx, payload):\n"
+            "    if payload.get('token') != 'application-value':\n"
+            "        raise ValueError('body token was stripped')\n"
+        )
+        record = await BotRepository.create(
+            name="body-token", code=code, enabled=True, settings={"webhook_token": "hook-secret"}
+        )
+        await bot_engine.reload_bot(record.id)
+        try:
+            async with client:
+                response = await client.post(
+                    "/api/hooks/own-token",
+                    json={"token": "application-value"},
+                    headers={"X-Hook-Token": "hook-secret"},
+                )
+            assert response.status_code == 200
+        finally:
+            bot_engine.remove_bot(record.id)
 
 
 class TestKillSwitchUnified:

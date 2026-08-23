@@ -1,5 +1,6 @@
 import logging
 import logging.config
+import re
 from collections import deque
 from threading import Lock
 from typing import Literal
@@ -108,6 +109,20 @@ class _RingBufferLogHandler(logging.Handler):
 _recent_log_handler = _RingBufferLogHandler(max_lines=1000)
 
 
+class _SecretQueryFilter(logging.Filter):
+    """Redact hook query tokens from access output and the debug log ring."""
+
+    _pattern = re.compile(r"([?&]token=)[^&\s\"]+", re.IGNORECASE)
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        redacted = self._pattern.sub(r"\1[REDACTED]", message)
+        if redacted != message:
+            record.msg = redacted
+            record.args = ()
+        return True
+
+
 def get_recent_log_lines(limit: int = 1000) -> list[str]:
     """Return recent formatted log lines from the in-memory ring buffer."""
     return _recent_log_handler.get_lines(limit)
@@ -170,14 +185,17 @@ def setup_logging() -> None:
                     "use_colors": None,
                 },
             },
+            "filters": {"secret_query": {"()": "app.config._SecretQueryFilter"}},
             "handlers": {
                 "default": {
                     "class": "logging.StreamHandler",
                     "formatter": "default",
+                    "filters": ["secret_query"],
                 },
                 "uvicorn_access": {
                     "class": "logging.StreamHandler",
                     "formatter": "uvicorn_access",
+                    "filters": ["secret_query"],
                 },
             },
             "root": {
@@ -211,6 +229,7 @@ def setup_logging() -> None:
             datefmt="%Y-%m-%d %H:%M:%S",
         )
     )
+    _recent_log_handler.addFilter(_SecretQueryFilter())
     for logger_name in ("", "uvicorn", "uvicorn.error", "uvicorn.access"):
         target = logging.getLogger(logger_name)
         if _recent_log_handler not in target.handlers:

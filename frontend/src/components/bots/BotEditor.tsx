@@ -59,6 +59,27 @@ function SectionTitle({ title, hint }: { title: string; hint?: string }) {
   );
 }
 
+const REDACTED_SECRET = '__REMOTE_TERM_REDACTED__';
+
+async function copyText(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  try {
+    if (!document.execCommand('copy')) throw new Error('Copy was rejected by the browser');
+  } finally {
+    textarea.remove();
+  }
+}
+
 export function resolveGeneratedUrl(
   template: string,
   schema: BotSettingsSchemaField[],
@@ -69,11 +90,17 @@ export function resolveGeneratedUrl(
       .filter((field) => field.type !== 'generated_url')
       .map((field) => [field.key, field] as const)
   );
-  return template.replace(/\{([^{}]+)\}/g, (placeholder, key: string) => {
+  return template.replace(/\{([^{}]+)\}/g, (placeholder, key: string, offset: number) => {
     const settingField = settingFields.get(key);
     if (!settingField) return placeholder;
     const value = settings[key] ?? settingField.default;
-    return value == null ? '' : String(value).trim();
+    const resolved = value == null || value === REDACTED_SECRET ? '' : String(value).trim();
+    const queryStart = template.indexOf('?');
+    const parameterStart = Math.max(template.lastIndexOf('&', offset), queryStart);
+    const equals = template.indexOf('=', parameterStart);
+    return queryStart >= 0 && offset > queryStart && equals >= parameterStart && equals < offset
+      ? encodeURIComponent(resolved)
+      : resolved;
   });
 }
 
@@ -85,7 +112,9 @@ export function validateGeneratedUrl(
   for (const field of schema) {
     if (field.type === 'generated_url' || !template.includes(`{${field.key}}`)) continue;
     const value = settings[field.key] ?? field.default;
-    if (value == null || String(value).trim() === '') return `${field.label} is required`;
+    if (value == null || value === REDACTED_SECRET || String(value).trim() === '') {
+      return `${field.label} is required`;
+    }
   }
   try {
     const parsed = new URL(resolveGeneratedUrl(template, schema, settings));
@@ -113,7 +142,10 @@ function SchemaField({
   onChange: (value: unknown) => void;
 }) {
   const [revealed, setRevealed] = useState(false);
-  const current = value ?? field.default ?? (field.type === 'bool' ? false : '');
+  const current =
+    field.type === 'password' && value === REDACTED_SECRET
+      ? ''
+      : (value ?? field.default ?? (field.type === 'bool' ? false : ''));
 
   if (field.type === 'generated_url') {
     const generatedUrl = resolveGeneratedUrl(field.template, schema, settings);
@@ -132,9 +164,15 @@ function SchemaField({
             variant="ghost"
             size="sm"
             className="h-7 shrink-0 px-2"
-            onClick={() => {
-              void navigator.clipboard.writeText(generatedUrl);
-              toast.success(`${field.label} copied`);
+            onClick={async () => {
+              try {
+                await copyText(generatedUrl);
+                toast.success(`${field.label} copied`);
+              } catch (error) {
+                toast.error('Copy failed', {
+                  description: error instanceof Error ? error.message : undefined,
+                });
+              }
             }}
           >
             <Copy className="h-3.5 w-3.5 mr-1" />
@@ -157,7 +195,7 @@ function SchemaField({
           )}
         </div>
         {field.warning && (
-          <div className="mt-2 rounded-md border border-red-500/60 bg-red-500/10 p-3 text-xs text-red-500">
+          <div className="mt-2 rounded-md border border-destructive/60 bg-destructive/10 p-3 text-xs text-destructive">
             {field.warning}
           </div>
         )}

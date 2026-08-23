@@ -351,6 +351,34 @@ class BotContext:
                 flood_scope_override=scope,
             )
 
+    @staticmethod
+    def split_text(text: str, max_bytes: int = 155) -> list[str]:
+        """Split text into UTF-8-safe RF frames, preferring whitespace boundaries."""
+        if max_bytes < 1:
+            raise ValueError("max_bytes must be positive")
+        remaining = str(text or "").strip()
+        chunks: list[str] = []
+        while remaining:
+            encoded = remaining.encode("utf-8")
+            if len(encoded) <= max_bytes:
+                chunks.append(remaining)
+                break
+            cut = max_bytes
+            while cut and (encoded[cut] & 0xC0) == 0x80:
+                cut -= 1
+            candidate = encoded[:cut].decode("utf-8")
+            whitespace = max(candidate.rfind(" "), candidate.rfind("\n"))
+            if whitespace > 0:
+                candidate = candidate[:whitespace]
+            chunks.append(candidate.rstrip())
+            remaining = remaining[len(candidate) :].lstrip()
+        return chunks
+
+    async def reply_split(self, text: str, *, region: Any = _UNSET, max_bytes: int = 155) -> None:
+        """Reply using as many default-size RF frames as needed."""
+        for chunk in self.split_text(text, max_bytes=max_bytes):
+            await self.reply(chunk, region=region)
+
     async def send(self, channel: str, text: str, *, region: Any = _UNSET) -> None:
         """Send to any channel by name (``#chan`` / ``Public``) or 32-hex key."""
         from app.repository import ChannelRepository

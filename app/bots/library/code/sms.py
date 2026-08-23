@@ -53,7 +53,8 @@ BOT_META = {
     "name": "SMS",
     "category": "Communication",
     "description": "VoIP.ms or Twilio SMS with direct RemoteTerm callback and channel/DM conversation routing",
-    "version": "1.5.2",
+    "version": "1.6.0",
+    "admin_only": True,
     "settings_schema": [
         {
             "key": "provider",
@@ -189,16 +190,6 @@ BOT_META = {
             "type": "number",
             "default": 160,
         },
-        {
-            "key": "include_mesh_sender",
-            "label": "Include MeshCore sender in SMS (legacy)",
-            "type": "select",
-            "default": "yes",
-            "options": [
-                {"value": "yes", "label": "Yes"},
-                {"value": "no", "label": "No"},
-            ],
-        },
     ],
     "settings": {
         "provider": "voipms",
@@ -214,10 +205,11 @@ BOT_META = {
         "fallback_channel": "#test",
         "sms_header": "MESHCORE BOT CECREVIER.CA",
         "db_path": "data/sms.db",
-        "max_sms_chars": 420,
-        "include_mesh_sender": "yes",
+        "max_sms_chars": 160,
     },
 }
+
+_OUTBOUND_TASKS: set[asyncio.Task] = set()
 
 
 # ----------------------------- helpers -------------------------------------
@@ -232,6 +224,19 @@ def _normalize_nanpa(value: Any) -> str | None:
     if len(digits) == 11 and digits.startswith("1"):
         digits = digits[1:]
     return digits if len(digits) == 10 else None
+
+
+def _normalize_phone(value: Any) -> str | None:
+    """Keep NANPA storage compatibility while accepting international E.164."""
+    raw = str(value or "").strip()
+    nanpa = _normalize_nanpa(raw)
+    if nanpa:
+        return nanpa
+    if raw.startswith("+"):
+        digits = re.sub(r"\D", "", raw)
+        if 8 <= len(digits) <= 15 and not digits.startswith("0"):
+            return f"+{digits}"
+    return None
 
 
 def _display_phone(value: Any) -> str:
@@ -306,7 +311,8 @@ def _db(settings: dict[str, Any]) -> sqlite3.Connection:
             phone_to TEXT,
             message TEXT NOT NULL,
             provider_timestamp TEXT,
-            received_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            received_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            state TEXT NOT NULL DEFAULT 'processing'
         );
 
         CREATE TABLE IF NOT EXISTS sms_outgoing (
@@ -332,6 +338,10 @@ def _db(settings: dict[str, Any]) -> sqlite3.Connection:
         );
         """
     )
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(sms_incoming)")}
+    if "state" not in columns:
+        # Rows written by older versions were already treated as handled.
+        conn.execute("ALTER TABLE sms_incoming ADD COLUMN state TEXT NOT NULL DEFAULT 'complete'")
     conn.commit()
     return conn
 
@@ -454,7 +464,7 @@ def _save_outgoing(
         conn.close()
 
 
-def _save_incoming(
+def _claim_incoming(
     settings: dict[str, Any],
     unique_id: str,
     provider_id: str,
@@ -463,7 +473,7 @@ def _save_incoming(
     message: str,
     timestamp: str,
 ) -> bool:
-    """Return True only when this is a new inbound SMS."""
+    """Atomically claim a new inbound SMS for routing."""
     conn = _db(settings)
     try:
         cur = conn.execute(
@@ -475,8 +485,41 @@ def _save_incoming(
             """,
             (unique_id, provider_id, phone_from, phone_to, message, timestamp),
         )
+        if cur.rowcount == 0:
+            # A process crash can leave a claim behind. Do not race an active
+            # 10-second handler, but allow a later provider retry to recover it.
+            cur = conn.execute(
+                """
+                UPDATE sms_incoming
+                SET received_at=CURRENT_TIMESTAMP
+                WHERE unique_id=? AND state='processing'
+                  AND received_at <= datetime('now', '-30 seconds')
+                """,
+                (unique_id,),
+            )
         conn.commit()
         return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def _complete_incoming(settings: dict[str, Any], unique_id: str) -> None:
+    conn = _db(settings)
+    try:
+        conn.execute("UPDATE sms_incoming SET state='complete' WHERE unique_id=?", (unique_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _release_incoming(settings: dict[str, Any], unique_id: str) -> None:
+    """Release a failed claim so the provider's retry can route it again."""
+    conn = _db(settings)
+    try:
+        conn.execute(
+            "DELETE FROM sms_incoming WHERE unique_id=? AND state='processing'", (unique_id,)
+        )
+        conn.commit()
     finally:
         conn.close()
 
@@ -547,14 +590,8 @@ def _mark_routed(settings: dict[str, Any], code: str, routed_to: str) -> None:
         conn.close()
 
 
-def _unique_id(payload: dict[str, Any], phone: str, to: str, message: str, timestamp: str) -> str:
-    provider_id = str(
-        payload.get("id")
-        or payload.get("ID")
-        or payload.get("message_id")
-        or payload.get("sms_id")
-        or ""
-    ).strip()
+def _unique_id(provider_id: str, phone: str, to: str, message: str, timestamp: str) -> str:
+    provider_id = str(provider_id or "").strip()
     if provider_id:
         return f"sms:{provider_id}"
 
@@ -684,8 +721,8 @@ def _twilio_request(settings: dict[str, Any], destination: str, message: str) ->
     """Send one SMS through Twilio's Messages REST resource."""
     account_sid = str(settings.get("twilio_account_sid", "") or "").strip()
     auth_token = str(settings.get("twilio_auth_token", "") or "").strip()
-    from_phone = _normalize_nanpa(settings.get("twilio_from_number", ""))
-    dst = _normalize_nanpa(destination)
+    from_phone = _normalize_phone(settings.get("twilio_from_number", ""))
+    dst = _normalize_phone(destination)
 
     if not account_sid or not auth_token or not from_phone:
         return {"ok": False, "error": "Twilio API configuration incomplete"}
@@ -694,7 +731,11 @@ def _twilio_request(settings: dict[str, Any], destination: str, message: str) ->
 
     url = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json"
     body = urllib.parse.urlencode(
-        {"From": f"+1{from_phone}", "To": f"+1{dst}", "Body": message}
+        {
+            "From": from_phone if from_phone.startswith("+") else f"+1{from_phone}",
+            "To": dst if dst.startswith("+") else f"+1{dst}",
+            "Body": message,
+        }
     ).encode("utf-8")
     credentials = base64.b64encode(f"{account_sid}:{auth_token}".encode()).decode("ascii")
     request = urllib.request.Request(
@@ -771,7 +812,8 @@ def _provider_request(settings: dict[str, Any], destination: str, message: str) 
 
 
 async def _send_sms(ctx, msg, destination: str, message: str) -> None:
-    phone = _normalize_nanpa(destination)
+    provider = str(ctx.settings.get("provider", "voipms") or "voipms").casefold()
+    phone = _normalize_phone(destination) if provider == "twilio" else _normalize_nanpa(destination)
     if not phone:
         await ctx.reply("📱 Numéro invalide.")
         return
@@ -785,13 +827,32 @@ async def _send_sms(ctx, msg, destination: str, message: str) -> None:
     actor_id = _actor_id(msg)
     outgoing = _format_outgoing(ctx.settings, sender, clean)
 
-    result = await asyncio.to_thread(
-        _provider_request,
-        ctx.settings,
-        phone,
-        outgoing,
-    )
+    async def send_and_record() -> None:
+        result = await asyncio.to_thread(_provider_request, ctx.settings, phone, outgoing)
+        await _finish_outbound(ctx, msg, phone, clean, sender, actor_id, result)
 
+    # A provider may accept and bill the SMS just before the bot handler's
+    # deadline. Keep the single attempt alive so its state is always persisted;
+    # automatic retry after an uncertain result would risk duplicate billing.
+    task = asyncio.create_task(send_and_record())
+    _OUTBOUND_TASKS.add(task)
+
+    def finished(done: asyncio.Task) -> None:
+        _OUTBOUND_TASKS.discard(done)
+        if done.cancelled():
+            return
+        error = done.exception()
+        if error is not None:
+            ctx.log(
+                f"SMS post-send persistence failed: {type(error).__name__}: {error}",
+                level="ERROR",
+            )
+
+    task.add_done_callback(finished)
+    await asyncio.shield(task)
+
+
+async def _finish_outbound(ctx, msg, phone, clean, sender, actor_id, result) -> None:
     if not result.get("ok"):
         internal_error = str(result.get("error") or "unknown error")
         uncertain = bool(result.get("uncertain"))
@@ -805,7 +866,7 @@ async def _send_sms(ctx, msg, destination: str, message: str) -> None:
             sender,
             phone,
             clean,
-            "unknown" if uncertain else "error",
+            "unknown" if uncertain else "failed",
             internal_error,
         )
         # Keep provider/API details private on MeshCore.
@@ -937,7 +998,7 @@ async def sms_route(ctx, msg):
     if destination in {"test", "bots"}:
         channel = f"#{destination}"
         try:
-            await ctx.send(channel, f"📱 SMS {_display_phone(phone)}: {message}")
+            await _send_channel_split(ctx, channel, f"📱 SMS {_display_phone(phone)}: {message}")
         except ValueError:
             await ctx.reply(f"📱 Canal {channel} indisponible.")
             return
@@ -975,7 +1036,8 @@ async def sms_route(ctx, msg):
             await ctx.reply("📱 Contact sans clé publique.")
             return
 
-        await ctx.send_dm(
+        await _send_dm_split(
+            ctx,
             public_key,
             f"📱 SMS {_display_phone(phone)}: {message}",
         )
@@ -1025,6 +1087,16 @@ async def _notify_unrouted(ctx, code: str, phone: str, reason: str, preview: str
     )
 
 
+async def _send_channel_split(ctx, channel: str, text: str) -> None:
+    for chunk in ctx.split_text(text):
+        await ctx.send(channel, chunk)
+
+
+async def _send_dm_split(ctx, public_key: str, text: str) -> None:
+    for chunk in ctx.split_text(text):
+        await ctx.send_dm(public_key, chunk)
+
+
 @bot.on_webhook("sms")
 async def incoming_sms(ctx, payload):
     """Receive an incoming SMS JSON payload and route it back to MeshCore."""
@@ -1061,7 +1133,7 @@ async def incoming_sms(ctx, payload):
     elif isinstance(raw_to, dict):
         raw_to = raw_to.get("phone_number") or raw_to.get("number")
 
-    phone = _normalize_nanpa(
+    phone = _normalize_phone(
         raw_from
         or _payload_value(source, "FROM", "From", "from_number", "sender")
         or _payload_value(payload, "from", "FROM", "From", "from_number", "sender")
@@ -1091,9 +1163,9 @@ async def incoming_sms(ctx, payload):
         ctx.log("SMS webhook: empty message", level="WARNING")
         return
 
-    unique_id = _unique_id(payload, phone, to, message, timestamp)
+    unique_id = _unique_id(provider_id, phone, to, message, timestamp)
     is_new = await asyncio.to_thread(
-        _save_incoming,
+        _claim_incoming,
         ctx.settings,
         unique_id,
         provider_id,
@@ -1104,6 +1176,19 @@ async def incoming_sms(ctx, payload):
     )
     if not is_new:
         return
+
+    try:
+        await _route_incoming(ctx, phone, message)
+    except BaseException:
+        # wait_for cancellation is included: a provider retry must be able to
+        # reclaim an SMS that never reached a mesh route.
+        await asyncio.shield(asyncio.to_thread(_release_incoming, ctx.settings, unique_id))
+        raise
+    await asyncio.to_thread(_complete_incoming, ctx.settings, unique_id)
+
+
+async def _route_incoming(ctx, phone: str, message: str) -> None:
+    """Route a claimed inbound SMS; callers own claim completion/release."""
 
     conversation = await asyncio.to_thread(
         _get_conversation,
@@ -1126,7 +1211,8 @@ async def incoming_sms(ctx, payload):
 
             if public_key:
                 try:
-                    await ctx.send_dm(
+                    await _send_dm_split(
+                        ctx,
                         public_key,
                         f"📱 SMS {_display_phone(phone)}: {message}",
                     )
@@ -1156,7 +1242,8 @@ async def incoming_sms(ctx, payload):
         channel = str(conversation.get("channel_name") or "").strip()
         if channel:
             try:
-                await ctx.send(
+                await _send_channel_split(
+                    ctx,
                     channel,
                     f"📱 SMS {_display_phone(phone)} → "
                     f"{conversation.get('mesh_sender') or 'MeshCore'}: {message}",
