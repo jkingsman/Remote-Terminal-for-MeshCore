@@ -36,6 +36,7 @@ async def test_db():
         messages,
         raw_packets,
         repeater_telemetry,
+        room_poll,
         settings,
     )
     from app.repository import fanout as fanout_repo
@@ -53,6 +54,7 @@ async def test_db():
         bots_repo,
         repeater_telemetry,
         contact_telemetry,
+        room_poll,
     ]
     originals = [(mod, mod.db) for mod in submodules]
 

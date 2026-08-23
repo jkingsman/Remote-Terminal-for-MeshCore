@@ -460,6 +460,8 @@ For room contacts (`type=3`), `ConversationPane.tsx` keeps the normal chat surfa
 
 `ServerLoginStatusBanner` is shared between repeater and room login surfaces for inline status/error display.
 
+**Auto-open + sync:** on open, the panel fetches `api.getRoomPoll`; if a credential is stored server-side (`has_stored_credential`, which includes a guest `""` credential — checked as such, never by truthiness) it auto-logs-in with `api.roomLogin(key, { useStoredCredential: true })` and skips the password form, falling back to the form on failure. The authenticated view has a "Keep this room synced" toggle + interval that drives `api.setRoomPoll`; enabling it stores the current session's credential (`credential_action: 'set'`, `credential` may be `""` for guest) so the backend poller can log in unattended. The plaintext credential is never sent back to the client — the status payload carries booleans only.
+
 ## Message Search Pane
 
 The `SearchView` component (`components/SearchView.tsx`) provides full-text search across all DMs and channel messages. Key behaviors:

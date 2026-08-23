@@ -274,10 +274,15 @@ Web Push is a standalone subsystem in `app/push/`, separate from the fanout modu
 - `GET /contacts/{public_key}/repeater/telemetry-history` — stored telemetry history for a repeater (read-only, no radio access)
 - `POST /contacts/{public_key}/telemetry` — on-demand CayenneLPP telemetry from any contact (persists in `contact_telemetry_history`)
 - `GET /contacts/{public_key}/telemetry-history` — stored LPP telemetry history for a contact (read-only)
-- `POST /contacts/{public_key}/room/login` — one attempt on the effective route, then one flood retry on timeout
+- `POST /contacts/{public_key}/room/login` — one attempt on the effective route, then one flood retry on timeout. Body `{password?, use_stored_credential?}`: `password` is three-state (`null`/absent = guest unless `use_stored_credential`, `""` = guest, else the password); `use_stored_credential=true` logs in with the room's server-side stored credential and never returns it.
 - `POST /contacts/{public_key}/room/status`
 - `POST /contacts/{public_key}/room/lpp-telemetry`
 - `POST /contacts/{public_key}/room/acl`
+- `GET /contacts/{public_key}/room/poll` — room poll/credential status; booleans only, never the stored credential
+- `PUT /contacts/{public_key}/room/poll` — set stored credential (`credential_action` keep/set/clear; `credential=""` stores a guest login) and/or the background poll schedule; enabling polling requires a stored credential
+- `DELETE /contacts/{public_key}/room/poll` — remove the stored credential and disable polling
+
+The background room poller (`app/radio_sync.py` `_room_poll_loop`, started post-connect) periodically logs in to each subscribed room with its stored credential so the server enqueues its message delta; the existing drain/dedup pipeline captures it. Reliability rests on the incoming-message dedup (re-pulling an overlapping delta is a no-op), a durable per-room subscription (`room_poll_subscriptions`), the shared radio lock (`radio_operation(blocking=False, suspend_auto_fetch=True)` — busy = skip), and exponential backoff; an explicit `LOGIN_FAILED` disables the subscription. MeshCore has no message cursor, so this is "keep the session current + drain," never "fetch since N".
 
 ### Channels
 - `GET /channels`

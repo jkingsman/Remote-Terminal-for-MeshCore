@@ -11,8 +11,23 @@ vi.mock('../api', () => ({
     roomAcl: vi.fn(),
     roomLppTelemetry: vi.fn(),
     sendRepeaterCommand: vi.fn(),
+    getRoomPoll: vi.fn(),
+    setRoomPoll: vi.fn(),
+    deleteRoomPoll: vi.fn(),
   },
 }));
+
+const NO_STORED_CREDENTIAL = {
+  room_key: 'aa'.repeat(32),
+  has_stored_credential: false,
+  is_guest_credential: false,
+  poll_enabled: false,
+  interval_seconds: 1200,
+  last_poll_at: null,
+  last_result: null,
+  last_error: null,
+  consecutive_errors: 0,
+};
 
 vi.mock('../components/ui/sonner', () => ({
   toast: Object.assign(vi.fn(), {
@@ -51,6 +66,9 @@ describe('RoomServerPanel', () => {
     vi.clearAllMocks();
     localStorage.clear();
     resetRoomCacheForTests();
+    // Default: no server-side credential, so the panel shows the login form
+    // rather than auto-opening.
+    mockApi.getRoomPoll.mockResolvedValue({ ...NO_STORED_CREDENTIAL });
   });
 
   it('keeps room controls available when login is not confirmed', async () => {
@@ -105,16 +123,12 @@ describe('RoomServerPanel', () => {
     fireEvent.click(screen.getByText('Retry Password Login'));
 
     await waitFor(() => {
-      expect(mockApi.roomLogin).toHaveBeenNthCalledWith(
-        1,
-        roomContact.public_key,
-        'secret-room-password'
-      );
-      expect(mockApi.roomLogin).toHaveBeenNthCalledWith(
-        2,
-        roomContact.public_key,
-        'secret-room-password'
-      );
+      expect(mockApi.roomLogin).toHaveBeenNthCalledWith(1, roomContact.public_key, {
+        password: 'secret-room-password',
+      });
+      expect(mockApi.roomLogin).toHaveBeenNthCalledWith(2, roomContact.public_key, {
+        password: 'secret-room-password',
+      });
     });
   });
 
@@ -137,5 +151,54 @@ describe('RoomServerPanel', () => {
     expect(screen.queryByText('Retry Password Login')).not.toBeInTheDocument();
     expect(screen.queryByText('Retry Existing-Access Login')).not.toBeInTheDocument();
     expect(mockToast.success).toHaveBeenCalledWith('Login confirmed by the room server.');
+  });
+
+  it('auto-opens with the stored credential instead of showing the login form', async () => {
+    mockApi.getRoomPoll.mockResolvedValue({
+      ...NO_STORED_CREDENTIAL,
+      has_stored_credential: true,
+      poll_enabled: true,
+    });
+    mockApi.roomLogin.mockResolvedValueOnce({ status: 'ok', authenticated: true, message: null });
+
+    render(<RoomServerPanel contact={roomContact} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Show Tools')).toBeInTheDocument();
+    });
+    // Auto-login used the stored credential; the password form never rendered.
+    expect(mockApi.roomLogin).toHaveBeenCalledWith(roomContact.public_key, {
+      useStoredCredential: true,
+    });
+    expect(screen.queryByText('Login with Password')).not.toBeInTheDocument();
+  });
+
+  it('stores a guest ("") credential when enabling sync after a guest login', async () => {
+    mockApi.roomLogin.mockResolvedValueOnce({ status: 'ok', authenticated: true, message: null });
+    mockApi.setRoomPoll.mockResolvedValueOnce({
+      ...NO_STORED_CREDENTIAL,
+      has_stored_credential: true,
+      is_guest_credential: true,
+      poll_enabled: true,
+    });
+
+    render(<RoomServerPanel contact={roomContact} />);
+    fireEvent.click(screen.getByText('Login with Existing Access / Guest'));
+
+    await waitFor(() => {
+      expect(screen.getByText('Keep this room synced')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText('Keep this room synced'));
+
+    await waitFor(() => {
+      // "" is a real guest credential, stored via credential_action 'set' — not
+      // treated as "no credential".
+      expect(mockApi.setRoomPoll).toHaveBeenCalledWith(roomContact.public_key, {
+        enabled: true,
+        credential_action: 'set',
+        credential: '',
+      });
+    });
   });
 });
