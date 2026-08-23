@@ -774,16 +774,31 @@ export interface BotUiTrigger {
   spec: string;
 }
 
-export interface BotSettingsSchemaField {
+interface BotSettingsSchemaFieldBase {
   key: string;
   label: string;
-  type: 'text' | 'password' | 'int' | 'float' | 'bool' | 'select';
   default?: unknown;
   help?: string;
+  show_when?: { key: string; value: string };
+}
+
+export interface BotSettingsValueField extends BotSettingsSchemaFieldBase {
+  type: 'text' | 'password' | 'int' | 'float' | 'number' | 'bool' | 'select' | 'url';
   min?: number;
   max?: number;
   options?: { value: string; label: string }[];
 }
+
+export interface BotSettingsGeneratedUrlField extends BotSettingsSchemaFieldBase {
+  type: 'generated_url';
+  template: string;
+  warning?: string;
+  copy_label?: string;
+  testable?: boolean;
+  test_label?: string;
+}
+
+export type BotSettingsSchemaField = BotSettingsValueField | BotSettingsGeneratedUrlField;
 
 export interface Bot {
   id: string;

@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import logging
+import secrets
 import time
 from datetime import datetime
 from typing import Any
+from urllib.parse import parse_qs
 
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException, Query, Request, Response
 
 from app.bots.cron import parse_cron, validate_cron
 from app.bots.engine import bot_engine
@@ -45,6 +50,7 @@ router = APIRouter(prefix="/bots", tags=["bots"])
 hooks_router = APIRouter(prefix="/hooks", tags=["bots"])
 
 _WINDOW_SECONDS = {"1h": 3600, "24h": 86400, "7d": 7 * 86400}
+REDACTED_SECRET = "__REMOTE_TERM_REDACTED__"
 
 DEFAULT_NEW_BOT_CODE = '''"""New bot — reacts to a keyword. See the API hints below the editor."""
 
@@ -98,6 +104,25 @@ def _runs_24h_by_bot(runs: list[BotRun]) -> dict[str, int]:
     return counts
 
 
+def _redact_bot_secrets(record: Bot) -> Bot:
+    secret_keys = {
+        str(field.get("key"))
+        for field in record.settings_schema
+        if field.get("type") == "password" and field.get("key")
+    }
+    if not secret_keys:
+        return record
+    redacted = record.model_copy(deep=True)
+    for key in secret_keys & redacted.settings.keys():
+        if redacted.settings.get(key):
+            redacted.settings[key] = REDACTED_SECRET
+    return redacted
+
+
+def _decorate_for_api(record: Bot) -> Bot:
+    return _redact_bot_secrets(bot_engine.decorate_record(record))
+
+
 # ---------------------------------------------------------------------------
 # Bots CRUD
 # ---------------------------------------------------------------------------
@@ -114,7 +139,7 @@ async def list_bots() -> list[Bot]:
             counts[run.bot_id] = counts.get(run.bot_id, 0) + 1
     out = []
     for record in records:
-        decorated = bot_engine.decorate_record(record)
+        decorated = _decorate_for_api(record)
         decorated.runs_24h = counts.get(record.id, 0)
         out.append(decorated)
     return out
@@ -273,7 +298,7 @@ async def create_bot(body: BotCreateRequest) -> Bot:
         modified=not bool(body.from_builtin_key),
     )
     await bot_engine.reload_bot(bot.id)
-    return bot_engine.decorate_record(bot)
+    return _decorate_for_api(bot)
 
 
 @router.get("/{bot_id}", response_model=Bot)
@@ -281,7 +306,7 @@ async def get_bot(bot_id: str) -> Bot:
     record = await BotRepository.get(bot_id)
     if record is None:
         raise HTTPException(status_code=404, detail="bot not found")
-    return bot_engine.decorate_record(record)
+    return _decorate_for_api(record)
 
 
 @router.patch("/{bot_id}", response_model=Bot)
@@ -290,6 +315,13 @@ async def update_bot(bot_id: str, body: BotUpdateRequest) -> Bot:
     if record is None:
         raise HTTPException(status_code=404, detail="bot not found")
     fields = body.model_dump(exclude_unset=True)
+
+    if isinstance(fields.get("settings"), dict):
+        merged_settings = dict(record.settings)
+        for key, value in fields["settings"].items():
+            if value != REDACTED_SECRET:
+                merged_settings[key] = value
+        fields["settings"] = merged_settings
 
     if "name" in fields:
         name = (fields["name"] or "").strip()
@@ -321,7 +353,7 @@ async def update_bot(bot_id: str, body: BotUpdateRequest) -> Bot:
     updated = await BotRepository.update(bot_id, **fields)
     assert updated is not None
     await bot_engine.reload_bot(bot_id)
-    return bot_engine.decorate_record(updated)
+    return _decorate_for_api(updated)
 
 
 @router.delete("/{bot_id}")
@@ -355,7 +387,7 @@ async def reset_bot(bot_id: str) -> Bot:
     )
     assert updated is not None
     await bot_engine.reload_bot(bot_id)
-    return bot_engine.decorate_record(updated)
+    return _decorate_for_api(updated)
 
 
 @router.post("/{bot_id}/test", response_model=BotTestResponse)
@@ -519,15 +551,15 @@ async def delete_feed(feed_id: str) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 
-@hooks_router.post("/{slug}")
-async def inbound_hook(
+async def _run_inbound_hook(
     slug: str,
-    payload: dict[str, Any],
+    request: Request,
     x_hook_token: str | None = Header(default=None),
-) -> dict[str, str]:
+) -> tuple[dict[str, str], str]:
     found = bot_engine.find_webhook(slug)
     if found is None:
         raise HTTPException(status_code=404, detail="no enabled bot listens on this hook")
+
     loaded, handler = found
     expected = str(loaded.record.settings.get("webhook_token", "") or "")
     if not expected:
@@ -535,7 +567,103 @@ async def inbound_hook(
             status_code=403,
             detail="webhook token not configured — set webhook_token in the bot's settings",
         )
-    if x_hook_token != expected:
+
+    payload: dict[str, Any] = {}
+
+    if request.method == "GET":
+        payload = dict(request.query_params)
+    else:
+        content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+
+        if content_type == "application/json" or content_type.endswith("+json"):
+            try:
+                data = await request.json()
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail="invalid JSON payload") from exc
+            payload = data if isinstance(data, dict) else {"payload": data}
+
+        elif content_type == "application/x-www-form-urlencoded":
+            raw = (await request.body()).decode("utf-8", errors="replace")
+            parsed = parse_qs(raw, keep_blank_values=True)
+            payload = {key: values[-1] if values else "" for key, values in parsed.items()}
+
+        else:
+            raw = await request.body()
+            if raw:
+                payload = {"body": raw.decode("utf-8", errors="replace")}
+
+    supplied_token = (
+        x_hook_token or request.query_params.get("token") or str(payload.get("token", "") or "")
+    )
+
+    if not secrets.compare_digest(supplied_token, expected):
         raise HTTPException(status_code=403, detail="invalid webhook token")
-    await bot_engine.run_webhook(loaded, handler, slug, payload)
-    return {"status": "ok"}
+
+    # Only the SMS integration accepts its authentication token in the body.
+    # Other generic webhooks may legitimately own a field named ``token``.
+    if slug == "sms" and not x_hook_token and not request.query_params.get("token"):
+        payload.pop("token", None)
+
+    provider = str(loaded.record.settings.get("provider", "voipms") or "voipms").casefold()
+    if slug == "sms" and provider == "twilio":
+        _verify_twilio_signature(request, payload, loaded.record.settings)
+
+    succeeded = await bot_engine.run_webhook(loaded, handler, slug, payload)
+    if not succeeded:
+        raise HTTPException(status_code=503, detail="webhook handler did not complete")
+    return {"status": "ok"}, provider
+
+
+def _verify_twilio_signature(
+    request: Request, payload: dict[str, Any], settings: dict[str, Any]
+) -> None:
+    """Verify Twilio's documented HMAC-SHA1 callback signature."""
+    supplied = request.headers.get("x-twilio-signature", "")
+    auth_token = str(settings.get("twilio_auth_token", "") or "")
+    if not supplied or not auth_token:
+        raise HTTPException(status_code=403, detail="invalid Twilio signature")
+    signed = str(request.url)
+    for key in sorted(payload):
+        value = payload[key]
+        if isinstance(value, (str, int, float, bool)):
+            signed += f"{key}{value}"
+    expected = base64.b64encode(
+        hmac.new(auth_token.encode(), signed.encode(), hashlib.sha1).digest()
+    ).decode("ascii")
+    if not secrets.compare_digest(supplied, expected):
+        raise HTTPException(status_code=403, detail="invalid Twilio signature")
+
+
+@hooks_router.get("/sms")
+async def inbound_sms_hook(
+    request: Request,
+    x_hook_token: str | None = Header(default=None),
+) -> Response:
+    await _run_inbound_hook("sms", request, x_hook_token)
+    # VoIP.ms uses the exact plain-text body "ok" to acknowledge delivery
+    # when URL Callback Retry is enabled.
+    return Response(content="ok", media_type="text/plain")
+
+
+@hooks_router.post("/sms")
+async def inbound_sms_post_hook(
+    request: Request,
+    x_hook_token: str | None = Header(default=None),
+) -> Response:
+    _result, provider = await _run_inbound_hook("sms", request, x_hook_token)
+    if provider == "twilio":
+        return Response(
+            content='<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
+            media_type="application/xml",
+        )
+    return Response(content="ok", media_type="text/plain")
+
+
+@hooks_router.post("/{slug}")
+async def inbound_hook(
+    slug: str,
+    request: Request,
+    x_hook_token: str | None = Header(default=None),
+) -> dict[str, str]:
+    result, _provider = await _run_inbound_hook(slug, request, x_hook_token)
+    return result

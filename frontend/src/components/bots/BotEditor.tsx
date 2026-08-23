@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Play, Plus, X } from 'lucide-react';
+import { ArrowLeft, Copy, Play, Plus, X } from 'lucide-react';
 
 import { api } from '../../api';
 import type {
@@ -59,18 +59,149 @@ function SectionTitle({ title, hint }: { title: string; hint?: string }) {
   );
 }
 
+const REDACTED_SECRET = '__REMOTE_TERM_REDACTED__';
+
+async function copyText(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  try {
+    if (!document.execCommand('copy')) throw new Error('Copy was rejected by the browser');
+  } finally {
+    textarea.remove();
+  }
+}
+
+export function resolveGeneratedUrl(
+  template: string,
+  schema: BotSettingsSchemaField[],
+  settings: Record<string, unknown>
+): string {
+  const settingFields = new Map(
+    schema
+      .filter((field) => field.type !== 'generated_url')
+      .map((field) => [field.key, field] as const)
+  );
+  return template.replace(/\{([^{}]+)\}/g, (placeholder, key: string, offset: number) => {
+    const settingField = settingFields.get(key);
+    if (!settingField) return placeholder;
+    const value = settings[key] ?? settingField.default;
+    const resolved = value == null || value === REDACTED_SECRET ? '' : String(value).trim();
+    const queryStart = template.indexOf('?');
+    const parameterStart = Math.max(template.lastIndexOf('&', offset), queryStart);
+    const equals = template.indexOf('=', parameterStart);
+    return queryStart >= 0 && offset > queryStart && equals >= parameterStart && equals < offset
+      ? encodeURIComponent(resolved)
+      : resolved;
+  });
+}
+
+export function validateGeneratedUrl(
+  template: string,
+  schema: BotSettingsSchemaField[],
+  settings: Record<string, unknown>
+): string | null {
+  for (const field of schema) {
+    if (field.type === 'generated_url' || !template.includes(`{${field.key}}`)) continue;
+    const value = settings[field.key] ?? field.default;
+    if (value == null || value === REDACTED_SECRET || String(value).trim() === '') {
+      return `${field.label} is required`;
+    }
+  }
+  try {
+    const parsed = new URL(resolveGeneratedUrl(template, schema, settings));
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return 'URL must use HTTP or HTTPS';
+    }
+  } catch {
+    return 'URL is not valid';
+  }
+  return null;
+}
+
 /** Renders one settings_schema field bound to the settings draft. */
 function SchemaField({
   field,
   value,
+  schema,
+  settings,
   onChange,
 }: {
   field: BotSettingsSchemaField;
   value: unknown;
+  schema: BotSettingsSchemaField[];
+  settings: Record<string, unknown>;
   onChange: (value: unknown) => void;
 }) {
   const [revealed, setRevealed] = useState(false);
-  const current = value ?? field.default ?? (field.type === 'bool' ? false : '');
+  const current =
+    field.type === 'password' && value === REDACTED_SECRET
+      ? ''
+      : (value ?? field.default ?? (field.type === 'bool' ? false : ''));
+
+  if (field.type === 'generated_url') {
+    const generatedUrl = resolveGeneratedUrl(field.template, schema, settings);
+    return (
+      <div>
+        <div className="text-xs text-muted-foreground mb-1">{field.label}</div>
+        {field.help && (
+          <div className="text-[0.6875rem] text-muted-foreground mb-1.5">{field.help}</div>
+        )}
+        <div className="flex items-start gap-2 rounded-md border border-input bg-muted px-3 py-2">
+          <code className="min-w-0 flex-1 font-mono text-xs break-all select-all">
+            {generatedUrl}
+          </code>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 shrink-0 px-2"
+            onClick={async () => {
+              try {
+                await copyText(generatedUrl);
+                toast.success(`${field.label} copied`);
+              } catch (error) {
+                toast.error('Copy failed', {
+                  description: error instanceof Error ? error.message : undefined,
+                });
+              }
+            }}
+          >
+            <Copy className="h-3.5 w-3.5 mr-1" />
+            {field.copy_label ?? 'Copy'}
+          </Button>
+          {field.testable && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 shrink-0 px-2"
+              onClick={() => {
+                const error = validateGeneratedUrl(field.template, schema, settings);
+                if (error) toast.error(error);
+                else toast.success('URL is complete and valid; no request was sent');
+              }}
+            >
+              {field.test_label ?? 'Test URL'}
+            </Button>
+          )}
+        </div>
+        {field.warning && (
+          <div className="mt-2 rounded-md border border-destructive/60 bg-destructive/10 p-3 text-xs text-destructive">
+            {field.warning}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   if (field.type === 'bool') {
     return (
@@ -87,10 +218,14 @@ function SchemaField({
   }
 
   if (field.type === 'select') {
+    const inputId = `bot-setting-${field.key}`;
     return (
       <div>
-        <div className="text-xs text-muted-foreground mb-1">{field.label}</div>
+        <label htmlFor={inputId} className="block text-xs text-muted-foreground mb-1">
+          {field.label}
+        </label>
         <select
+          id={inputId}
           value={String(current)}
           onChange={(e) => onChange(e.target.value)}
           className="h-8 w-full rounded-md border border-input bg-transparent px-2.5 text-[0.8125rem]"
@@ -108,13 +243,21 @@ function SchemaField({
     );
   }
 
-  const isNumber = field.type === 'int' || field.type === 'float';
+  const isNumber = field.type === 'int' || field.type === 'float' || field.type === 'number';
   return (
     <div>
       <div className="text-xs text-muted-foreground mb-1">{field.label}</div>
       <div className="flex gap-2">
         <Input
-          type={field.type === 'password' && !revealed ? 'password' : isNumber ? 'number' : 'text'}
+          type={
+            field.type === 'password' && !revealed
+              ? 'password'
+              : isNumber
+                ? 'number'
+                : field.type === 'url'
+                  ? 'url'
+                  : 'text'
+          }
           value={String(current)}
           min={field.min}
           max={field.max}
@@ -122,7 +265,7 @@ function SchemaField({
           onChange={(e) => {
             if (field.type === 'int')
               onChange(e.target.value === '' ? '' : parseInt(e.target.value, 10) || 0);
-            else if (field.type === 'float')
+            else if (field.type === 'float' || field.type === 'number')
               onChange(e.target.value === '' ? '' : parseFloat(e.target.value) || 0);
             else onChange(e.target.value);
           }}
@@ -714,17 +857,32 @@ export function BotEditor({ botId, channels, onBack, onDeleted }: BotEditorProps
               </p>
             ) : (
               <div className="flex flex-col gap-3.5">
-                {bot.settings_schema.map((field) => (
-                  <SchemaField
-                    key={field.key}
-                    field={field}
-                    value={settings[field.key]}
-                    onChange={(value) => {
-                      setSettings((prev) => ({ ...prev, [field.key]: value }));
-                      markDirty();
-                    }}
-                  />
-                ))}
+                {bot.settings_schema.map((field) => {
+                  if (
+                    field.show_when &&
+                    String(
+                      settings[field.show_when.key] ??
+                        bot.settings_schema.find((item) => item.key === field.show_when?.key)
+                          ?.default ??
+                        ''
+                    ) !== field.show_when.value
+                  ) {
+                    return null;
+                  }
+                  return (
+                    <SchemaField
+                      key={field.key}
+                      field={field}
+                      value={settings[field.key]}
+                      schema={bot.settings_schema}
+                      settings={settings}
+                      onChange={(value) => {
+                        setSettings((prev) => ({ ...prev, [field.key]: value }));
+                        markDirty();
+                      }}
+                    />
+                  );
+                })}
               </div>
             )}
           </div>

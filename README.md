@@ -238,7 +238,7 @@ uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
 >
 > If you forget, the app will start normally but MQTT connections will fail and you'll see a toast in the UI with this same guidance.
 
-If you enable Basic Auth, protect the app with HTTPS. HTTP Basic credentials are not safe on plain HTTP. Also note that the app's permissive CORS policy is a deliberate trusted-network tradeoff, so cross-origin browser JavaScript is not a reliable way to use that Basic Auth gate.
+If you enable Basic Auth, protect the app with HTTPS. HTTP Basic credentials are not safe on plain HTTP. Provider callbacks under `/api/hooks/*` are exempt from app-wide Basic Auth because providers cannot supply those credentials; enabled hooks enforce their own bot-specific webhook token instead. SMS keeps query-token authentication for VoIP.ms compatibility and redacts that token from access/debug logs; Twilio also uses its signed callback header. Also note that the app's permissive CORS policy is a deliberate trusted-network tradeoff, so cross-origin browser JavaScript is not a reliable way to use that Basic Auth gate.
 
 ## Where To Go Next
 

@@ -61,11 +61,28 @@ admin users). Repository: `app/repository/bots.py`.
 `webhook_token` setting). Route-order gotcha: fixed paths that share the
 `POST /<segment>/test` shape must be registered before `POST /{bot_id}/test`.
 
+Password-typed settings are write-only: bot API responses contain a redaction
+sentinel, and sending that sentinel back preserves the stored credential.
+Generated callback URLs therefore require the operator to re-enter a secret
+before copying it; the original value is never returned to the browser.
+
+All `/api/hooks/*` routes bypass optional app-wide Basic Auth because providers
+cannot supply it; each enabled hook still requires its bot-specific token.
+SMS accepts a query token for VoIP.ms compatibility, and access/debug logging
+redacts it. Twilio callbacks additionally require `X-Twilio-Signature`, checked
+against the configured Auth Token and the exact public callback URL. Reverse
+proxies must preserve the public scheme, host, path, and query string used by
+Twilio or configure forwarding so FastAPI reconstructs that same URL. VoIP.ms
+does not offer an equivalent callback-signature mechanism, so it retains the
+token gate only.
+
 ## Invariants worth keeping
 
 - Legacy `def bot(**kwargs)` sources must keep running unchanged (migration
   064 moved them here verbatim).
 - Seeded bots ship disabled — enabling what a node answers is an operator act.
+- Newly installed SMS bots are `admin_only`; existing installations retain
+  their stored permission flag during version refreshes.
 - `ui_triggers` only feed handlers declared with **no-argument** decorators
   (`@bot.on_keyword()` / `@bot.on_cron()`); code-declared triggers are derived
   at load time and never stored.
