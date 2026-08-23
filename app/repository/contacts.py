@@ -177,6 +177,9 @@ class ContactRepository:
             last_seen=row["last_seen"],
             on_radio=bool(row["on_radio"]),
             favorite=bool(row["favorite"]) if "favorite" in available_columns else False,
+            mcmp_enabled=(
+                bool(row["mcmp_enabled"]) if "mcmp_enabled" in available_columns else False
+            ),
             last_contacted=row["last_contacted"],
             last_read_at=row["last_read_at"],
             first_seen=row["first_seen"],
@@ -491,6 +494,17 @@ class ContactRepository:
                 (1 if value else 0, public_key.lower()),
             ):
                 pass
+
+    @staticmethod
+    async def set_mcmp_enabled(public_key: str, value: bool) -> bool:
+        """Enable/disable MCMP compression for a contact. True if a row was found."""
+        async with db.tx() as conn:
+            async with conn.execute(
+                "UPDATE contacts SET mcmp_enabled = ? WHERE public_key = ?",
+                (1 if value else 0, public_key.lower()),
+            ) as cursor:
+                rowcount = cursor.rowcount
+        return rowcount > 0
 
     @staticmethod
     async def delete(public_key: str) -> None:

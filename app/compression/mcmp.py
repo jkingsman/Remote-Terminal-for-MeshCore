@@ -950,6 +950,44 @@ def get_compressor() -> MeshCompressor:
     return _singleton
 
 
+def _log_model_load_failure() -> None:
+    global _model_load_failed
+    if not _model_load_failed:
+        _model_load_failed = True
+        logger.warning("MCMP model unavailable; outbound compression disabled", exc_info=True)
+
+
+def encode_outbound(text: str) -> str:
+    """Compress ``text`` for sending, as the v2 text transport (``mcmp2:``).
+
+    Uses the "only if smaller" gate: returns the original text unchanged when
+    compression would not shrink it (so short/incompressible messages stay
+    readable by any client). Never raises — on model-load failure the original
+    text is returned so sending still works, just uncompressed.
+
+    We send v2 rather than v3: without a firmware signature v3 only adds
+    container overhead, and v2's plaintext fallback keeps small messages
+    universally readable. (v3 is still decoded on the way in.)
+    """
+    if not text:
+        return text
+    try:
+        return get_compressor().encode_if_smaller(text)
+    except Exception:
+        _log_model_load_failure()
+        return text
+
+
+def outbound_wire_bytes(text: str) -> int:
+    """UTF-8 byte length ``text`` would occupy on the wire once compressed.
+
+    Drives the live compose counter: the frontend shows this against the packet
+    budget so the effective character capacity grows as compressible text is
+    typed. Falls back to the raw byte length if the model is unavailable.
+    """
+    return len(encode_outbound(text).encode("utf-8"))
+
+
 class DecodedIncoming:
     """Result of :func:`try_decode_incoming`."""
 
@@ -976,16 +1014,10 @@ def try_decode_incoming(text: str) -> DecodedIncoming | None:
     if not (stripped.startswith(_PREFIX_V3) or stripped.startswith(_PREFIX_V2)):
         return None
 
-    global _model_load_failed
     try:
         compressor = get_compressor()
     except Exception:
-        if not _model_load_failed:
-            _model_load_failed = True
-            logger.warning(
-                "MCMP model unavailable; compressed messages will display raw",
-                exc_info=True,
-            )
+        _log_model_load_failure()
         return None
 
     v3 = try_decode_v3_text(compressor, text)

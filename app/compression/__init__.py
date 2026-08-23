@@ -14,9 +14,11 @@ from .mcmp import (
     DecodedV3Message,
     MeshCompressor,
     MeshCompressorError,
+    encode_outbound,
     encode_v3_text,
     get_compressor,
     is_v3_text_payload,
+    outbound_wire_bytes,
     try_decode_incoming,
     try_decode_v3_text,
 )
@@ -26,9 +28,11 @@ __all__ = [
     "DecodedV3Message",
     "MeshCompressor",
     "MeshCompressorError",
+    "encode_outbound",
     "encode_v3_text",
     "get_compressor",
     "is_v3_text_payload",
+    "outbound_wire_bytes",
     "try_decode_incoming",
     "try_decode_v3_text",
 ]
