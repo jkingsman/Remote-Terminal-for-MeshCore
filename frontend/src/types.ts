@@ -469,6 +469,26 @@ export interface RepeaterLoginResponse {
   message: string | null;
 }
 
+/** Room poll subscription status. Never carries the stored credential value. */
+export interface RoomPollStatus {
+  room_key: string;
+  has_stored_credential: boolean;
+  is_guest_credential: boolean;
+  poll_enabled: boolean;
+  interval_seconds: number;
+  last_poll_at: number | null;
+  last_result: string | null;
+  last_error: string | null;
+  consecutive_errors: number;
+}
+
+export interface RoomPollConfigRequest {
+  enabled?: boolean;
+  interval_seconds?: number;
+  credential_action?: 'keep' | 'set' | 'clear';
+  credential?: string | null;
+}
+
 export interface RepeaterStatusResponse {
   battery_volts: number;
   tx_queue_len: number;

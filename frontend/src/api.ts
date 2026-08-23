@@ -29,6 +29,8 @@ import type {
   RepeaterAclResponse,
   RepeaterAdvertIntervalsResponse,
   RepeaterLoginResponse,
+  RoomPollConfigRequest,
+  RoomPollStatus,
   RepeaterLppTelemetryResponse,
   RepeaterNeighborsResponse,
   RepeaterNodeInfoResponse,
@@ -473,10 +475,29 @@ export const api = {
     }),
   contactTelemetryHistory: (publicKey: string) =>
     fetchJson<TelemetryHistoryEntry[]>(`/contacts/${publicKey}/telemetry-history`),
-  roomLogin: (publicKey: string, password: string) =>
+  roomLogin: (
+    publicKey: string,
+    opts: { password?: string; useStoredCredential?: boolean } = {}
+  ) =>
     fetchJson<RepeaterLoginResponse>(`/contacts/${publicKey}/room/login`, {
       method: 'POST',
-      body: JSON.stringify({ password }),
+      // password may legitimately be "" (guest); only omit it when unset so the
+      // backend falls back to the stored credential.
+      body: JSON.stringify({
+        ...(opts.password !== undefined ? { password: opts.password } : {}),
+        use_stored_credential: opts.useStoredCredential ?? false,
+      }),
+    }),
+  getRoomPoll: (publicKey: string) =>
+    fetchJson<RoomPollStatus>(`/contacts/${publicKey}/room/poll`),
+  setRoomPoll: (publicKey: string, config: RoomPollConfigRequest) =>
+    fetchJson<RoomPollStatus>(`/contacts/${publicKey}/room/poll`, {
+      method: 'PUT',
+      body: JSON.stringify(config),
+    }),
+  deleteRoomPoll: (publicKey: string) =>
+    fetchJson<RoomPollStatus>(`/contacts/${publicKey}/room/poll`, {
+      method: 'DELETE',
     }),
   roomStatus: (publicKey: string) =>
     fetchJson<RepeaterStatusResponse>(`/contacts/${publicKey}/room/status`, {

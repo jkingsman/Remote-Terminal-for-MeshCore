@@ -5,10 +5,16 @@ from app.models import (
     AclEntry,
     LppSensor,
     RepeaterAclResponse,
-    RepeaterLoginRequest,
     RepeaterLoginResponse,
     RepeaterLppTelemetryResponse,
     RepeaterStatusResponse,
+    RoomLoginRequest,
+    RoomPollConfigRequest,
+    RoomPollStatus,
+)
+from app.repository.room_poll import (
+    DEFAULT_POLL_INTERVAL_SECONDS,
+    RoomPollRepository,
 )
 from app.routers.contacts import _ensure_on_radio, _resolve_contact_or_404
 from app.routers.server_control import (
@@ -24,12 +30,51 @@ def _require_room(contact) -> None:
     require_server_capable_contact(contact, allowed_types=(CONTACT_TYPE_ROOM,))
 
 
+def _poll_status(room_key: str, sub) -> RoomPollStatus:
+    """Build the client-facing status. Deliberately omits the credential value."""
+    if sub is None:
+        return RoomPollStatus(
+            room_key=room_key,
+            has_stored_credential=False,
+            is_guest_credential=False,
+            poll_enabled=False,
+            interval_seconds=DEFAULT_POLL_INTERVAL_SECONDS,
+        )
+    return RoomPollStatus(
+        room_key=room_key,
+        has_stored_credential=sub.has_credential,
+        is_guest_credential=sub.is_guest_credential,
+        poll_enabled=sub.poll_enabled,
+        interval_seconds=sub.interval_seconds,
+        last_poll_at=sub.last_poll_at,
+        last_result=sub.last_result,
+        last_error=sub.last_error,
+        consecutive_errors=sub.consecutive_errors,
+    )
+
+
 @router.post("/{public_key}/room/login", response_model=RepeaterLoginResponse)
-async def room_login(public_key: str, request: RepeaterLoginRequest) -> RepeaterLoginResponse:
-    """Attempt room-server login and report whether auth was confirmed."""
+async def room_login(public_key: str, request: RoomLoginRequest) -> RepeaterLoginResponse:
+    """Attempt room-server login and report whether auth was confirmed.
+
+    With ``use_stored_credential`` the server logs in using the credential saved
+    for this room (password or guest) and never returns it to the caller — this
+    is what lets the UI open a known room without the password prompt.
+    """
     radio_manager.require_connected()
     contact = await _resolve_contact_or_404(public_key)
     _require_room(contact)
+
+    if request.use_stored_credential:
+        sub = await RoomPollRepository.get(contact.public_key)
+        # credential is three-state; `is None` (not falsiness) distinguishes
+        # "nothing stored" from a valid guest ("") credential.
+        if sub is None or sub.credential is None:
+            raise HTTPException(status_code=400, detail="no stored credential for this room")
+        password = sub.credential
+    else:
+        # Absent password -> guest; the model already normalizes None to guest.
+        password = request.password if request.password is not None else ""
 
     async with radio_manager.radio_operation(
         "room_login",
@@ -39,9 +84,52 @@ async def room_login(public_key: str, request: RepeaterLoginRequest) -> Repeater
         return await prepare_authenticated_contact_connection(
             mc,
             contact,
-            request.password,
+            password,
             label="room server",
         )
+
+
+@router.get("/{public_key}/room/poll", response_model=RoomPollStatus)
+async def get_room_poll(public_key: str) -> RoomPollStatus:
+    """Report a room's stored-credential / poll status (never the credential)."""
+    contact = await _resolve_contact_or_404(public_key)
+    _require_room(contact)
+    sub = await RoomPollRepository.get(contact.public_key)
+    return _poll_status(contact.public_key, sub)
+
+
+@router.put("/{public_key}/room/poll", response_model=RoomPollStatus)
+async def set_room_poll(public_key: str, request: RoomPollConfigRequest) -> RoomPollStatus:
+    """Set a room's stored credential and/or background poll schedule."""
+    contact = await _resolve_contact_or_404(public_key)
+    _require_room(contact)
+
+    sub = await RoomPollRepository.upsert(
+        contact.public_key,
+        enabled=request.enabled,
+        interval_seconds=request.interval_seconds,
+        credential_action=request.credential_action,
+        credential=request.credential,
+    )
+
+    # Enabling polling without a stored credential can never succeed — the poller
+    # needs one to log in. Reject rather than silently leaving it disabled.
+    if sub.poll_enabled and not sub.has_credential:
+        raise HTTPException(
+            status_code=400,
+            detail="store a room password or guest credential before enabling polling",
+        )
+
+    return _poll_status(contact.public_key, sub)
+
+
+@router.delete("/{public_key}/room/poll", response_model=RoomPollStatus)
+async def delete_room_poll(public_key: str) -> RoomPollStatus:
+    """Remove a room's stored credential and disable polling."""
+    contact = await _resolve_contact_or_404(public_key)
+    _require_room(contact)
+    await RoomPollRepository.delete(contact.public_key)
+    return _poll_status(contact.public_key, None)
 
 
 @router.post("/{public_key}/room/status", response_model=RepeaterStatusResponse)

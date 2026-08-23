@@ -565,6 +565,63 @@ class RepeaterLoginResponse(BaseModel):
     )
 
 
+class RoomLoginRequest(BaseModel):
+    """Request to log in to a room server.
+
+    ``password`` is three-state: ``None`` means "use the credential stored for
+    this room" (set ``use_stored_credential``), an empty string is a guest
+    login, any other string is a password. ``use_stored_credential`` is the
+    explicit signal so the server logs in with the saved credential without ever
+    sending it back to the browser.
+    """
+
+    password: str | None = Field(
+        default=None,
+        description="Room password (empty string for guest login); ignored when "
+        "use_stored_credential is true",
+    )
+    use_stored_credential: bool = Field(
+        default=False,
+        description="Log in with the room's server-side stored credential",
+    )
+
+
+class RoomPollConfigRequest(BaseModel):
+    """Configure a room's stored credential and background poll schedule.
+
+    ``credential_action`` keeps an empty-string guest credential distinct from
+    "leave unchanged": ``keep`` (default) leaves the stored credential as-is,
+    ``set`` stores ``credential`` verbatim ("" = guest), ``clear`` removes it.
+    """
+
+    enabled: bool | None = Field(
+        default=None, description="Enable/disable background polling for this room"
+    )
+    interval_seconds: int | None = Field(
+        default=None, description="Per-room poll interval in seconds (floored server-side)"
+    )
+    credential_action: Literal["keep", "set", "clear"] = Field(
+        default="keep", description="What to do with the stored credential"
+    )
+    credential: str | None = Field(
+        default=None, description="Credential value when credential_action is 'set' ('' = guest)"
+    )
+
+
+class RoomPollStatus(BaseModel):
+    """Room poll subscription status. Never includes the stored credential."""
+
+    room_key: str
+    has_stored_credential: bool = Field(description="A credential is stored (password or guest)")
+    is_guest_credential: bool = Field(description="The stored credential is a guest (empty) login")
+    poll_enabled: bool
+    interval_seconds: int
+    last_poll_at: int | None = None
+    last_result: str | None = None
+    last_error: str | None = None
+    consecutive_errors: int = 0
+
+
 class RepeaterStatusResponse(BaseModel):
     """Status telemetry from a repeater (single attempt, no retries)."""
 

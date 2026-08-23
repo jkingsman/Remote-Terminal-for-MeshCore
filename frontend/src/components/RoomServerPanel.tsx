@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { api } from '../api';
 import { toast } from './ui/sonner';
@@ -10,6 +10,7 @@ import type {
   RepeaterAclResponse,
   RepeaterLppTelemetryResponse,
   RepeaterStatusResponse,
+  RoomPollStatus,
 } from '../types';
 import { TelemetryPane } from './repeater/RepeaterTelemetryPane';
 import { AclPane } from './repeater/RepeaterAclPane';
@@ -143,6 +144,18 @@ export function RoomServerPanel({ contact, onAuthenticatedChange }: RoomServerPa
   );
   const [consoleLoading, setConsoleLoading] = useState(false);
 
+  // Room-sync (background poller) state.
+  const [pollStatus, setPollStatus] = useState<RoomPollStatus | null>(null);
+  const [syncSaving, setSyncSaving] = useState(false);
+  const [autoOpening, setAutoOpening] = useState(false);
+  // The plaintext credential from the current interactive login, so enabling
+  // sync can store it. null when we auto-opened (the server already has it) or
+  // before any login this session. "" is a valid guest credential — never
+  // collapse it to "no credential".
+  const [sessionCredential, setSessionCredential] = useState<string | null>(null);
+  // Guard: attempt the stored-credential auto-login at most once per room.
+  const autoLoginTriedRef = useRef<string | null>(null);
+
   // Persist to cache on every state change
   useEffect(() => {
     setCachedRoom(contact.public_key, {
@@ -211,8 +224,12 @@ export function RoomServerPanel({ contact, onAuthenticatedChange }: RoomServerPa
 
       setLoginLoading(true);
       setLoginError(null);
+      // Remember the credential the user provided so "keep synced" can store it,
+      // even if the login request itself errors (the panel still authenticates
+      // optimistically). "" is a valid guest credential.
+      setSessionCredential(nextPassword);
       try {
-        const result = await api.roomLogin(contact.public_key, nextPassword);
+        const result = await api.roomLogin(contact.public_key, { password: nextPassword });
         setLastLoginAttempt(buildServerLoginAttemptFromResponse(method, result, 'room server'));
         setAuthenticated(true);
         if (result.authenticated) {
@@ -251,6 +268,126 @@ export function RoomServerPanel({ contact, onAuthenticatedChange }: RoomServerPa
     await performLogin('', 'blank');
     persistAfterLogin('');
   }, [performLogin, persistAfterLogin]);
+
+  const attemptStoredLogin = useCallback(async () => {
+    setAutoOpening(true);
+    setLoginError(null);
+    try {
+      const result = await api.roomLogin(contact.public_key, { useStoredCredential: true });
+      setLastLoginAttempt(buildServerLoginAttemptFromResponse('password', result, 'room server'));
+      setAuthenticated(true);
+      if (!result.authenticated) {
+        toast.warning("Couldn't confirm room login", {
+          description:
+            result.message ?? 'The room server did not confirm the saved credential.',
+        });
+      }
+    } catch (err) {
+      // Stored credential failed (e.g. the server-side password changed) — fall
+      // back to the manual login form rather than leaving the user stuck.
+      setLoginError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setAutoOpening(false);
+    }
+  }, [contact.public_key]);
+
+  // On opening a room, load its poll/credential status; if a credential is
+  // stored (password OR guest), auto-open by logging in with it — no prompt.
+  useEffect(() => {
+    let cancelled = false;
+    autoLoginTriedRef.current = null;
+    setPollStatus(null);
+    api
+      .getRoomPoll(contact.public_key)
+      .then((status) => {
+        if (cancelled) return;
+        setPollStatus(status);
+        if (
+          status.has_stored_credential &&
+          !authenticated &&
+          autoLoginTriedRef.current !== contact.public_key
+        ) {
+          autoLoginTriedRef.current = contact.public_key;
+          void attemptStoredLogin();
+        }
+      })
+      .catch(() => {
+        // No status or unreachable — fall through to the manual login form.
+      });
+    return () => {
+      cancelled = true;
+    };
+    // Intentionally keyed on the room only: re-running on auth/callback changes
+    // would re-fetch and risk a second auto-login.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contact.public_key]);
+
+  const handleToggleSync = useCallback(
+    async (enabled: boolean) => {
+      setSyncSaving(true);
+      try {
+        let status: RoomPollStatus;
+        if (enabled && !pollStatus?.has_stored_credential) {
+          // Polling needs a stored credential; save the one from this session.
+          // sessionCredential === "" is a valid guest credential, so test for
+          // null explicitly rather than falsiness.
+          if (sessionCredential === null) {
+            toast.error('Log in to this room first so its credential can be saved for syncing.');
+            return;
+          }
+          status = await api.setRoomPoll(contact.public_key, {
+            enabled: true,
+            credential_action: 'set',
+            credential: sessionCredential,
+          });
+        } else {
+          status = await api.setRoomPoll(contact.public_key, { enabled });
+        }
+        setPollStatus(status);
+      } catch (err) {
+        toast.error('Failed to update room sync', {
+          description: err instanceof Error ? err.message : undefined,
+        });
+      } finally {
+        setSyncSaving(false);
+      }
+    },
+    [contact.public_key, pollStatus, sessionCredential]
+  );
+
+  const handleIntervalChange = useCallback(
+    async (minutes: number) => {
+      setSyncSaving(true);
+      try {
+        const status = await api.setRoomPoll(contact.public_key, {
+          interval_seconds: Math.max(5, minutes) * 60,
+        });
+        setPollStatus(status);
+      } catch (err) {
+        toast.error('Failed to update sync interval', {
+          description: err instanceof Error ? err.message : undefined,
+        });
+      } finally {
+        setSyncSaving(false);
+      }
+    },
+    [contact.public_key]
+  );
+
+  const handleForgetCredential = useCallback(async () => {
+    setSyncSaving(true);
+    try {
+      const status = await api.deleteRoomPoll(contact.public_key);
+      setPollStatus(status);
+      toast.success('Saved room credential removed.');
+    } catch (err) {
+      toast.error('Failed to remove saved credential', {
+        description: err instanceof Error ? err.message : undefined,
+      });
+    } finally {
+      setSyncSaving(false);
+    }
+  }, [contact.public_key]);
 
   const handleConsoleCommand = useCallback(
     async (command: string) => {
@@ -294,6 +431,17 @@ export function RoomServerPanel({ contact, onAuthenticatedChange }: RoomServerPa
     lastLoginAttempt !== null && lastLoginAttempt.outcome !== 'confirmed';
 
   if (!authenticated) {
+    if (autoOpening) {
+      return (
+        <div className="flex-1 overflow-y-auto p-4">
+          <div className="mx-auto flex w-full max-w-sm flex-col items-center gap-3 py-8 text-center">
+            <p className="text-sm text-muted-foreground">
+              Connecting to {panelTitle} with the saved credential…
+            </p>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="flex-1 overflow-y-auto p-4">
         <div className="mx-auto flex w-full max-w-sm flex-col gap-4">
@@ -375,6 +523,62 @@ export function RoomServerPanel({ contact, onAuthenticatedChange }: RoomServerPa
           >
             {advancedOpen ? 'Hide Tools' : 'Show Tools'}
           </Button>
+        </div>
+        <div className="rounded-md border border-border bg-background/40 px-3 py-2.5">
+          <label className="flex cursor-pointer items-center gap-2.5">
+            <input
+              type="checkbox"
+              checked={pollStatus?.poll_enabled ?? false}
+              disabled={syncSaving}
+              onChange={(e) => void handleToggleSync(e.target.checked)}
+              className="h-4 w-4 rounded border-input accent-primary"
+            />
+            <span className="text-[0.8125rem] font-medium">Keep this room synced</span>
+          </label>
+          <p className="mt-1 text-[0.8125rem] text-muted-foreground">
+            Periodically logs in with the saved credential to pull new room messages while
+            you&apos;re away. The room credential is stored on this server.
+          </p>
+          {pollStatus?.poll_enabled && (
+            <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+              <label className="flex items-center gap-1.5">
+                Every
+                <input
+                  key={pollStatus.interval_seconds}
+                  type="number"
+                  min={5}
+                  defaultValue={Math.round((pollStatus.interval_seconds ?? 1200) / 60)}
+                  disabled={syncSaving}
+                  onBlur={(e) => void handleIntervalChange(Number(e.target.value))}
+                  className="h-7 w-16 rounded-md border border-input bg-transparent px-2 text-xs"
+                  aria-label="Sync interval in minutes"
+                />
+                min
+              </label>
+              {pollStatus.last_poll_at ? (
+                <span>
+                  · last synced{' '}
+                  {new Date(pollStatus.last_poll_at * 1000).toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                </span>
+              ) : null}
+              {pollStatus.last_error ? (
+                <span className="text-destructive">· {pollStatus.last_error}</span>
+              ) : null}
+            </div>
+          )}
+          {pollStatus?.has_stored_credential ? (
+            <button
+              type="button"
+              onClick={() => void handleForgetCredential()}
+              disabled={syncSaving}
+              className="mt-2 text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+            >
+              Forget saved credential
+            </button>
+          ) : null}
         </div>
       </div>
       <Sheet open={advancedOpen} onOpenChange={setAdvancedOpen}>
