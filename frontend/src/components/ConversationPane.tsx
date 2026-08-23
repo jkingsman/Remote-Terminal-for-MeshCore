@@ -346,7 +346,17 @@ export function ConversationPane({
         <ContactResolutionBanner variant="unknown-full-key" />
       )}
       {activeContactIsRoom && activeContact && (
-        <RoomServerPanel contact={activeContact} onAuthenticatedChange={setRoomAuthenticated} />
+        // Key by conversation so switching rooms remounts the panel and restores
+        // that room's own state (via its cache) instead of leaking the previous
+        // room's login/failed-login view. The key is namespaced (`room-`) so it
+        // does NOT collide with the sibling MessageList's key={activeConversation.id}
+        // — an authenticated room renders both, and duplicate sibling keys break
+        // React reconciliation.
+        <RoomServerPanel
+          key={`room-${activeConversation.id}`}
+          contact={activeContact}
+          onAuthenticatedChange={setRoomAuthenticated}
+        />
       )}
       {showRoomChat && <div data-toast-anchor="conversation" aria-hidden="true" />}
       {showRoomChat && (
