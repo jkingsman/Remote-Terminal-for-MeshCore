@@ -238,6 +238,12 @@ export const api = {
     }),
 
   // Messages
+  /** Estimate wire size after MCMP v3 encoding */
+  estimateMessageSize: (payload: { text: string; channel_key?: string; include_signature?: boolean }) =>
+    fetchJson<{ size: number }>('/messages/estimate-size', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   getMessages: (
     params?: {
       limit?: number;
