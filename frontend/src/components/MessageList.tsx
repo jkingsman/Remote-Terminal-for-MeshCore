@@ -343,9 +343,10 @@ function McmpLockIcon({ status }: { status: 'unsigned' | 'valid' }) {
       strokeLinecap="round"
       strokeLinejoin="round"
       className={cn('ml-1.5 inline-block h-3 w-3 align-middle', colorClass)}
+      role="img"
       aria-label={status === 'valid' ? 'Valid MCMP signature' : 'Unsigned MCMP message'}
-      title={status === 'valid' ? 'Valid MCMP signature' : 'Unsigned MCMP message'}
     >
+      <title>{status === 'valid' ? 'Valid MCMP signature' : 'Unsigned MCMP message'}</title>
       <rect x="4" y="11" width="16" height="10" rx="2" />
       <path d="M8 11V7a4 4 0 0 1 8 0v4" />
     </svg>
