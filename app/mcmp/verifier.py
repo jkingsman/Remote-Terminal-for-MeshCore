@@ -17,6 +17,10 @@ class McmpVerificationResult:
     name_collision: bool = False
 
 
+def _normalize_name(name: str) -> str:
+    return name.strip()
+
+
 async def verify_channel_message(
     *,
     decoded_msg,
@@ -25,10 +29,11 @@ async def verify_channel_message(
 ) -> McmpVerificationResult:
     """Verify an MCMP v3 channel message signature.
 
-    The claimed identity is `sender_name` (from the outer GROUP_TEXT envelope).
-    Candidate keys are the contacts bearing that exact name. Verification
-    succeeds if any candidate's public key verifies the signature against the
-    canonical signing bytes.
+    The claimed identity is `sender_name` from the outer GROUP_TEXT envelope.
+    If the MCMP container also embeds a sender name, it must match that
+    displayed name. Candidate keys are the contacts bearing the sender name.
+    Verification succeeds only if a candidate's public key verifies the
+    signature against the canonical signing bytes.
     """
     signature = decoded_msg.signature
     if signature is None:
@@ -36,6 +41,11 @@ async def verify_channel_message(
 
     if not sender_name:
         return McmpVerificationResult(status="unverifiable")
+
+    # If the MCMP body embeds a sender name, it must match the displayed name.
+    if decoded_msg.sender_name is not None:
+        if _normalize_name(decoded_msg.sender_name) != _normalize_name(sender_name):
+            return McmpVerificationResult(status="invalid")
 
     candidates = await ContactRepository.get_by_name(sender_name)
     if not candidates:
