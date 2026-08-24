@@ -551,7 +551,10 @@ class SendChannelMessageRequest(SendMessageRequest):
 class McmpEstimateRequest(BaseModel):
     """A draft message whose compressed wire size the compose counter needs."""
 
-    text: str = Field(default="")
+    # Bounded: compression is synchronous CPU work on the event loop, and real
+    # messages are a few hundred bytes. The cap keeps a hostile/oversized body
+    # from stalling the server (~1.3 us/char).
+    text: str = Field(default="", max_length=4096)
 
 
 class McmpEstimateResponse(BaseModel):

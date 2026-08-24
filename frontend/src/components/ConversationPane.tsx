@@ -194,9 +194,11 @@ export function ConversationPane({
     return channels.find((candidate) => candidate.key === activeConversation.id) ?? null;
   }, [activeConversation, channels]);
   // Whether the active conversation compresses outbound messages, so the compose
-  // counter can show the compressed wire size instead of the raw length.
+  // counter can show the compressed wire size instead of the raw length. Room
+  // servers are excluded to match the header toggle (which hides for rooms).
   const activeMcmpEnabled =
-    (activeContact?.mcmp_enabled ?? false) || (activeChannel?.mcmp_enabled ?? false);
+    (!activeContactIsRoom && (activeContact?.mcmp_enabled ?? false)) ||
+    (activeChannel?.mcmp_enabled ?? false);
   // Reset the room-auth gate when the conversation changes, but do it during
   // render (guarded by the previous id) rather than in an effect. An effect here
   // races the keyed RoomServerPanel's own onAuthenticatedChange mount report:

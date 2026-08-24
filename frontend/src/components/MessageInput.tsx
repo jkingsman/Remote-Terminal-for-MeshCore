@@ -64,10 +64,11 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
 ) {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
-  // Compressed wire size of the current draft, fetched from the backend (the
-  // MCMP codec is server-side). null until the first estimate resolves, or when
-  // compression is off for this conversation.
-  const [compressedBytes, setCompressedBytes] = useState<number | null>(null);
+  // Compressed wire size fetched from the backend (the MCMP codec is
+  // server-side), tagged with the exact draft it was computed for so a stale
+  // result is never shown for different text. null until the first estimate
+  // resolves, or when compression is off for this conversation.
+  const [compressed, setCompressed] = useState<{ bytes: number; forText: string } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   /** Resize textarea to fit content, clamped between 1 row and ~6 rows. */
@@ -123,7 +124,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
   // effective character capacity grows as compressible text is typed.
   useEffect(() => {
     if (!mcmpEnabled || !limits || text.trim().length === 0) {
-      setCompressedBytes(null);
+      setCompressed(null);
       return;
     }
     let cancelled = false;
@@ -131,10 +132,10 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
       api
         .estimateMcmp(text)
         .then((res) => {
-          if (!cancelled) setCompressedBytes(res.wire_bytes);
+          if (!cancelled) setCompressed({ bytes: res.wire_bytes, forText: text });
         })
         .catch(() => {
-          if (!cancelled) setCompressedBytes(null);
+          if (!cancelled) setCompressed(null);
         });
     }, 150);
     return () => {
@@ -143,11 +144,12 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
     };
   }, [text, mcmpEnabled, limits]);
 
-  // The byte count the counter and limit thresholds use: the compressed size
-  // when available, otherwise the raw length (conservative until the estimate
-  // resolves, and always for uncompressed conversations).
-  const showCompressed = mcmpEnabled && compressedBytes !== null;
-  const effectiveByteLen = showCompressed ? compressedBytes : textByteLen;
+  // The byte count the counter and limit thresholds use: the compressed size,
+  // but only while it matches the current draft (so it can't freeze on a stale
+  // value mid-typing); otherwise the raw length (until the estimate resolves,
+  // and always for uncompressed conversations).
+  const showCompressed = mcmpEnabled && compressed !== null && compressed.forText === text;
+  const effectiveByteLen = showCompressed ? compressed.bytes : textByteLen;
 
   // Determine current limit state
   const { limitState, warningMessage } = useMemo((): {

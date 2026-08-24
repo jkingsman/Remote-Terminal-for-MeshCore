@@ -390,10 +390,15 @@ class _MeshModel:
         return highs
 
 
-# --- base91 (two variants: v2 mesh_compressor, v3 mcmp_app_codec) -------------
+# --- base91 -------------------------------------------------------------------
+#
+# The v2 (mesh_compressor.dart) and v3 (mcmp_app_codec.dart) encoders are
+# byte-for-byte identical, so a single encoder serves both. The two DECODERS are
+# NOT identical -- they diverge on trailing-byte handling -- so both are kept,
+# each matching its own upstream Dart helper.
 
 
-def _b91_encode_v2(data: bytes) -> str:
+def _b91_encode(data: bytes) -> str:
     if not data:
         return ""
     out: list[str] = []
@@ -451,31 +456,6 @@ def _b91_decode_v2(text: str) -> bytes:
             n >>= 8
             n_bits -= 8
     return bytes(out)
-
-
-def _b91_encode_v3(data: bytes) -> str:
-    out: list[str] = []
-    b = 0
-    n = 0
-    for byte in data:
-        b |= byte << n
-        n += 8
-        if n > 13:
-            value = b & 8191
-            if value > 88:
-                b >>= 13
-                n -= 13
-            else:
-                value = b & 16383
-                b >>= 14
-                n -= 14
-            out.append(_BASE91_ALPHABET[value % 91])
-            out.append(_BASE91_ALPHABET[value // 91])
-    if n != 0:
-        out.append(_BASE91_ALPHABET[b % 91])
-        if n > 7 or b > 90:
-            out.append(_BASE91_ALPHABET[b // 91])
-    return "".join(out)
 
 
 def _b91_decode_v3(text: str) -> bytes:
@@ -602,7 +582,14 @@ def _decode_arithmetic(ac_data: bytes, model: _MeshModel, has_escapes: bool) -> 
         if ch == _EOF:
             break
         if ch == _ESC and has_escapes:
-            ch = chr(_decode_codepoint(decoder))
+            cp = _decode_codepoint(decoder)
+            # A valid escape only ever encodes a real Unicode scalar. Anything
+            # outside that range means corrupt/false-positive input; signal it
+            # rather than letting chr() raise a raw ValueError (the fallback
+            # sub-model can otherwise yield values up to 0x1FFFFF).
+            if cp > 0x10FFFF or 0xD800 <= cp <= 0xDFFF:
+                raise MeshCompressorError(f"Invalid decoded codepoint: {cp:#x}")
+            ch = chr(cp)
         out.append(ch)
         context = _append_context(context, ch, model.order)
 
@@ -671,7 +658,7 @@ class MeshCompressor:
         marker = (
             _TEXT_COMPRESSED_ESC_MARKER if (flags & 0x01) == 1 else _TEXT_COMPRESSED_NO_ESC_MARKER
         )
-        compressed_text = f"{marker}{_b91_encode_v2(payload)}"
+        compressed_text = f"{marker}{_b91_encode(payload)}"
         if len(compressed_text) >= len(text) and text[0] not in _TEXT_MARKERS:
             return text
         return compressed_text
@@ -687,7 +674,11 @@ class MeshCompressor:
         elif head == _TEXT_COMPRESSED_ESC_MARKER:
             has_escapes = True
         else:
-            return text
+            # Not a valid MCMP v2 marker: this is not a compressed payload (e.g. a
+            # literal message that happens to start with "mcmp2:"). Signal it so
+            # the caller keeps the original text instead of storing the stripped
+            # remainder.
+            raise MeshCompressorError(f"Unknown MCMP v2 marker: {head!r}")
         payload = _b91_decode_v2(text[1:])
         return _decode_arithmetic(payload, model, has_escapes)
 
@@ -705,18 +696,26 @@ class MeshCompressor:
         return ac_result
 
     def decompress_bytes(self, data: bytes) -> str:
-        """Lenient decode of the binary form (no re-encode verification).
+        """Decode the binary form (no re-encode verification).
 
         Dart re-compresses and byte-compares to validate; we skip that so a
         message encoded on a peer with a slightly different libm still decodes
         rather than being rejected. For valid data the result is identical.
+
+        Raises ``MeshCompressorError`` on corrupt input (bad UTF-8 in the
+        plaintext fallback, or an escape that decodes to a non-scalar
+        codepoint). The ingest entry points (:func:`try_decode_incoming`,
+        :func:`try_decode_v3_text`) catch this and leave the message undecoded.
         """
         model = self._require_model()
         if not data:
             return ""
         first = data[0]
         if first > 0x01:
-            return data.decode("utf-8")
+            try:
+                return data.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise MeshCompressorError("invalid UTF-8 in plaintext fallback") from exc
         has_escapes = (first & 0x01) == 1
         if len(data) == 1:
             return ""
@@ -914,7 +913,7 @@ def encode_v3_text(
             reply_author_name=reply_author_name,
             reply_timestamp=reply_timestamp,
         )
-        return f"{_PREFIX_V3}{_b91_encode_v3(body)}"
+        return f"{_PREFIX_V3}{_b91_encode(body)}"
     except Exception:
         return text
 
@@ -978,16 +977,6 @@ def encode_outbound(text: str) -> str:
         return text
 
 
-def outbound_wire_bytes(text: str) -> int:
-    """UTF-8 byte length ``text`` would occupy on the wire once compressed.
-
-    Drives the live compose counter: the frontend shows this against the packet
-    budget so the effective character capacity grows as compressible text is
-    typed. Falls back to the raw byte length if the model is unavailable.
-    """
-    return len(encode_outbound(text).encode("utf-8"))
-
-
 class DecodedIncoming:
     """Result of :func:`try_decode_incoming`."""
 
@@ -1002,11 +991,18 @@ class DecodedIncoming:
 def try_decode_incoming(text: str) -> DecodedIncoming | None:
     """Decode an incoming message body if it is MCMP (v3 first, then v2).
 
-    Returns ``None`` for plain text (or anything not recognizably MCMP), so the
-    caller can store the body unchanged. Never raises: if the model cannot be
-    loaded, or the payload is malformed, the message is left undecoded (and
-    displays as its raw ``mcmp2:``/``mcmp3:`` string) rather than breaking
-    ingest.
+    Returns ``None`` for plain text, for a body that only looks like MCMP (an
+    unknown marker, invalid basE91, an out-of-range escape codepoint, or a
+    malformed v3 container), and for a model that cannot be loaded — in every
+    such case the caller stores the body unchanged (it displays as its raw
+    ``mcmp2:``/``mcmp3:`` string). Never raises.
+
+    Caveat: decoding is lenient — it does not re-encode-verify the way the Dart
+    reference does (we dropped that to tolerate cross-libm float differences).
+    A corrupt-but-well-formed bitstream that slips past the LoRa CRC and the
+    radio's per-packet HMAC could therefore decode to plausible-but-wrong text
+    rather than being rejected. In practice such corruption is caught upstream;
+    the trade-off buys robustness against benign encoder/decoder float drift.
     """
     if not text:
         return None
@@ -1029,3 +1025,23 @@ def try_decode_incoming(text: str) -> DecodedIncoming | None:
         return DecodedIncoming(text=decoded, version="v2", v3=None)
 
     return None
+
+
+def decode_incoming_body(text: str) -> str:
+    """Decode an inbound MCMP body to plaintext for storage, else return as-is.
+
+    The single decode entry point for every message ingest route (channel and
+    DM, raw-RF and get_msg fallback). Using it everywhere keeps decoding — and
+    therefore content dedup — consistent across routes. Never raises; logs at
+    debug when it decodes.
+    """
+    decoded = try_decode_incoming(text)
+    if decoded is None:
+        return text
+    logger.debug(
+        "Decoded MCMP %s message body (%d -> %d chars)",
+        decoded.version,
+        len(text),
+        len(decoded.text),
+    )
+    return decoded.text

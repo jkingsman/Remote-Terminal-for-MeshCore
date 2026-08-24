@@ -4,7 +4,7 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from app.compression import try_decode_incoming
+from app.compression import decode_incoming_body
 from app.models import CONTACT_TYPE_REPEATER, CONTACT_TYPE_ROOM, Contact, ContactUpsert, Message
 from app.repository import (
     AmbiguousPublicKeyPrefixError,
@@ -162,19 +162,11 @@ async def _store_direct_message(
     contact_repository=ContactRepository,
     raw_packet_repository=RawPacketRepository,
 ) -> Message | None:
-    # MCMP-compressed bodies ride as ordinary text behind an ``mcmp2:``/``mcmp3:``
+    # MCMP-compressed bodies ride as ordinary text behind an mcmp2:/mcmp3:
     # prefix; decode to plaintext before storage/dedup so the DB, search and bots
     # see the real message. This is the shared point for every DM ingest route,
-    # keeping content dedup consistent. Non-MCMP text is returned unchanged.
-    decoded = try_decode_incoming(text)
-    if decoded is not None:
-        logger.debug(
-            "Decoded MCMP %s direct message (%d -> %d chars)",
-            decoded.version,
-            len(text),
-            len(decoded.text),
-        )
-        text = decoded.text
+    # keeping content dedup consistent (non-MCMP text is returned unchanged).
+    text = decode_incoming_body(text)
 
     async def store() -> Message | None:
         if linked_packet_dedup and packet_id is not None:

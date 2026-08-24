@@ -3,7 +3,7 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from app.compression import try_decode_incoming
+from app.compression import decode_incoming_body
 from app.models import Message, MessagePath
 from app.repository import ContactRepository, MessageRepository, RawPacketRepository
 
@@ -286,20 +286,10 @@ async def create_message_from_decrypted(
 ) -> int | None:
     """Store and broadcast a decrypted channel message."""
     received = received_at or int(time.time())
-    # MCMP-compressed bodies ride as ordinary text behind an ``mcmp2:``/``mcmp3:``
-    # prefix; decode to plaintext before it is stored so the DB, search and bots
-    # see the real message. Decoding happens here (the shared implementation for
-    # every channel ingest route) so content dedup stays consistent. Non-MCMP
-    # text is returned unchanged.
-    decoded = try_decode_incoming(message_text)
-    if decoded is not None:
-        logger.debug(
-            "Decoded MCMP %s channel message (%d -> %d chars)",
-            decoded.version,
-            len(message_text),
-            len(decoded.text),
-        )
-        message_text = decoded.text
+    # MCMP-compressed bodies ride as ordinary text behind an mcmp2:/mcmp3:
+    # prefix; decode to plaintext before storage/dedup so the DB, search and bots
+    # see the real message (non-MCMP text is returned unchanged).
+    message_text = decode_incoming_body(message_text)
     text = f"{sender}: {message_text}" if sender else message_text
     channel_key_normalized = channel_key.upper()
 
@@ -464,6 +454,10 @@ async def create_fallback_channel_message(
 ) -> Message | None:
     """Store and broadcast a CHANNEL_MSG_RECV fallback channel message."""
     conversation_key_normalized = conversation_key.upper()
+    # Decode MCMP here too: this get_msg() drain route must decode at parity with
+    # the raw-RF route (create_message_from_decrypted) or the same message
+    # arriving via both paths would store two rows (dedup keys on text).
+    message_text = decode_incoming_body(message_text)
     text = f"{sender_name}: {message_text}" if sender_name else message_text
 
     resolved_sender_key: str | None = None

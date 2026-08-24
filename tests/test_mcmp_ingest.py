@@ -87,6 +87,71 @@ class TestChannelIngestDecode:
         assert stored is not None
         assert stored.text == "Carol: just a normal message"
 
+    @pytest.mark.asyncio
+    async def test_fallback_channel_route_decodes(self, test_db, captured_broadcasts, compressor):
+        # The get_msg() drain route must decode at parity with the raw-RF route,
+        # or the same message arriving via both paths stores two rows.
+        from app.services.messages import create_fallback_channel_message
+
+        _, mock_broadcast = captured_broadcasts
+        wire = compressor.encode_if_smaller(LONG_TEXT)
+        assert wire.startswith("mcmp2:")
+
+        message = await create_fallback_channel_message(
+            conversation_key=CHANNEL_KEY,
+            message_text=wire,
+            sender_timestamp=SENDER_TIMESTAMP,
+            received_at=SENDER_TIMESTAMP,
+            path=None,
+            path_len=None,
+            txt_type=0,
+            sender_name="Dave",
+            channel_name="#general",
+            broadcast_fn=mock_broadcast,
+        )
+        assert message is not None
+        assert message.text == f"Dave: {LONG_TEXT}"
+
+    @pytest.mark.asyncio
+    async def test_both_channel_routes_dedup_to_one_row(
+        self, test_db, captured_broadcasts, compressor
+    ):
+        # A compressed message arriving via BOTH the raw-RF and get_msg routes
+        # must collapse onto a single stored row (both decode to the same text).
+        from app.packet_processor import create_message_from_decrypted
+        from app.services.messages import create_fallback_channel_message
+
+        _, mock_broadcast = captured_broadcasts
+        wire = compressor.encode_if_smaller(LONG_TEXT)
+        packet_id, _ = await RawPacketRepository.create(b"dedup", SENDER_TIMESTAMP)
+
+        first = await create_message_from_decrypted(
+            packet_id=packet_id,
+            channel_key=CHANNEL_KEY,
+            sender="Erin",
+            message_text=wire,
+            timestamp=SENDER_TIMESTAMP,
+        )
+        assert first is not None
+        second = await create_fallback_channel_message(
+            conversation_key=CHANNEL_KEY,
+            message_text=wire,
+            sender_timestamp=SENDER_TIMESTAMP,
+            received_at=SENDER_TIMESTAMP,
+            path=None,
+            path_len=None,
+            txt_type=0,
+            sender_name="Erin",
+            channel_name="#general",
+            broadcast_fn=mock_broadcast,
+        )
+        assert second is None  # deduped against the first row
+        rows = await MessageRepository.get_all(
+            msg_type="CHAN", conversation_key=CHANNEL_KEY.upper(), limit=10
+        )
+        matching = [r for r in rows if r.text == f"Erin: {LONG_TEXT}"]
+        assert len(matching) == 1
+
 
 class TestDirectMessageIngestDecode:
     @pytest.mark.asyncio

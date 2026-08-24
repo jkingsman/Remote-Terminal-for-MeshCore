@@ -113,9 +113,9 @@ def test_v3_signed_message_decodes_without_verification(compressor: MeshCompress
     body += (777).to_bytes(4, "little")
     body += bytes(range(64))
     body += compressed
-    from app.compression.mcmp import _b91_encode_v3
+    from app.compression.mcmp import _b91_encode
 
-    wire = "mcmp3:" + _b91_encode_v3(bytes(body))
+    wire = "mcmp3:" + _b91_encode(bytes(body))
     decoded = try_decode_v3_text(compressor, wire)
     assert decoded is not None
     assert decoded.text == text
@@ -146,8 +146,17 @@ def test_try_decode_incoming_dispatch(compressor: MeshCompressor):
 
 
 def test_malformed_payload_returns_none(compressor: MeshCompressor):
-    # Garbage after a valid prefix must not raise.
-    assert compressor.try_decode_prefixed("mcmp2:not valid base91 ~~~") is None or True
-    assert try_decode_incoming("mcmp3:@@@bogus@@@") is None or True
+    # Garbage after a valid prefix must not raise, and must return None so the
+    # caller keeps the raw body rather than storing a mangled decode.
+    assert compressor.try_decode_prefixed("mcmp2:not valid base91 ~~~") is None
+    assert try_decode_incoming("mcmp3:@@@bogus@@@") is None
     # A bare prefix with no payload is not a decodable message.
     assert try_decode_incoming("mcmp2:") is None
+
+
+def test_literal_prefixed_text_is_not_false_decoded(compressor: MeshCompressor):
+    # A plain message that merely starts with the prefix (no valid marker) must
+    # NOT be treated as compressed — otherwise it would be stored with the prefix
+    # stripped ("mcmp2:hello" -> "hello").
+    assert try_decode_incoming("mcmp2:hello") is None
+    assert compressor.try_decode_prefixed("mcmp2:hello") is None

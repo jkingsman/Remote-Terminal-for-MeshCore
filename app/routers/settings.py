@@ -348,18 +348,21 @@ async def set_mcmp_enabled(request: McmpEnabledRequest) -> McmpEnabledResponse:
     When on, outbound messages to that conversation are MCMP-compressed before
     sending. Off by default: the receiver must understand MCMP to read it.
     """
+    from app.websocket import broadcast_event
+
     if request.type == "contact":
         found = await ContactRepository.set_mcmp_enabled(request.id, request.enabled)
         if not found:
             raise HTTPException(status_code=404, detail="Contact not found")
+        refreshed_contact = await ContactRepository.get_by_key(request.id)
+        if refreshed_contact:
+            broadcast_event("contact", refreshed_contact.model_dump())
     else:
         found = await ChannelRepository.set_mcmp_enabled(request.id, request.enabled)
         if not found:
             raise HTTPException(status_code=404, detail="Channel not found")
         refreshed = await ChannelRepository.get_by_key(request.id)
         if refreshed:
-            from app.websocket import broadcast_event
-
             broadcast_event("channel", refreshed.model_dump())
 
     logger.info(
