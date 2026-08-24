@@ -182,6 +182,10 @@ export function ConversationPane({
     if (!activeConversation || activeConversation.type !== 'contact') return null;
     return contacts.find((candidate) => candidate.public_key === activeConversation.id) ?? null;
   }, [activeConversation, contacts]);
+  const activeChannel = useMemo(() => {
+    if (!activeConversation || activeConversation.type !== 'channel') return null;
+    return channels.find((candidate) => candidate.key === activeConversation.id) ?? null;
+  }, [activeConversation, channels]);
   const activeContactIsRoom = activeContact?.type === CONTACT_TYPE_ROOM;
   useEffect(() => {
     setRoomAuthenticated(false);
@@ -193,6 +197,20 @@ export function ConversationPane({
     activeContact !== null &&
     !isPrefixOnlyActiveContact &&
     isUnknownFullKeyContact(activeContact.public_key, activeContact.last_advert);
+
+  const mcmpEnabled = useMemo(() => {
+    if (activeConversation?.type === 'channel') return activeChannel?.mcmp_enabled ?? false;
+    if (activeConversation?.type === 'contact') return activeContact?.mcmp_enabled ?? false;
+    return false;
+  }, [activeConversation?.type, activeChannel, activeContact]);
+
+  const mcmpSignEnabled = activeConversation?.type === 'channel'
+    ? (activeChannel?.mcmp_sign_enabled ?? false)
+    : false;
+
+  const channelKeyForEstimate = activeConversation?.type === 'channel'
+    ? activeConversation.id
+    : undefined;
 
   if (!activeConversation) {
     return (
@@ -364,6 +382,9 @@ export function ConversationPane({
           disabled={!health?.radio_connected}
           conversationType={activeConversation.type}
           senderName={config?.name}
+          channelKey={channelKeyForEstimate}
+          mcmpEnabled={mcmpEnabled}
+          mcmpSignEnabled={mcmpSignEnabled}
           placeholder={
             !health?.radio_connected
               ? 'Radio not connected'
