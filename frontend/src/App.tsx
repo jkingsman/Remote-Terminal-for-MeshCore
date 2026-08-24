@@ -243,27 +243,29 @@ export function App() {
   );
 
   const handleSetMcmpEnabled = useCallback(
-    async (type: 'channel' | 'contact', id: string, enabled: boolean) => {
-      const apply = (value: boolean) => {
+    async (type: 'channel' | 'contact', id: string, enabled: boolean, version: number) => {
+      const apply = (nextEnabled: boolean, nextVersion: number) => {
+        const patch = { mcmp_enabled: nextEnabled, mcmp_version: nextVersion };
         if (type === 'contact') {
-          setContacts((prev) =>
-            prev.map((c) => (c.public_key === id ? { ...c, mcmp_enabled: value } : c))
-          );
+          setContacts((prev) => prev.map((c) => (c.public_key === id ? { ...c, ...patch } : c)));
         } else {
-          setChannels((prev) =>
-            prev.map((c) => (c.key === id ? { ...c, mcmp_enabled: value } : c))
-          );
+          setChannels((prev) => prev.map((c) => (c.key === id ? { ...c, ...patch } : c)));
         }
       };
-      apply(enabled); // optimistic
+      // Capture prior state so a failure reverts to exactly what it was.
+      const prior =
+        type === 'contact'
+          ? contacts.find((c) => c.public_key === id)
+          : channels.find((c) => c.key === id);
+      apply(enabled, version); // optimistic
       try {
-        await api.setMcmpEnabled(type, id, enabled);
+        await api.setMcmpEnabled(type, id, enabled, version);
       } catch {
-        apply(!enabled); // revert
+        apply(prior?.mcmp_enabled ?? false, prior?.mcmp_version ?? 2); // revert
         toast.error('Failed to update compression');
       }
     },
-    [setContacts, setChannels]
+    [contacts, channels, setContacts, setChannels]
   );
 
   // useConversationRouter is called second — it receives channels/contacts as inputs

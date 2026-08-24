@@ -113,6 +113,7 @@ class Contact(BaseModel):
     on_radio: bool = False
     favorite: bool = False
     mcmp_enabled: bool = False  # Opt-in: MCMP-compress outbound messages to this contact
+    mcmp_version: int = 2  # MCMP transport when enabled: 2 = mcmp2:, 3 = mcmp3: container
     last_contacted: int | None = None  # Last time we sent/received a message
     last_read_at: int | None = None  # Server-side read state tracking
     first_seen: int | None = None
@@ -359,6 +360,7 @@ class Channel(BaseModel):
     favorite: bool = False
     muted: bool = False
     mcmp_enabled: bool = False  # Opt-in: MCMP-compress outbound messages to this channel
+    mcmp_version: int = 2  # MCMP transport when enabled: 2 = mcmp2:, 3 = mcmp3: container
 
 
 class ChannelMessageCounts(BaseModel):
@@ -555,6 +557,7 @@ class McmpEstimateRequest(BaseModel):
     # messages are a few hundred bytes. The cap keeps a hostile/oversized body
     # from stalling the server (~1.3 us/char).
     text: str = Field(default="", max_length=4096)
+    version: int = Field(default=2, ge=2, le=3, description="MCMP transport: 2 or 3")
 
 
 class McmpEstimateResponse(BaseModel):
@@ -565,17 +568,21 @@ class McmpEstimateResponse(BaseModel):
 
 
 class McmpEnabledRequest(BaseModel):
-    """Enable/disable MCMP compression for a conversation (contact or channel)."""
+    """Configure MCMP compression for a conversation (contact or channel)."""
 
     type: Literal["contact", "channel"]
     id: str
     enabled: bool
+    # Optional so the toggle can be flipped without touching the version; when
+    # provided, sets the transport (2 = mcmp2:, 3 = mcmp3: container).
+    version: int | None = Field(default=None, ge=2, le=3)
 
 
 class McmpEnabledResponse(BaseModel):
     type: Literal["contact", "channel"]
     id: str
     enabled: bool
+    version: int
 
 
 class RepeaterLoginRequest(BaseModel):

@@ -211,7 +211,7 @@ describe('MessageInput', () => {
 
       // Rendered in both desktop and mobile counter variants.
       await waitFor(() => expect(screen.getAllByText(/40\/156/).length).toBeGreaterThan(0));
-      expect(mockApi.estimateMcmp).toHaveBeenCalledWith(text);
+      expect(mockApi.estimateMcmp).toHaveBeenCalledWith(text, 2);
       // The raw over-budget count is not shown.
       expect(screen.queryAllByText(/200\/156/).length).toBe(0);
     });
@@ -222,6 +222,31 @@ describe('MessageInput', () => {
       // Raw byte count is shown; no estimate call.
       expect(screen.getByText(/11\/156/)).toBeTruthy();
       expect(mockApi.estimateMcmp).not.toHaveBeenCalled();
+    });
+
+    it('does not flash "too long" while the compressed estimate is pending', () => {
+      // Estimate never resolves within the test: while pending, a long-but-
+      // compressible draft must NOT show the raw over-budget error.
+      mockApi.estimateMcmp.mockReturnValue(new Promise(() => {}));
+      renderInput({ conversationType: 'contact', mcmpEnabled: true });
+
+      fireEvent.change(getInput(), { target: { value: 'x'.repeat(200) } });
+
+      // Without MCMP this 200-byte draft would be "likely truncated by radio";
+      // with MCMP on and the estimate pending, we stay neutral.
+      expect(screen.queryAllByText(/likely truncated by radio/).length).toBe(0);
+      expect(screen.queryAllByText(/may impact multi-repeater/).length).toBe(0);
+    });
+
+    it('does show "too long" once the compressed size itself exceeds the budget', async () => {
+      // A genuinely over-budget compressed size must still warn.
+      mockApi.estimateMcmp.mockResolvedValue({ wire_bytes: 200, compressed: true });
+      renderInput({ conversationType: 'contact', mcmpEnabled: true });
+
+      fireEvent.change(getInput(), { target: { value: 'x'.repeat(400) } });
+      await waitFor(() =>
+        expect(screen.getAllByText(/likely truncated by radio/).length).toBeGreaterThan(0)
+      );
     });
   });
 

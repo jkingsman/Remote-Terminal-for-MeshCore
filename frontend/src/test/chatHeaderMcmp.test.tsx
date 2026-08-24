@@ -81,7 +81,7 @@ describe('ChatHeader conversation-features modal', () => {
     fireEvent.click(screen.getByRole('button', FEATURES_BUTTON));
 
     fireEvent.click(screen.getByRole('switch', { name: 'Enable MCMP compression' }));
-    expect(onSetMcmpEnabled).toHaveBeenCalledWith('channel', key, true);
+    expect(onSetMcmpEnabled).toHaveBeenCalledWith('channel', key, true, 2);
   });
 
   it('shows the toggle on for a channel that has MCMP enabled, and disables it', () => {
@@ -103,7 +103,30 @@ describe('ChatHeader conversation-features modal', () => {
     const toggle = screen.getByRole('switch', { name: 'Disable MCMP compression' });
     expect(toggle).toHaveAttribute('aria-checked', 'true');
     fireEvent.click(toggle);
-    expect(onSetMcmpEnabled).toHaveBeenCalledWith('channel', key, false);
+    expect(onSetMcmpEnabled).toHaveBeenCalledWith('channel', key, false, 2);
+  });
+
+  it('selects the MCMP version from the modal', () => {
+    const key = 'EE'.repeat(16);
+    const channel = { ...makeChannel(key, '#general', true), mcmp_version: 2 };
+    const conversation: Conversation = { type: 'channel', id: key, name: '#general' };
+    const onSetMcmpEnabled = vi.fn();
+
+    render(
+      <ChatHeader
+        {...baseProps}
+        conversation={conversation}
+        channels={[channel]}
+        onSetMcmpEnabled={onSetMcmpEnabled}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', FEATURES_BUTTON));
+    // v2 is selected; choosing v3 keeps enabled=true and sets version=3.
+    const v3 = screen.getByRole('radio', { name: 'MCMP v3' });
+    expect(v3).toHaveAttribute('aria-checked', 'false');
+    fireEvent.click(v3);
+    expect(onSetMcmpEnabled).toHaveBeenCalledWith('channel', key, true, 3);
   });
 
   it('opens the modal for a regular contact', () => {
@@ -123,7 +146,7 @@ describe('ChatHeader conversation-features modal', () => {
 
     fireEvent.click(screen.getByRole('button', FEATURES_BUTTON));
     fireEvent.click(screen.getByRole('switch', { name: 'Enable MCMP compression' }));
-    expect(onSetMcmpEnabled).toHaveBeenCalledWith('contact', key, true);
+    expect(onSetMcmpEnabled).toHaveBeenCalledWith('contact', key, true, 2);
   });
 
   it('does not render the features button without an onSetMcmpEnabled handler', () => {

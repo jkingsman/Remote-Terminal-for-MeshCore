@@ -37,7 +37,9 @@ async def estimate_mcmp(request: McmpEstimateRequest) -> McmpEstimateResponse:
     character capacity grows as compressible text is typed. Pure computation --
     no radio involved.
     """
-    encoded = encode_outbound(request.text)
+    # Timestamp only affects v3 (fixed 4 bytes), so a placeholder is fine for the
+    # size estimate.
+    encoded = encode_outbound(request.text, version=request.version, timestamp=0)
     return McmpEstimateResponse(
         wire_bytes=len(encoded.encode("utf-8")),
         compressed=encoded != request.text,

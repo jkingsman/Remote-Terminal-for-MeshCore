@@ -49,6 +49,8 @@ interface MessageInputProps {
   /** When the conversation compresses outbound messages (MCMP), the counter
    *  reflects the compressed wire size instead of the raw byte length. */
   mcmpEnabled?: boolean;
+  /** MCMP transport version (2 or 3) the estimate should size for. */
+  mcmpVersion?: number;
 }
 
 type LimitState = 'normal' | 'warning' | 'danger' | 'error';
@@ -59,7 +61,7 @@ export interface MessageInputHandle {
 }
 
 export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(function MessageInput(
-  { onSend, disabled, placeholder, conversationType, senderName, mcmpEnabled },
+  { onSend, disabled, placeholder, conversationType, senderName, mcmpEnabled, mcmpVersion },
   ref
 ) {
   const [text, setText] = useState('');
@@ -130,7 +132,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
     let cancelled = false;
     const handle = setTimeout(() => {
       api
-        .estimateMcmp(text)
+        .estimateMcmp(text, mcmpVersion ?? 2)
         .then((res) => {
           if (!cancelled) setCompressed({ bytes: res.wire_bytes, forText: text });
         })
@@ -142,14 +144,23 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
       cancelled = true;
       clearTimeout(handle);
     };
-  }, [text, mcmpEnabled, limits]);
+  }, [text, mcmpEnabled, mcmpVersion, limits]);
 
-  // The byte count the counter and limit thresholds use: the compressed size,
-  // but only while it matches the current draft (so it can't freeze on a stale
-  // value mid-typing); otherwise the raw length (until the estimate resolves,
-  // and always for uncompressed conversations).
-  const showCompressed = mcmpEnabled && compressed !== null && compressed.forText === text;
-  const effectiveByteLen = showCompressed ? compressed.bytes : textByteLen;
+  // The byte count the counter shows: the compressed size when we have one (the
+  // exact one for this draft, or the last one while a fresh estimate is in
+  // flight), otherwise the raw length (and always for uncompressed
+  // conversations).
+  const showCompressed = mcmpEnabled && compressed !== null;
+  const effectiveByteLen = compressed !== null ? compressed.bytes : textByteLen;
+  // True while MCMP is on but the compressed size for the *current* text hasn't
+  // resolved yet (the estimate is debounced). We must not judge the draft "too
+  // long" from the raw length during this window — that caused a red flash on
+  // long-but-compressible messages before the estimate came back.
+  const estimatePending =
+    mcmpEnabled &&
+    !!limits &&
+    text.trim().length > 0 &&
+    !(compressed !== null && compressed.forText === text);
 
   // Determine current limit state
   const { limitState, warningMessage } = useMemo((): {
@@ -157,6 +168,9 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
     warningMessage: string | null;
   } => {
     if (!limits) return { limitState: 'normal', warningMessage: null };
+    // Stay neutral until the compressed size is known — don't alarm on the raw
+    // length while compression is being computed.
+    if (estimatePending) return { limitState: 'normal', warningMessage: null };
 
     if (effectiveByteLen >= limits.hardLimit) {
       return { limitState: 'error', warningMessage: 'likely truncated by radio' };
@@ -168,7 +182,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
       return { limitState: 'warning', warningMessage: 'may impact multi-repeater hop delivery' };
     }
     return { limitState: 'normal', warningMessage: null };
-  }, [effectiveByteLen, limits]);
+  }, [effectiveByteLen, limits, estimatePending]);
 
   const remaining = limits ? limits.hardLimit - effectiveByteLen : 0;
 

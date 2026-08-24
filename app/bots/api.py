@@ -36,6 +36,64 @@ _UNSET = object()
 # the mailbox bot has always used).
 DEFAULT_SPLIT_BYTES = 155
 
+# Worst-case numbering prefix reserved when splitting compressed replies. The
+# real "(i/n) " prefix has <= this many digits, so its compressed form is never
+# larger, keeping each numbered part within budget.
+_NUM_RESERVE_PREFIX = "(99/99) "
+
+
+def _mcmp_wire_len(text: str, version: int) -> int:
+    """UTF-8 byte length ``text`` occupies on the wire once MCMP-compressed."""
+    from app.compression import encode_outbound
+
+    # Timestamp only affects v3 (fixed 4 bytes), so a placeholder is fine for
+    # sizing.
+    return len(encode_outbound(text, version=version, timestamp=0).encode("utf-8"))
+
+
+def split_text_compressed(text: str, max_bytes: int, version: int) -> list[str]:
+    """Split ``text`` so each numbered part fits ``max_bytes`` *after* MCMP.
+
+    Like :meth:`BotContext.split_text`, but measures the compressed wire size
+    instead of the raw byte length, so a conversation with MCMP enabled packs
+    more text per message (fewer, larger parts). Prefers word/newline
+    boundaries; parts are numbered ``(i/n)`` when there is more than one.
+    """
+    text = (text or "").strip()
+    if not text:
+        return []
+    if _mcmp_wire_len(text, version) <= max_bytes:
+        return [text]
+
+    parts: list[str] = []
+    remaining = text
+    while remaining:
+        # Whole remainder (with numbering headroom) fits -> last part.
+        if _mcmp_wire_len(_NUM_RESERVE_PREFIX + remaining, version) <= max_bytes:
+            parts.append(remaining)
+            break
+        # Largest char-prefix whose numbered, compressed size fits. Compressed
+        # length is non-decreasing in character count, so binary search is valid.
+        lo, hi, best = 1, len(remaining), 1
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            if _mcmp_wire_len(_NUM_RESERVE_PREFIX + remaining[:mid], version) <= max_bytes:
+                best = mid
+                lo = mid + 1
+            else:
+                hi = mid - 1
+        chunk = remaining[:best]
+        if best < len(remaining):
+            cut = max(chunk.rfind(" "), chunk.rfind("\n"))
+            if cut > best // 2:
+                chunk = chunk[: cut + 1]
+        chunk = chunk.rstrip() or remaining[:best]
+        parts.append(chunk)
+        remaining = remaining[len(chunk) :].lstrip()
+
+    total = len(parts)
+    return [f"({i}/{total}) {p}" for i, p in enumerate(parts, 1)]
+
 
 @dataclass(frozen=True)
 class KeywordTrigger:
@@ -356,34 +414,6 @@ class BotContext:
                 flood_scope_override=scope,
             )
 
-    @staticmethod
-    def split_text(text: str, max_bytes: int = 155) -> list[str]:
-        """Split text into UTF-8-safe RF frames, preferring whitespace boundaries."""
-        if max_bytes < 1:
-            raise ValueError("max_bytes must be positive")
-        remaining = str(text or "").strip()
-        chunks: list[str] = []
-        while remaining:
-            encoded = remaining.encode("utf-8")
-            if len(encoded) <= max_bytes:
-                chunks.append(remaining)
-                break
-            cut = max_bytes
-            while cut and (encoded[cut] & 0xC0) == 0x80:
-                cut -= 1
-            candidate = encoded[:cut].decode("utf-8")
-            whitespace = max(candidate.rfind(" "), candidate.rfind("\n"))
-            if whitespace > 0:
-                candidate = candidate[:whitespace]
-            chunks.append(candidate.rstrip())
-            remaining = remaining[len(candidate) :].lstrip()
-        return chunks
-
-    async def reply_split(self, text: str, *, region: Any = _UNSET, max_bytes: int = 155) -> None:
-        """Reply using as many default-size RF frames as needed."""
-        for chunk in self.split_text(text, max_bytes=max_bytes):
-            await self.reply(chunk, region=region)
-
     async def send(self, channel: str, text: str, *, region: Any = _UNSET) -> None:
         """Send to any channel by name (``#chan`` / ``Public``) or 32-hex key."""
         from app.repository import ChannelRepository
@@ -463,9 +493,40 @@ class BotContext:
 
         Text that fits in ``max_bytes`` is sent as-is in one message; longer
         text goes out as numbered parts, in order, each within the budget.
+
+        When the reply target has MCMP compression enabled, parts are sized by
+        their *compressed* wire length, so more text fits per message (fewer,
+        larger parts) — otherwise by the raw byte length.
         """
-        for part in self.split_text(text, max_bytes):
+        version = await self._origin_mcmp_version()
+        parts = (
+            split_text_compressed(text, max_bytes, version)
+            if version is not None
+            else self.split_text(text, max_bytes)
+        )
+        for part in parts:
             await self.reply(part, region=region)
+
+    async def _origin_mcmp_version(self) -> int | None:
+        """MCMP version for the reply target if compression is enabled, else None."""
+        try:
+            if self._origin_is_dm:
+                if not self._origin_sender_key:
+                    return None
+                from app.repository import ContactRepository
+
+                contact = await ContactRepository.get_by_key(self._origin_sender_key)
+                if contact and contact.mcmp_enabled:
+                    return contact.mcmp_version
+            elif self._origin_channel_key:
+                from app.repository import ChannelRepository
+
+                channel = await ChannelRepository.get_by_key(self._origin_channel_key)
+                if channel and channel.mcmp_enabled:
+                    return channel.mcmp_version
+        except Exception:
+            return None
+        return None
 
     # -- geocoding -----------------------------------------------------------
     async def geocode(self, query: str) -> dict[str, Any] | None:
