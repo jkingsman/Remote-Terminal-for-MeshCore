@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 from app.image_protocol import (
@@ -9,6 +11,7 @@ from app.image_protocol import (
     fragment_image,
     reassemble_image,
 )
+from app.routers.images import _image_envelope_body
 
 
 def test_meshcore_sar_ie4_compatibility_vector():
@@ -65,3 +68,41 @@ def test_fragmentation_rejects_empty_and_oversized_images():
         fragment_image("00112233", b"")
     with pytest.raises(ValueError):
         fragment_image("00112233", bytes(MAX_ENCODED_IMAGE_BYTES + 1))
+
+
+def test_private_image_body_is_passed_to_parser_unchanged():
+    message = SimpleNamespace(type="PRIV", text="IE4:a:0:e:74:4r:1mc", sender_name=None)
+
+    body = _image_envelope_body(message)
+
+    assert body == "IE4:a:0:e:74:4r:1mc"
+    assert ImageEnvelope.parse(body) is not None
+
+
+def test_channel_image_body_excludes_exact_sender_presentation_prefix():
+    message = SimpleNamespace(
+        type="CHAN", text="Alice: IE4:a:0:e:74:4r:1mc", sender_name="Alice"
+    )
+
+    body = _image_envelope_body(message)
+
+    assert body == "IE4:a:0:e:74:4r:1mc"
+    assert ImageEnvelope.parse(body) is not None
+    # Parsing the raw stored text (with the presentation prefix) must not work.
+    assert ImageEnvelope.parse(message.text) is None
+
+
+@pytest.mark.parametrize(
+    ("text", "sender_name"),
+    [
+        ("Alice: ordinary channel text", "Alice"),
+        ("Alice: IE4:!:0:e:74:4r:1mc", "Alice"),
+        ("Mallory: IE4:a:0:e:74:4r:1mc", "Alice"),
+    ],
+)
+def test_channel_body_extraction_does_not_turn_non_image_or_mismatched_text_into_image(
+    text, sender_name
+):
+    message = SimpleNamespace(type="CHAN", text=text, sender_name=sender_name)
+
+    assert ImageEnvelope.parse(_image_envelope_body(message)) is None

@@ -25,6 +25,15 @@ router = APIRouter(prefix="/images", tags=["images"])
 IMAGE_CACHE_TTL_SECONDS = 86_400
 
 
+def _image_envelope_body(message) -> str:
+    """Return the protocol body, excluding channel presentation metadata."""
+    if message.type == "CHAN" and message.sender_name:
+        sender_prefix = f"{message.sender_name}: "
+        if message.text.startswith(sender_prefix):
+            return message.text[len(sender_prefix) :]
+    return message.text
+
+
 def _validate_encoded_image(data: bytes, format_id: ImageFormat) -> None:
     if not 1 <= len(data) <= MAX_ENCODED_IMAGE_BYTES:
         raise HTTPException(status_code=413, detail="encoded image is too large")
@@ -138,7 +147,7 @@ async def fetch_image(message_id: int) -> dict:
     message = await MessageRepository.get_by_id(message_id)
     if message is None:
         raise HTTPException(status_code=404, detail="message not found")
-    envelope = ImageEnvelope.parse(message.text)
+    envelope = ImageEnvelope.parse(_image_envelope_body(message))
     if envelope is None:
         raise HTTPException(status_code=422, detail="message is not a valid IE4 image envelope")
     peer_key = message.conversation_key if message.type == "PRIV" else message.sender_key
