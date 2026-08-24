@@ -1,3 +1,4 @@
+# app/database.py
 import asyncio
 import logging
 from collections.abc import AsyncIterator
@@ -31,7 +32,8 @@ CREATE TABLE IF NOT EXISTS contacts (
     last_contacted INTEGER,
     first_seen INTEGER,
     last_read_at INTEGER,
-    favorite INTEGER DEFAULT 0
+    favorite INTEGER DEFAULT 0,
+    mcmp_enabled INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS channels (
@@ -43,7 +45,9 @@ CREATE TABLE IF NOT EXISTS channels (
     path_hash_mode_override INTEGER,
     last_read_at INTEGER,
     favorite INTEGER DEFAULT 0,
-    muted INTEGER DEFAULT 0
+    muted INTEGER DEFAULT 0,
+    mcmp_enabled INTEGER DEFAULT 0,
+    mcmp_sign_enabled INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS messages (
