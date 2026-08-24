@@ -1,4 +1,3 @@
-# app/database.py
 import asyncio
 import logging
 from collections.abc import AsyncIterator
@@ -64,11 +63,6 @@ CREATE TABLE IF NOT EXISTS messages (
     acked INTEGER DEFAULT 0,
     sender_name TEXT,
     sender_key TEXT
-    -- Deduplication: channel echoes/repeats use a content/time unique index so
-    -- duplicate observations reconcile onto a single stored row. Legacy
-    -- databases may also gain an incoming-DM content index via migration 44.
-    -- Enforced via idx_messages_dedup_null_safe (unique index) rather than a table constraint
-    -- to avoid the storage overhead of SQLite's autoindex duplicating every message text.
 );
 
 CREATE TABLE IF NOT EXISTS raw_packets (
@@ -156,9 +150,6 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
 );
 """
 
-# Indexes are created after migrations so that legacy databases have all
-# required columns (e.g. sender_key, added by migration 25) before index
-# creation runs.
 SCHEMA_INDEXES = """
 CREATE INDEX IF NOT EXISTS idx_messages_received ON messages(received_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_dedup_null_safe
@@ -188,30 +179,7 @@ CREATE INDEX IF NOT EXISTS idx_repeater_telemetry_pk_ts
 
 
 class Database:
-    """Single-connection aiosqlite wrapper with coroutine-level serialization.
-
-    Why the lock: aiosqlite runs one ``sqlite3.Connection`` on a background
-    worker thread and serializes statement execution there. But SQLite's
-    ``COMMIT`` fails with ``OperationalError: cannot commit transaction -
-    SQL statements in progress`` whenever *any* cursor on the connection has
-    a live prepared statement (a ``SELECT`` that returned ``SQLITE_ROW`` but
-    hasn't been fully consumed or closed). Under concurrent coroutines, one
-    task's in-flight ``fetchone()`` can still be in ``SQLITE_ROW`` state when
-    another task's ``commit()`` runs on the worker — triggering the error.
-
-    Fix: all DB work goes through ``tx()`` (writes) or ``readonly()`` (reads),
-    both of which acquire ``self._lock``. The lock is non-reentrant (asyncio
-    default) by design — nested ``tx()`` calls are a bug. Repository methods
-    that compose multiple operations factor the raw SQL into private helpers
-    that take a ``conn`` and don't lock; the public method acquires the lock
-    once and calls those helpers.
-
-    Why reads are also locked: reads must also hold the lock, because a read
-    in ``SQLITE_ROW`` state is precisely the live statement that breaks a
-    concurrent writer's commit. Single-connection aiosqlite cannot safely
-    overlap reads and writes. If we ever split reader/writer connections in
-    the future, ``readonly()`` becomes the seam to point at the reader pool.
-    """
+    """Single-connection aiosqlite wrapper with coroutine-level serialization."""
 
     def __init__(self, db_path: str):
         self.db_path = db_path
@@ -220,16 +188,6 @@ class Database:
 
     @asynccontextmanager
     async def tx(self) -> AsyncIterator[aiosqlite.Connection]:
-        """Acquire the connection for a write transaction.
-
-        Commits on clean exit, rolls back on exception. Callers MUST close
-        every cursor opened inside the block (use ``async with conn.execute(...)
-        as cursor:``) so no prepared statement is alive when commit runs.
-
-        The lock serializes concurrent writers AND ensures no reader's cursor
-        is alive during the commit. Nested calls will deadlock — factor shared
-        SQL into helpers that accept ``conn`` and do not re-enter ``tx()``.
-        """
         async with self._lock:
             if self._connection is None:
                 raise RuntimeError("Database not connected")
@@ -244,14 +202,6 @@ class Database:
 
     @asynccontextmanager
     async def readonly(self) -> AsyncIterator[aiosqlite.Connection]:
-        """Acquire the connection for a read. No commit, no rollback.
-
-        Locked for the same reason writes are: on a single connection, an
-        active read statement blocks a concurrent writer's commit. Callers
-        MUST fully consume or close cursors before the block exits (use
-        ``async with conn.execute(...) as cursor:`` + ``fetchall`` /
-        ``fetchone``; avoid holding a cursor across ``await`` on other IO).
-        """
         async with self._lock:
             if self._connection is None:
                 raise RuntimeError("Database not connected")
@@ -263,44 +213,18 @@ class Database:
         self._connection = await aiosqlite.connect(self.db_path)
         self._connection.row_factory = aiosqlite.Row
 
-        # WAL mode: faster writes, concurrent readers during writes, no journal file churn.
-        # Persists in the DB file but we set it explicitly on every connection.
         await self._connection.execute("PRAGMA journal_mode = WAL")
-
-        # synchronous = NORMAL is safe with WAL — only the most recent
-        # transaction can be lost on an OS crash (no corruption risk).
-        # Reduces fsync overhead vs. the default FULL.
         await self._connection.execute("PRAGMA synchronous = NORMAL")
-
-        # Retry for up to 5s on lock contention instead of failing instantly.
-        # Matters when a second connection (e.g. VACUUM) touches the DB.
         await self._connection.execute("PRAGMA busy_timeout = 5000")
-
-        # Bump page cache to ~64 MB (negative value = KB). Keeps hot pages
-        # in memory for read-heavy queries (unreads, pagination, search).
         await self._connection.execute("PRAGMA cache_size = -64000")
-
-        # Keep temp tables and sort spills in memory instead of on disk.
         await self._connection.execute("PRAGMA temp_store = MEMORY")
-
-        # Incremental auto-vacuum: freed pages are reclaimable via
-        # PRAGMA incremental_vacuum without a full VACUUM. Must be set before
-        # the first table is created (for new databases); for existing databases
-        # migration 20 handles the one-time VACUUM to restructure the file.
         await self._connection.execute("PRAGMA auto_vacuum = INCREMENTAL")
-
-        # Foreign key enforcement: must be set per-connection (not persisted).
-        # Disabled during schema init and migrations to avoid issues with
-        # historical table-rebuild migrations that may temporarily violate
-        # constraints, then re-enabled for all subsequent application queries.
         await self._connection.execute("PRAGMA foreign_keys = OFF")
 
         await self._connection.executescript(SCHEMA_TABLES)
         await self._connection.commit()
         logger.debug("Database tables initialized")
 
-        # Run any pending migrations before creating indexes, so that
-        # legacy databases have all required columns first.
         from app.migrations import run_migrations
 
         await run_migrations(self._connection)
@@ -309,7 +233,6 @@ class Database:
         await self._connection.commit()
         logger.debug("Database indexes initialized")
 
-        # Enable FK enforcement for all application queries from this point on.
         await self._connection.execute("PRAGMA foreign_keys = ON")
         logger.debug("Foreign key enforcement enabled")
 

@@ -425,24 +425,15 @@ async def delete_contact(public_key: str) -> dict:
 
 @router.post("/{public_key}/trace", response_model=TraceResponse)
 async def request_trace(public_key: str) -> TraceResponse:
-    """Send a single-hop trace to a contact and wait for the result.
-
-    The trace path contains the contact's 4-byte pubkey hash as the sole hop
-    (no intermediate repeaters). This uses TRACE's dedicated width flags rather
-    than the radio's normal path_hash_mode setting.
-    """
+    """Send a single-hop trace to a contact and wait for the result."""
     radio_manager.require_connected()
 
     contact = await _resolve_contact_or_404(public_key)
 
     tag = random.randint(1, 0xFFFFFFFF)
-    # Use a 4-byte contact hash for low-collision direct trace targeting.
     contact_hash = contact.public_key[: TRACE_HASH_BYTES * 2]
 
-    # Trace does not need auto-fetch suspension: response arrives as TRACE_DATA
-    # from the reader loop, not via get_msg().
     async with radio_manager.radio_operation("request_trace", pause_polling=True) as mc:
-        # Ensure contact is on radio so the trace can reach them
         await _ensure_on_radio(mc, contact)
 
         logger.info(
@@ -457,7 +448,6 @@ async def request_trace(public_key: str) -> TraceResponse:
         if result.type == EventType.ERROR:
             raise HTTPException(status_code=422, detail=f"Failed to send trace: {result.payload}")
 
-        # Wait for the matching TRACE_DATA event
         event = await mc.wait_for_event(
             EventType.TRACE_DATA,
             attribute_filters={"tag": tag},
@@ -471,9 +461,7 @@ async def request_trace(public_key: str) -> TraceResponse:
     path = trace.get("path", [])
     path_len = trace.get("path_len", 0)
 
-    # remote_snr: first entry in path (what the target heard us at)
     remote_snr = path[0]["snr"] if path else None
-    # local_snr: last entry in path (what we heard them at on the bounce-back)
     local_snr = path[-1]["snr"] if path else None
 
     logger.info(
@@ -616,6 +604,33 @@ async def set_contact_routing_override(
         await _broadcast_contact_update(updated_contact)
 
     return {"status": "ok", "public_key": contact.public_key}
+
+
+class ContactMcmpSettingsRequest(BaseModel):
+    mcmp_enabled: bool = Field(
+        default=False, description="Enable MCMP compression for direct messages"
+    )
+
+
+@router.post("/{public_key}/mcmp", response_model=Contact)
+async def set_contact_mcmp(public_key: str, request: ContactMcmpSettingsRequest) -> Contact:
+    """Set MCMP compression flag for a direct-contact conversation."""
+    contact = await _resolve_contact_or_404(public_key)
+    if len(contact.public_key) < 64:
+        raise HTTPException(status_code=409, detail="Contact has no full public key")
+
+    updated = await ContactRepository.set_mcmp_enabled(
+        contact.public_key, request.mcmp_enabled
+    )
+    if not updated:
+        raise HTTPException(status_code=500, detail="Failed to update MCMP setting")
+
+    refreshed = await ContactRepository.get_by_key(contact.public_key)
+    if refreshed is None:
+        raise HTTPException(status_code=500, detail="Contact disappeared after update")
+
+    await _broadcast_contact_update(refreshed)
+    return refreshed
 
 
 # ---------------------------------------------------------------------------
