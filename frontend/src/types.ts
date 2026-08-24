@@ -166,8 +166,8 @@ export interface Contact {
   last_contacted: number | null;
   last_read_at: number | null;
   first_seen: number | null;
-  /** MCMP compression flag for direct messages */
-  mcmp_enabled: boolean;
+  /** MCMP compression flag for direct messages. May be absent on older records. */
+  mcmp_enabled?: boolean;
 }
 
 export interface ContactRoute {
@@ -249,10 +249,10 @@ export interface Channel {
   last_read_at: number | null;
   favorite: boolean;
   muted: boolean;
-  /** MCMP v3 compression enabled for this channel */
-  mcmp_enabled: boolean;
-  /** MCMP v3 signing enabled for this channel (only effective when mcmp_enabled is true) */
-  mcmp_sign_enabled: boolean;
+  /** MCMP v3 compression enabled for this channel. May be absent on older records. */
+  mcmp_enabled?: boolean;
+  /** MCMP v3 signing enabled for this channel. May be absent on older records. */
+  mcmp_sign_enabled?: boolean;
 }
 
 export interface ChannelMessageCounts {
