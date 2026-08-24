@@ -328,7 +328,7 @@ describe('ConversationPane', () => {
     const { rerender } = render(
       <ConversationPane
         {...createProps({
-          activeConversation: { type: 'contact', id: roomA.public_key, name: roomA.name },
+          activeConversation: { type: 'contact', id: roomA.public_key, name: roomA.name ?? '' },
           contacts,
         })}
       />
@@ -346,7 +346,7 @@ describe('ConversationPane', () => {
     rerender(
       <ConversationPane
         {...createProps({
-          activeConversation: { type: 'contact', id: roomB.public_key, name: roomB.name },
+          activeConversation: { type: 'contact', id: roomB.public_key, name: roomB.name ?? '' },
           contacts,
         })}
       />

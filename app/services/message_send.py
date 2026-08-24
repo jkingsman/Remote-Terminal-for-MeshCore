@@ -9,6 +9,7 @@ from typing import Any
 from fastapi import HTTPException
 from meshcore import EventType
 
+from app.compression import encode_outbound
 from app.models import ResendChannelMessageResponse
 from app.radio import RadioOperationBusyError
 from app.region_scope import is_unscoped, normalize_region_scope
@@ -301,9 +302,24 @@ async def send_channel_message_with_effective_scope(
                 action_label,
             )
 
+        # Compress on the wire when the channel opts in. Only the transmitted
+        # body is compressed; callers persist the plaintext (with the sender
+        # prefix) separately. The firmware prepends "<name>: " to what we send,
+        # so the sender name stays outside the compressed payload -- exactly how
+        # meshcore-open frames it, and the channel budget already reserves room
+        # for the prefix. encode_outbound() is deterministic, so a resend
+        # produces identical wire bytes.
+        wire_msg = encode_outbound(text) if channel.mcmp_enabled else text
+        if wire_msg != text:
+            logger.debug(
+                "MCMP-compressed channel body for %s (%d -> %d bytes)",
+                channel.name,
+                len(text.encode("utf-8")),
+                len(wire_msg.encode("utf-8")),
+            )
         send_result = await mc.commands.send_chan_msg(
             chan=channel_slot,
-            msg=text,
+            msg=wire_msg,
             timestamp=timestamp_bytes,
         )
         if send_result is None:
@@ -533,7 +549,7 @@ async def _retry_direct_message_until_acked(
 
                 result = await mc.commands.send_msg(
                     dst=cached_contact,
-                    msg=text,
+                    msg=encode_outbound(text) if contact.mcmp_enabled else text,
                     timestamp=sender_timestamp,
                     attempt=attempt,
                 )
@@ -649,9 +665,12 @@ async def send_direct_message_to_contact(
                 text=text,
                 requested_timestamp=sent_at,
             )
+            # Compress on the wire when the contact opts in; the stored/dedup
+            # text stays plaintext (below). encode_outbound() is deterministic so
+            # the retry path sends identical bytes.
             result = await mc.commands.send_msg(
                 dst=cached_contact,
-                msg=text,
+                msg=encode_outbound(text) if contact.mcmp_enabled else text,
                 timestamp=sender_timestamp,
             )
 

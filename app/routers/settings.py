@@ -5,7 +5,12 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from app.models import CONTACT_TYPE_REPEATER, AppSettings
+from app.models import (
+    CONTACT_TYPE_REPEATER,
+    AppSettings,
+    McmpEnabledRequest,
+    McmpEnabledResponse,
+)
 from app.region_scope import normalize_region_scope
 from app.repository import AppSettingsRepository, ChannelRepository, ContactRepository
 from app.telemetry_interval import (
@@ -334,6 +339,39 @@ async def toggle_favorite(request: FavoriteRequest) -> FavoriteToggleResponse:
         logger.info("%s channel favorite: %s", "Added" if new_value else "Removed", request.id[:12])
 
     return FavoriteToggleResponse(type=request.type, id=request.id, favorite=new_value)
+
+
+@router.post("/mcmp/set", response_model=McmpEnabledResponse)
+async def set_mcmp_enabled(request: McmpEnabledRequest) -> McmpEnabledResponse:
+    """Enable/disable MCMP compression for a conversation (contact or channel).
+
+    When on, outbound messages to that conversation are MCMP-compressed before
+    sending. Off by default: the receiver must understand MCMP to read it.
+    """
+    from app.websocket import broadcast_event
+
+    if request.type == "contact":
+        found = await ContactRepository.set_mcmp_enabled(request.id, request.enabled)
+        if not found:
+            raise HTTPException(status_code=404, detail="Contact not found")
+        refreshed_contact = await ContactRepository.get_by_key(request.id)
+        if refreshed_contact:
+            broadcast_event("contact", refreshed_contact.model_dump())
+    else:
+        found = await ChannelRepository.set_mcmp_enabled(request.id, request.enabled)
+        if not found:
+            raise HTTPException(status_code=404, detail="Channel not found")
+        refreshed = await ChannelRepository.get_by_key(request.id)
+        if refreshed:
+            broadcast_event("channel", refreshed.model_dump())
+
+    logger.info(
+        "Set %s MCMP compression %s: %s",
+        request.type,
+        "on" if request.enabled else "off",
+        request.id[:12],
+    )
+    return McmpEnabledResponse(type=request.type, id=request.id, enabled=request.enabled)
 
 
 @router.post("/muted-channels/toggle", response_model=MuteChannelToggleResponse)
