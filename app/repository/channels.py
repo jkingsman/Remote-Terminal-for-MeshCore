@@ -1,3 +1,4 @@
+# app/repository/channels.py
 import time
 
 from app.database import db
@@ -7,12 +8,19 @@ from app.models import Channel
 class ChannelRepository:
     @staticmethod
     async def upsert(key: str, name: str, is_hashtag: bool = False, on_radio: bool = False) -> None:
-        """Upsert a channel. Key is 32-char hex string."""
+        """Upsert a channel. Key is 32-char hex string.
+
+        New channels start with mcmp_enabled=0 and mcmp_sign_enabled=0.
+        These flags are intentionally *not* updated on conflict so that
+        repeated upserts from radio sync cannot reset per-channel MCMP settings.
+        """
         async with db.tx() as conn:
             async with conn.execute(
                 """
-                INSERT INTO channels (key, name, is_hashtag, on_radio, flood_scope_override)
-                VALUES (?, ?, ?, ?, NULL)
+                INSERT INTO channels (key, name, is_hashtag, on_radio, flood_scope_override,
+                                      path_hash_mode_override, last_read_at, favorite, muted,
+                                      mcmp_enabled, mcmp_sign_enabled)
+                VALUES (?, ?, ?, ?, NULL, NULL, NULL, 0, 0, 0, 0)
                 ON CONFLICT(key) DO UPDATE SET
                     name = excluded.name,
                     is_hashtag = excluded.is_hashtag,
@@ -28,7 +36,9 @@ class ChannelRepository:
         async with db.readonly() as conn:
             async with conn.execute(
                 """
-                SELECT key, name, is_hashtag, on_radio, flood_scope_override, path_hash_mode_override, last_read_at, favorite, muted
+                SELECT key, name, is_hashtag, on_radio, flood_scope_override,
+                       path_hash_mode_override, last_read_at, favorite, muted,
+                       mcmp_enabled, mcmp_sign_enabled
                 FROM channels
                 WHERE key = ?
                 """,
@@ -46,6 +56,8 @@ class ChannelRepository:
                 last_read_at=row["last_read_at"],
                 favorite=bool(row["favorite"]),
                 muted=bool(row["muted"]),
+                mcmp_enabled=bool(row["mcmp_enabled"]),
+                mcmp_sign_enabled=bool(row["mcmp_sign_enabled"]),
             )
         return None
 
@@ -54,7 +66,9 @@ class ChannelRepository:
         async with db.readonly() as conn:
             async with conn.execute(
                 """
-                SELECT key, name, is_hashtag, on_radio, flood_scope_override, path_hash_mode_override, last_read_at, favorite, muted
+                SELECT key, name, is_hashtag, on_radio, flood_scope_override,
+                       path_hash_mode_override, last_read_at, favorite, muted,
+                       mcmp_enabled, mcmp_sign_enabled
                 FROM channels
                 ORDER BY name
                 """
@@ -71,6 +85,8 @@ class ChannelRepository:
                 last_read_at=row["last_read_at"],
                 favorite=bool(row["favorite"]),
                 muted=bool(row["muted"]),
+                mcmp_enabled=bool(row["mcmp_enabled"]),
+                mcmp_sign_enabled=bool(row["mcmp_sign_enabled"]),
             )
             for row in rows
         ]
@@ -140,6 +156,28 @@ class ChannelRepository:
             async with conn.execute(
                 "UPDATE channels SET path_hash_mode_override = ? WHERE key = ?",
                 (path_hash_mode_override, key.upper()),
+            ) as cursor:
+                rowcount = cursor.rowcount
+        return rowcount > 0
+
+    @staticmethod
+    async def set_mcmp_enabled(key: str, enabled: bool) -> bool:
+        """Enable or disable MCMP compression for a channel."""
+        async with db.tx() as conn:
+            async with conn.execute(
+                "UPDATE channels SET mcmp_enabled = ? WHERE key = ?",
+                (1 if enabled else 0, key.upper()),
+            ) as cursor:
+                rowcount = cursor.rowcount
+        return rowcount > 0
+
+    @staticmethod
+    async def set_mcmp_sign_enabled(key: str, enabled: bool) -> bool:
+        """Enable or disable MCMP v3 signing for a channel."""
+        async with db.tx() as conn:
+            async with conn.execute(
+                "UPDATE channels SET mcmp_sign_enabled = ? WHERE key = ?",
+                (1 if enabled else 0, key.upper()),
             ) as cursor:
                 rowcount = cursor.rowcount
         return rowcount > 0
