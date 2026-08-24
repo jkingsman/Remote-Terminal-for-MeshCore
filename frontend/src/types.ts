@@ -166,6 +166,8 @@ export interface Contact {
   last_contacted: number | null;
   last_read_at: number | null;
   first_seen: number | null;
+  /** MCMP compression flag for direct messages */
+  mcmp_enabled: boolean;
 }
 
 export interface ContactRoute {
@@ -247,6 +249,10 @@ export interface Channel {
   last_read_at: number | null;
   favorite: boolean;
   muted: boolean;
+  /** MCMP v3 compression enabled for this channel */
+  mcmp_enabled: boolean;
+  /** MCMP v3 signing enabled for this channel (only effective when mcmp_enabled is true) */
+  mcmp_sign_enabled: boolean;
 }
 
 export interface ChannelMessageCounts {
@@ -328,6 +334,8 @@ export interface Message {
   transport_code?: number | null;
   /** Resolved region name for the transport code, if it matched a known region. */
   region?: string | null;
+  /** MCMP v3 signature verification status. Present only for messages that carried an MCMP payload. */
+  mcmp_signature_status?: 'none' | 'unsigned' | 'valid' | 'invalid' | 'unverifiable' | null;
 }
 
 export interface MessagesAroundResponse {
