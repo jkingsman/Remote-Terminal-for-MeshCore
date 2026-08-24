@@ -535,12 +535,26 @@ describe('MessageList image messages', () => {
 
   it('shows tap-to-load progress and renders the completed image', async () => {
     const fetchSpy = vi.spyOn(api, 'fetchImage').mockResolvedValue({
-      session_id: '0000000a', state: 'receiving', format: 0, width: 256, height: 171,
-      size_bytes: 2100, fragment_count: 14, received_count: 4, missing_indices: [],
+      session_id: '0000000a',
+      state: 'receiving',
+      format: 0,
+      width: 256,
+      height: 171,
+      size_bytes: 2100,
+      fragment_count: 14,
+      received_count: 4,
+      missing_indices: [],
     });
     vi.spyOn(api, 'getImageSession').mockResolvedValue({
-      session_id: '0000000a', state: 'complete', format: 0, width: 256, height: 171,
-      size_bytes: 2100, fragment_count: 14, received_count: 14, missing_indices: [],
+      session_id: '0000000a',
+      state: 'complete',
+      format: 0,
+      width: 256,
+      height: 171,
+      size_bytes: 2100,
+      fragment_count: 14,
+      received_count: 14,
+      missing_indices: [],
     });
     render(
       <MessageList
@@ -552,7 +566,9 @@ describe('MessageList image messages', () => {
     expect(screen.getByText('Tap to load')).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Load image' }));
     expect(await screen.findByText('4/14')).toBeVisible();
-    await waitFor(() => expect(screen.getByAltText('Image message')).toBeVisible(), { timeout: 2000 });
+    await waitFor(() => expect(screen.getByAltText('Image message')).toBeVisible(), {
+      timeout: 2000,
+    });
     expect(fetchSpy).toHaveBeenCalledWith(1);
   });
 });

@@ -41,7 +41,7 @@ function ImageMessage({ message, content }: { message: Message; content: string 
   const [state, setState] = useState<'idle' | 'loading' | 'complete' | 'unavailable'>(
     message.outgoing ? 'complete' : 'idle'
   );
-  const [received, setReceived] = useState(message.outgoing ? envelope?.fragmentCount ?? 0 : 0);
+  const [received, setReceived] = useState(message.outgoing ? (envelope?.fragmentCount ?? 0) : 0);
   const [fullscreen, setFullscreen] = useState(false);
   if (!envelope) return null;
 
@@ -70,7 +70,12 @@ function ImageMessage({ message, content }: { message: Message; content: string 
   return (
     <div className="w-48 max-w-full">
       {state === 'complete' ? (
-        <button type="button" className="block overflow-hidden rounded-md" onClick={() => setFullscreen(true)} aria-label="Open image">
+        <button
+          type="button"
+          className="block overflow-hidden rounded-md"
+          onClick={() => setFullscreen(true)}
+          aria-label="Open image"
+        >
           <img src={contentUrl} alt="Image message" className="aspect-square w-48 object-cover" />
         </button>
       ) : (
@@ -81,17 +86,51 @@ function ImageMessage({ message, content }: { message: Message; content: string 
           aria-label="Load image"
           className="flex aspect-square w-48 flex-col items-center justify-center gap-2 rounded-md bg-muted/60 text-muted-foreground"
         >
-          {state === 'loading' ? <Loader2 className="animate-spin" size={30} /> : state === 'unavailable' ? <ImageOff size={30} /> : <Download size={30} />}
-          <span className="text-xs">{state === 'loading' ? `${received}/${envelope.fragmentCount}` : state === 'unavailable' ? 'Unavailable — tap to retry' : 'Tap to load'}</span>
+          {state === 'loading' ? (
+            <Loader2 className="animate-spin" size={30} />
+          ) : state === 'unavailable' ? (
+            <ImageOff size={30} />
+          ) : (
+            <Download size={30} />
+          )}
+          <span className="text-xs">
+            {state === 'loading'
+              ? `${received}/${envelope.fragmentCount}`
+              : state === 'unavailable'
+                ? 'Unavailable — tap to retry'
+                : 'Tap to load'}
+          </span>
         </button>
       )}
       <div className="mt-1 text-[0.6875rem] text-muted-foreground">
-        {label} · {envelope.fragmentCount} fragments · ~{Math.max(1, Math.round(estimateImageTransmitSeconds(envelope.fragmentCount, envelope.sizeBytes)))}s tx/hop
+        {label} · {envelope.fragmentCount} fragments · ~
+        {Math.max(
+          1,
+          Math.round(estimateImageTransmitSeconds(envelope.fragmentCount, envelope.sizeBytes))
+        )}
+        s tx/hop
       </div>
       {fullscreen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 p-4" role="dialog" aria-label="Image viewer" onClick={() => setFullscreen(false)}>
-          <button type="button" className="absolute right-4 top-4 rounded-full bg-background/80 p-2 text-foreground" aria-label="Close image" onClick={() => setFullscreen(false)}><X size={22} /></button>
-          <img src={contentUrl} alt="Image message full size" className="max-h-full max-w-full object-contain" onClick={(event) => event.stopPropagation()} />
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 p-4"
+          role="dialog"
+          aria-label="Image viewer"
+          onClick={() => setFullscreen(false)}
+        >
+          <button
+            type="button"
+            className="absolute right-4 top-4 rounded-full bg-background/80 p-2 text-foreground"
+            aria-label="Close image"
+            onClick={() => setFullscreen(false)}
+          >
+            <X size={22} />
+          </button>
+          <img
+            src={contentUrl}
+            alt="Image message full size"
+            className="max-h-full max-w-full object-contain"
+            onClick={(event) => event.stopPropagation()}
+          />
         </div>
       )}
     </div>
