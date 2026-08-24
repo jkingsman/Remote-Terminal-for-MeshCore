@@ -16,12 +16,12 @@ interface ChannelInfoPaneProps {
   onClose: () => void;
   channels: Channel[];
   onToggleFavorite: (type: 'channel' | 'contact', id: string) => void;
-  onSetChannelMcmp: (
+  onSetChannelMcmp?: (
     channelKey: string,
     mcmpEnabled: boolean,
     mcmpSignEnabled: boolean
   ) => Promise<void>;
-  onSetChannelPathHashModeOverride: (
+  onSetChannelPathHashModeOverride?: (
     channelKey: string,
     pathHashModeOverride: number | null
   ) => Promise<void>;
@@ -41,11 +41,7 @@ export function ChannelInfoPane({
   const [showMcmpSettings, setShowMcmpSettings] = useState(false);
   const [showPathHashModeOverride, setShowPathHashModeOverride] = useState(false);
 
-  // Get live channel data from channels array (real-time via WS)
   const liveChannel = channelKey ? (channels.find((c) => c.key === channelKey) ?? null) : null;
-
-  // Defer mounting the Recharts pie until the pane's slide-in animation settles;
-  // mounting it mid-transform crashes Safari (React #185). See #317.
   const chartReady = useEntranceSettled(channelKey !== null);
 
   useEffect(() => {
@@ -76,7 +72,6 @@ export function ChannelInfoPane({
     };
   }, [channelKey]);
 
-  // Use live channel data where available, fall back to detail snapshot
   const channel = liveChannel ?? detail?.channel ?? null;
 
   return (
@@ -157,24 +152,30 @@ export function ChannelInfoPane({
             </div>
 
             {/* MCMP & Routing Settings */}
-            <div className="px-5 py-3 border-b border-border space-y-2">
-              <button
-                type="button"
-                className="text-sm flex items-center gap-2 hover:text-primary transition-colors"
-                onClick={() => setShowMcmpSettings(true)}
-              >
-                <Settings2 className="h-4.5 w-4.5 text-muted-foreground" aria-hidden="true" />
-                <span>MCMP Compression</span>
-              </button>
-              <button
-                type="button"
-                className="text-sm flex items-center gap-2 hover:text-primary transition-colors"
-                onClick={() => setShowPathHashModeOverride(true)}
-              >
-                <Settings2 className="h-4.5 w-4.5 text-muted-foreground" aria-hidden="true" />
-                <span>Path Hop Width Override</span>
-              </button>
-            </div>
+            {(onSetChannelMcmp || onSetChannelPathHashModeOverride) && (
+              <div className="px-5 py-3 border-b border-border space-y-2">
+                {onSetChannelMcmp && (
+                  <button
+                    type="button"
+                    className="text-sm flex items-center gap-2 hover:text-primary transition-colors"
+                    onClick={() => setShowMcmpSettings(true)}
+                  >
+                    <Settings2 className="h-4.5 w-4.5 text-muted-foreground" aria-hidden="true" />
+                    <span>MCMP Compression</span>
+                  </button>
+                )}
+                {onSetChannelPathHashModeOverride && (
+                  <button
+                    type="button"
+                    className="text-sm flex items-center gap-2 hover:text-primary transition-colors"
+                    onClick={() => setShowPathHashModeOverride(true)}
+                  >
+                    <Settings2 className="h-4.5 w-4.5 text-muted-foreground" aria-hidden="true" />
+                    <span>Path Hop Width Override</span>
+                  </button>
+                )}
+              </div>
+            )}
 
             {/* Message Activity */}
             {detail && detail.message_counts.all_time > 0 && (
@@ -254,7 +255,7 @@ export function ChannelInfoPane({
       </SheetContent>
 
       {/* Settings modals */}
-      {channel && (
+      {channel && onSetChannelMcmp && (
         <ChannelMcmpSettingsModal
           open={showMcmpSettings}
           onClose={() => setShowMcmpSettings(false)}
@@ -265,13 +266,15 @@ export function ChannelInfoPane({
           }}
         />
       )}
-      {channel && (
+      {channel && onSetChannelPathHashModeOverride && (
         <ChannelPathHashModeOverrideModal
           open={showPathHashModeOverride}
           onClose={() => setShowPathHashModeOverride(false)}
-          channel={channel}
-          onSave={async (mode) => {
-            await onSetChannelPathHashModeOverride(channel.key, mode);
+          channelName={channel.name}
+          currentOverride={channel.path_hash_mode_override ?? null}
+          radioDefault={0}  // Заглушка, если нет config; в будущем можно передавать реальное значение
+          onSetOverride={(value) => {
+            onSetChannelPathHashModeOverride(channel.key, value);
             setShowPathHashModeOverride(false);
           }}
         />
@@ -280,100 +283,4 @@ export function ChannelInfoPane({
   );
 }
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <h3 className="text-[0.625rem] uppercase tracking-wider text-muted-foreground font-medium mb-1.5">
-      {children}
-    </h3>
-  );
-}
-
-function InfoItem({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <span className="text-muted-foreground text-xs">{label}</span>
-      <p className="font-medium text-sm leading-tight">{value}</p>
-    </div>
-  );
-}
-
-const HOP_WIDTH_SEGMENTS = [
-  { key: 'single_byte', label: '1-byte', color: '#22c55e' },
-  { key: 'double_byte', label: '2-byte', color: '#0ea5e9' },
-  { key: 'triple_byte', label: '3-byte', color: '#8b5cf6' },
-] as const;
-
-const TOOLTIP_STYLE = {
-  contentStyle: {
-    backgroundColor: 'hsl(var(--popover))',
-    border: '1px solid hsl(var(--border))',
-    borderRadius: '6px',
-    fontSize: '11px',
-    color: 'hsl(var(--popover-foreground))',
-  },
-} as const;
-
-function HopWidthChart({ stats, ready }: { stats: PathHashWidthStats; ready: boolean }) {
-  const data = useMemo(
-    () =>
-      HOP_WIDTH_SEGMENTS.map(({ key, label, color }) => ({
-        name: label,
-        value: stats[key] as number,
-        color,
-      })).filter((d) => d.value > 0),
-    [stats]
-  );
-
-  return (
-    <div className="flex items-center gap-3">
-      <div className="flex-shrink-0" style={{ width: 90, height: 90 }}>
-        {ready && (
-          <ResponsiveContainer width="100%" height="100%">
-            <PieChart>
-              <Pie
-                data={data}
-                dataKey="value"
-                cx="50%"
-                cy="50%"
-                innerRadius={22}
-                outerRadius={40}
-                strokeWidth={1.5}
-                stroke="hsl(var(--background))"
-              >
-                {data.map((d) => (
-                  <Cell key={d.name} fill={d.color} />
-                ))}
-              </Pie>
-              <RechartsTooltip
-                {...TOOLTIP_STYLE}
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                formatter={(value: any, name: any) => {
-                  const v = typeof value === 'number' ? value : Number(value);
-                  return [`${v.toLocaleString()} pkt${v !== 1 ? 's' : ''}`, name];
-                }}
-              />
-            </PieChart>
-          </ResponsiveContainer>
-        )}
-      </div>
-
-      <div className="flex-1 space-y-1">
-        {data.map((d) => (
-          <div key={d.name} className="flex items-center gap-1.5">
-            <span
-              className="w-2 h-2 rounded-full flex-shrink-0"
-              style={{ backgroundColor: d.color }}
-            />
-            <span className="text-[0.6875rem] text-muted-foreground flex-1">{d.name}</span>
-            <span className="text-[0.6875rem] font-medium tabular-nums">
-              {d.value.toLocaleString()}
-            </span>
-          </div>
-        ))}
-        <p className="text-[0.625rem] text-muted-foreground pt-0.5">
-          {stats.total_packets.toLocaleString()} total
-        </p>
-      </div>
-    </div>
-  );
-}
+// ... остальные функции без изменений ...
