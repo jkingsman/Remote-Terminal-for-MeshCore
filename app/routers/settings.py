@@ -343,10 +343,11 @@ async def toggle_favorite(request: FavoriteRequest) -> FavoriteToggleResponse:
 
 @router.post("/mcmp/set", response_model=McmpEnabledResponse)
 async def set_mcmp_enabled(request: McmpEnabledRequest) -> McmpEnabledResponse:
-    """Enable/disable MCMP compression for a conversation (contact or channel).
+    """Configure MCMP compression for a conversation (contact or channel).
 
-    When on, outbound messages to that conversation are MCMP-compressed before
-    sending. Off by default: the receiver must understand MCMP to read it.
+    Sets the enabled flag and, when ``version`` is provided, the transport (2 =
+    mcmp2:, 3 = mcmp3: container). Off by default: the receiver must understand
+    MCMP to read it.
     """
     from app.websocket import broadcast_event
 
@@ -354,24 +355,33 @@ async def set_mcmp_enabled(request: McmpEnabledRequest) -> McmpEnabledResponse:
         found = await ContactRepository.set_mcmp_enabled(request.id, request.enabled)
         if not found:
             raise HTTPException(status_code=404, detail="Contact not found")
+        if request.version is not None:
+            await ContactRepository.set_mcmp_version(request.id, request.version)
         refreshed_contact = await ContactRepository.get_by_key(request.id)
+        version = refreshed_contact.mcmp_version if refreshed_contact else (request.version or 2)
         if refreshed_contact:
             broadcast_event("contact", refreshed_contact.model_dump())
     else:
         found = await ChannelRepository.set_mcmp_enabled(request.id, request.enabled)
         if not found:
             raise HTTPException(status_code=404, detail="Channel not found")
+        if request.version is not None:
+            await ChannelRepository.set_mcmp_version(request.id, request.version)
         refreshed = await ChannelRepository.get_by_key(request.id)
+        version = refreshed.mcmp_version if refreshed else (request.version or 2)
         if refreshed:
             broadcast_event("channel", refreshed.model_dump())
 
     logger.info(
-        "Set %s MCMP compression %s: %s",
+        "Set %s MCMP compression %s (v%d): %s",
         request.type,
         "on" if request.enabled else "off",
+        version,
         request.id[:12],
     )
-    return McmpEnabledResponse(type=request.type, id=request.id, enabled=request.enabled)
+    return McmpEnabledResponse(
+        type=request.type, id=request.id, enabled=request.enabled, version=version
+    )
 
 
 @router.post("/muted-channels/toggle", response_model=MuteChannelToggleResponse)

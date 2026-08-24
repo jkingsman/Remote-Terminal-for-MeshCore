@@ -383,16 +383,19 @@ export const api = {
     }),
 
   // MCMP compression (per conversation)
-  setMcmpEnabled: (type: 'channel' | 'contact', id: string, enabled: boolean) =>
-    fetchJson<{ type: 'channel' | 'contact'; id: string; enabled: boolean }>('/settings/mcmp/set', {
-      method: 'POST',
-      body: JSON.stringify({ type, id, enabled }),
-    }),
+  setMcmpEnabled: (type: 'channel' | 'contact', id: string, enabled: boolean, version?: number) =>
+    fetchJson<{ type: 'channel' | 'contact'; id: string; enabled: boolean; version: number }>(
+      '/settings/mcmp/set',
+      {
+        method: 'POST',
+        body: JSON.stringify({ type, id, enabled, version }),
+      }
+    ),
 
-  estimateMcmp: (text: string) =>
+  estimateMcmp: (text: string, version = 2) =>
     fetchJson<{ wire_bytes: number; compressed: boolean }>('/messages/mcmp-estimate', {
       method: 'POST',
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text, version }),
     }),
 
   // Fanout

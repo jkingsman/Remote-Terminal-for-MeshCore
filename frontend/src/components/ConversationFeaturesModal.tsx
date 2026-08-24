@@ -1,5 +1,6 @@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
 import { Switch } from './ui/switch';
+import { cn } from '@/lib/utils';
 
 /**
  * Per-conversation MeshCore Open feature toggles (compression today; image
@@ -19,7 +20,7 @@ interface FeatureRowProps {
 
 function FeatureRow({ title, description, checked, onCheckedChange, ariaLabel }: FeatureRowProps) {
   return (
-    <div className="flex items-start justify-between gap-3 rounded-md border border-border p-3">
+    <div className="flex items-start justify-between gap-3">
       <div className="min-w-0">
         <div className="text-sm font-medium text-foreground">{title}</div>
         <div className="mt-0.5 text-xs leading-snug text-muted-foreground">{description}</div>
@@ -34,6 +35,11 @@ function FeatureRow({ title, description, checked, onCheckedChange, ariaLabel }:
   );
 }
 
+const MCMP_VERSIONS: { value: number; label: string; description: string }[] = [
+  { value: 2, label: 'v2', description: 'Smaller; widely compatible' },
+  { value: 3, label: 'v3', description: 'Container (timestamp); matches the advanced fork' },
+];
+
 interface ConversationFeaturesModalProps {
   open: boolean;
   onClose: () => void;
@@ -41,7 +47,13 @@ interface ConversationFeaturesModalProps {
   conversationId: string;
   conversationName: string;
   mcmpEnabled: boolean;
-  onSetMcmpEnabled: (type: 'channel' | 'contact', id: string, enabled: boolean) => void;
+  mcmpVersion: number;
+  onSetMcmpEnabled: (
+    type: 'channel' | 'contact',
+    id: string,
+    enabled: boolean,
+    version: number
+  ) => void;
 }
 
 export function ConversationFeaturesModal({
@@ -51,6 +63,7 @@ export function ConversationFeaturesModal({
   conversationId,
   conversationName,
   mcmpEnabled,
+  mcmpVersion,
   onSetMcmpEnabled,
 }: ConversationFeaturesModalProps) {
   return (
@@ -67,13 +80,60 @@ export function ConversationFeaturesModal({
         </DialogHeader>
 
         <div className="space-y-2">
-          <FeatureRow
-            title="Compress messages (MCMP)"
-            description="Pack more text into a single packet with MCMP compression. The recipient must also support MCMP (meshcore-open / RemoteTerm) to read it; the compose counter then shows the compressed size."
-            checked={mcmpEnabled}
-            onCheckedChange={(next) => onSetMcmpEnabled(conversationType, conversationId, next)}
-            ariaLabel={mcmpEnabled ? 'Disable MCMP compression' : 'Enable MCMP compression'}
-          />
+          <div className="rounded-md border border-border p-3">
+            <FeatureRow
+              title="Compress messages (MCMP)"
+              description="Pack more text into a single packet with MCMP compression. The recipient must also support MCMP (meshcore-open / RemoteTerm) to read it; the compose counter then shows the compressed size."
+              checked={mcmpEnabled}
+              onCheckedChange={(next) =>
+                onSetMcmpEnabled(conversationType, conversationId, next, mcmpVersion)
+              }
+              ariaLabel={mcmpEnabled ? 'Disable MCMP compression' : 'Enable MCMP compression'}
+            />
+
+            {mcmpEnabled && (
+              <div className="mt-3 border-t border-border pt-3">
+                <div className="mb-1.5 text-xs font-medium text-foreground">Version</div>
+                <div
+                  className="grid grid-cols-2 gap-1.5"
+                  role="radiogroup"
+                  aria-label="MCMP version"
+                >
+                  {MCMP_VERSIONS.map((opt) => {
+                    const selected = mcmpVersion === opt.value;
+                    return (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        role="radio"
+                        aria-checked={selected}
+                        aria-label={`MCMP ${opt.label}`}
+                        onClick={() =>
+                          onSetMcmpEnabled(conversationType, conversationId, true, opt.value)
+                        }
+                        className={cn(
+                          'rounded-md border px-2.5 py-1.5 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                          selected
+                            ? 'border-primary bg-primary/10 text-foreground'
+                            : 'border-border hover:bg-accent'
+                        )}
+                      >
+                        <div className="font-medium">MCMP {opt.label}</div>
+                        <div className="text-xs leading-snug text-muted-foreground">
+                          {opt.description}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="mt-2 text-xs leading-snug text-muted-foreground">
+                  v2 is smallest and universally readable. v3 adds a metadata container (a timestamp
+                  now; signing/replies later) and is slightly larger. Both are decoded automatically
+                  on the way in.
+                </p>
+              </div>
+            )}
+          </div>
           {/* Future MeshCore Open features (image sharing, etc.) add a row here. */}
         </div>
       </DialogContent>

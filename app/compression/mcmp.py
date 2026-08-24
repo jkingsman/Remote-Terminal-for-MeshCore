@@ -956,22 +956,27 @@ def _log_model_load_failure() -> None:
         logger.warning("MCMP model unavailable; outbound compression disabled", exc_info=True)
 
 
-def encode_outbound(text: str) -> str:
-    """Compress ``text`` for sending, as the v2 text transport (``mcmp2:``).
+def encode_outbound(text: str, *, version: int = 2, timestamp: int = 0) -> str:
+    """Compress ``text`` for sending, as MCMP v2 (``mcmp2:``) or v3 (``mcmp3:``).
 
-    Uses the "only if smaller" gate: returns the original text unchanged when
-    compression would not shrink it (so short/incompressible messages stay
-    readable by any client). Never raises — on model-load failure the original
-    text is returned so sending still works, just uncompressed.
+    - **v2** uses the "only if smaller" gate: returns the text unchanged when
+      compression would not shrink it, so short/incompressible messages stay
+      readable by any client.
+    - **v3** always wraps the text in its metadata container (carrying
+      ``timestamp``), matching meshcore-open; it is slightly larger than v2 for
+      the same text (container + basE91). ``timestamp`` should be the message's
+      sender timestamp so a retry/resend produces identical bytes.
 
-    We send v2 rather than v3: without a firmware signature v3 only adds
-    container overhead, and v2's plaintext fallback keeps small messages
-    universally readable. (v3 is still decoded on the way in.)
+    Never raises — on model-load failure the original text is returned so sending
+    still works, just uncompressed. Both versions are decoded on the way in.
     """
     if not text:
         return text
     try:
-        return get_compressor().encode_if_smaller(text)
+        compressor = get_compressor()
+        if version == 3:
+            return encode_v3_text(compressor, text, timestamp=timestamp)
+        return compressor.encode_if_smaller(text)
     except Exception:
         _log_model_load_failure()
         return text

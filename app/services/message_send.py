@@ -307,9 +307,17 @@ async def send_channel_message_with_effective_scope(
         # prefix) separately. The firmware prepends "<name>: " to what we send,
         # so the sender name stays outside the compressed payload -- exactly how
         # meshcore-open frames it, and the channel budget already reserves room
-        # for the prefix. encode_outbound() is deterministic, so a resend
-        # produces identical wire bytes.
-        wire_msg = encode_outbound(text) if channel.mcmp_enabled else text
+        # for the prefix. encode_outbound() is deterministic (given the same
+        # timestamp), so a resend produces identical wire bytes.
+        wire_msg = (
+            encode_outbound(
+                text,
+                version=channel.mcmp_version,
+                timestamp=int.from_bytes(timestamp_bytes, "little"),
+            )
+            if channel.mcmp_enabled
+            else text
+        )
         if wire_msg != text:
             logger.debug(
                 "MCMP-compressed channel body for %s (%d -> %d bytes)",
@@ -549,7 +557,13 @@ async def _retry_direct_message_until_acked(
 
                 result = await mc.commands.send_msg(
                     dst=cached_contact,
-                    msg=encode_outbound(text) if contact.mcmp_enabled else text,
+                    msg=(
+                        encode_outbound(
+                            text, version=contact.mcmp_version, timestamp=sender_timestamp
+                        )
+                        if contact.mcmp_enabled
+                        else text
+                    ),
                     timestamp=sender_timestamp,
                     attempt=attempt,
                 )
@@ -670,7 +684,11 @@ async def send_direct_message_to_contact(
             # the retry path sends identical bytes.
             result = await mc.commands.send_msg(
                 dst=cached_contact,
-                msg=encode_outbound(text) if contact.mcmp_enabled else text,
+                msg=(
+                    encode_outbound(text, version=contact.mcmp_version, timestamp=sender_timestamp)
+                    if contact.mcmp_enabled
+                    else text
+                ),
                 timestamp=sender_timestamp,
             )
 

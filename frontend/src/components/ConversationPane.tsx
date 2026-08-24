@@ -64,7 +64,12 @@ interface ConversationPaneProps {
   onPathDiscovery: (publicKey: string) => Promise<PathDiscoveryResponse>;
   onToggleFavorite: (type: 'channel' | 'contact', id: string) => Promise<void>;
   onToggleMute: (key: string) => Promise<void>;
-  onSetMcmpEnabled?: (type: 'channel' | 'contact', id: string, enabled: boolean) => Promise<void>;
+  onSetMcmpEnabled?: (
+    type: 'channel' | 'contact',
+    id: string,
+    enabled: boolean,
+    version: number
+  ) => Promise<void>;
   onDeleteContact: (publicKey: string) => Promise<void>;
   onDeleteChannel: (key: string) => Promise<void>;
   onSetChannelFloodScopeOverride: (channelKey: string, floodScopeOverride: string) => Promise<void>;
@@ -199,6 +204,11 @@ export function ConversationPane({
   const activeMcmpEnabled =
     (!activeContactIsRoom && (activeContact?.mcmp_enabled ?? false)) ||
     (activeChannel?.mcmp_enabled ?? false);
+  // MCMP transport version (2 or 3) so the counter estimates the right size.
+  const activeMcmpVersion =
+    activeConversation?.type === 'contact'
+      ? (activeContact?.mcmp_version ?? 2)
+      : (activeChannel?.mcmp_version ?? 2);
   // Reset the room-auth gate when the conversation changes, but do it during
   // render (guarded by the previous id) rather than in an effect. An effect here
   // races the keyed RoomServerPanel's own onAuthenticatedChange mount report:
@@ -424,6 +434,7 @@ export function ConversationPane({
           conversationType={activeConversation.type}
           senderName={config?.name}
           mcmpEnabled={activeMcmpEnabled}
+          mcmpVersion={activeMcmpVersion}
           placeholder={
             !health?.radio_connected
               ? 'Radio not connected'

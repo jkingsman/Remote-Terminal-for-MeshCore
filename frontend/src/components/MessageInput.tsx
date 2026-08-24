@@ -49,6 +49,8 @@ interface MessageInputProps {
   /** When the conversation compresses outbound messages (MCMP), the counter
    *  reflects the compressed wire size instead of the raw byte length. */
   mcmpEnabled?: boolean;
+  /** MCMP transport version (2 or 3) the estimate should size for. */
+  mcmpVersion?: number;
 }
 
 type LimitState = 'normal' | 'warning' | 'danger' | 'error';
@@ -59,7 +61,7 @@ export interface MessageInputHandle {
 }
 
 export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(function MessageInput(
-  { onSend, disabled, placeholder, conversationType, senderName, mcmpEnabled },
+  { onSend, disabled, placeholder, conversationType, senderName, mcmpEnabled, mcmpVersion },
   ref
 ) {
   const [text, setText] = useState('');
@@ -130,7 +132,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
     let cancelled = false;
     const handle = setTimeout(() => {
       api
-        .estimateMcmp(text)
+        .estimateMcmp(text, mcmpVersion ?? 2)
         .then((res) => {
           if (!cancelled) setCompressed({ bytes: res.wire_bytes, forText: text });
         })
@@ -142,7 +144,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
       cancelled = true;
       clearTimeout(handle);
     };
-  }, [text, mcmpEnabled, limits]);
+  }, [text, mcmpEnabled, mcmpVersion, limits]);
 
   // The byte count the counter and limit thresholds use: the compressed size,
   // but only while it matches the current draft (so it can't freeze on a stale

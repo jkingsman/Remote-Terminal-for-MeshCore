@@ -211,7 +211,7 @@ describe('MessageInput', () => {
 
       // Rendered in both desktop and mobile counter variants.
       await waitFor(() => expect(screen.getAllByText(/40\/156/).length).toBeGreaterThan(0));
-      expect(mockApi.estimateMcmp).toHaveBeenCalledWith(text);
+      expect(mockApi.estimateMcmp).toHaveBeenCalledWith(text, 2);
       // The raw over-budget count is not shown.
       expect(screen.queryAllByText(/200\/156/).length).toBe(0);
     });

@@ -44,7 +44,12 @@ interface ChatHeaderProps {
   onOpenPushSettings?: () => void;
   onToggleFavorite: (type: 'channel' | 'contact', id: string) => void;
   onToggleMute?: (key: string) => void;
-  onSetMcmpEnabled?: (type: 'channel' | 'contact', id: string, enabled: boolean) => void;
+  onSetMcmpEnabled?: (
+    type: 'channel' | 'contact',
+    id: string,
+    enabled: boolean,
+    version: number
+  ) => void;
   onSetChannelFloodScopeOverride?: (key: string, floodScopeOverride: string) => void;
   onSetChannelPathHashModeOverride?: (key: string, pathHashModeOverride: number | null) => void;
   onDeleteChannel: (key: string) => void;
@@ -155,6 +160,10 @@ export function ChatHeader({
       : conversation.type === 'channel'
         ? (activeChannel?.mcmp_enabled ?? false)
         : false;
+  const mcmpVersion =
+    conversation.type === 'contact'
+      ? (activeContact?.mcmp_version ?? 2)
+      : (activeChannel?.mcmp_version ?? 2);
   const showFeaturesButton =
     !!onSetMcmpEnabled &&
     ((conversation.type === 'contact' && !activeContactIsRoomServer) ||
@@ -585,6 +594,7 @@ export function ChatHeader({
           conversationId={conversation.id}
           conversationName={conversation.name}
           mcmpEnabled={mcmpEnabled}
+          mcmpVersion={mcmpVersion}
           onSetMcmpEnabled={onSetMcmpEnabled}
         />
       )}

@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS contacts (
     first_seen INTEGER,
     last_read_at INTEGER,
     favorite INTEGER DEFAULT 0,
-    mcmp_enabled INTEGER DEFAULT 0
+    mcmp_enabled INTEGER DEFAULT 0,
+    mcmp_version INTEGER DEFAULT 2
 );
 
 CREATE TABLE IF NOT EXISTS channels (
@@ -45,7 +46,8 @@ CREATE TABLE IF NOT EXISTS channels (
     last_read_at INTEGER,
     favorite INTEGER DEFAULT 0,
     muted INTEGER DEFAULT 0,
-    mcmp_enabled INTEGER DEFAULT 0
+    mcmp_enabled INTEGER DEFAULT 0,
+    mcmp_version INTEGER DEFAULT 2
 );
 
 CREATE TABLE IF NOT EXISTS messages (

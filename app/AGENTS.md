@@ -171,7 +171,7 @@ The retry deliberately does not re-run `_ensure_on_radio` — re-adding the cont
 
 - MCMP (`app/compression/`) is a Python port of meshcore-open's arithmetic text compressor (n-gram model in `models/model-en-ru.json`), wire-compatible with it and dimapanov/mesh-compressor. Compressed bodies ride as ordinary message text behind an `mcmp2:` (v2) or `mcmp3:` (v3 metadata container) prefix.
 - **Decode on ingest:** `decode_incoming_body()` is called at every message ingest route — `create_message_from_decrypted` and `create_fallback_channel_message` (channels, raw-RF + get_msg) and `_store_direct_message` (DMs) — so the DB/search/bots see plaintext and content dedup stays consistent across routes. It never raises; a non-MCMP or malformed body is stored unchanged.
-- **Encode on send:** opt-in per conversation via `contacts.mcmp_enabled` / `channels.mcmp_enabled` (migration 066). `message_send.py` compresses only the transmitted body (v2, "only if smaller"); the stored/broadcast text stays plaintext. `encode_outbound()` is deterministic so DM retries and channel resends send identical bytes.
+- **Encode on send:** opt-in per conversation via `contacts.mcmp_enabled` / `channels.mcmp_enabled` (migration 066); the transport is selectable via `mcmp_version` (2 or 3; migration 067, default 2). `message_send.py` compresses only the transmitted body — v2 uses "only if smaller", v3 always wraps its container (carrying the message timestamp). The stored/broadcast text stays plaintext. `encode_outbound(text, version=, timestamp=)` is deterministic (v3 uses the sender timestamp) so DM retries and channel resends send identical bytes.
 - **Not implemented:** v3 Ed25519 signing (needs firmware) — v3 is sent unsigned and signed v3 from peers is decoded with the signature skipped, never verified. Decode is lenient (no re-encode verify) to tolerate cross-libm float drift.
 
 ### Region scope decoding (transport codes)
@@ -307,7 +307,7 @@ The background room poller (`app/radio_sync.py` `_room_poll_loop`, started post-
 - `POST /messages/direct`
 - `POST /messages/channel`
 - `POST /messages/channel/{message_id}/resend`
-- `POST /messages/mcmp-estimate` — compressed wire size of a draft (`{text}` → `{wire_bytes, compressed}`) for the live compose counter; pure computation, `text` capped at 4096 chars
+- `POST /messages/mcmp-estimate` — compressed wire size of a draft (`{text, version}` → `{wire_bytes, compressed}`) for the live compose counter; pure computation, `text` capped at 4096 chars
 
 ### Packets
 - `GET /packets/undecrypted/count`
@@ -331,7 +331,7 @@ The background room poller (`app/radio_sync.py` `_room_poll_loop`, started post-
 - `POST /settings/tracked-telemetry-contacts/toggle` — toggle tracked LPP telemetry for any contact (max 8)
 - `GET /settings/tracked-telemetry-contacts/schedule` — contact telemetry scheduling (shared ceiling with repeaters)
 - `POST /settings/muted-channels/toggle`
-- `POST /settings/mcmp/set` — enable/disable MCMP compression for a conversation (`{type: "contact"|"channel", id, enabled}`); broadcasts a `contact`/`channel` event
+- `POST /settings/mcmp/set` — configure MCMP for a conversation (`{type: "contact"|"channel", id, enabled, version?}`; `version` 2 or 3, omit to leave unchanged); broadcasts a `contact`/`channel` event
 
 ### Fanout
 - `GET /fanout` — list all fanout configs

@@ -180,6 +180,7 @@ class ContactRepository:
             mcmp_enabled=(
                 bool(row["mcmp_enabled"]) if "mcmp_enabled" in available_columns else False
             ),
+            mcmp_version=(row["mcmp_version"] if "mcmp_version" in available_columns else 2),
             last_contacted=row["last_contacted"],
             last_read_at=row["last_read_at"],
             first_seen=row["first_seen"],
@@ -502,6 +503,17 @@ class ContactRepository:
             async with conn.execute(
                 "UPDATE contacts SET mcmp_enabled = ? WHERE public_key = ?",
                 (1 if value else 0, public_key.lower()),
+            ) as cursor:
+                rowcount = cursor.rowcount
+        return rowcount > 0
+
+    @staticmethod
+    async def set_mcmp_version(public_key: str, version: int) -> bool:
+        """Set the MCMP transport version (2 or 3) for a contact."""
+        async with db.tx() as conn:
+            async with conn.execute(
+                "UPDATE contacts SET mcmp_version = ? WHERE public_key = ?",
+                (version, public_key.lower()),
             ) as cursor:
                 rowcount = cursor.rowcount
         return rowcount > 0
