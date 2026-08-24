@@ -25,6 +25,12 @@ interface UseConversationActionsResult {
     channelKey: string,
     pathHashModeOverride: number | null
   ) => Promise<void>;
+  handleSetChannelMcmp: (
+    channelKey: string,
+    mcmpEnabled: boolean,
+    mcmpSignEnabled: boolean
+  ) => Promise<void>;
+  handleSetContactMcmp: (publicKey: string, mcmpEnabled: boolean) => Promise<void>;
   handleSenderClick: (sender: string) => void;
   handleTrace: () => Promise<void>;
   handlePathDiscovery: (publicKey: string) => Promise<PathDiscoveryResponse>;
@@ -129,6 +135,36 @@ export function useConversationActions({
     [mergeChannelIntoList]
   );
 
+  const handleSetChannelMcmp = useCallback(
+    async (channelKey: string, mcmpEnabled: boolean, mcmpSignEnabled: boolean) => {
+      try {
+        const updated = await api.setChannelMcmpSettings(channelKey, mcmpEnabled, mcmpSignEnabled);
+        mergeChannelIntoList(updated);
+        toast.success('MCMP settings saved');
+      } catch (err) {
+        toast.error('Failed to update MCMP settings', {
+          description: err instanceof Error ? err.message : 'Unknown error',
+        });
+      }
+    },
+    [mergeChannelIntoList]
+  );
+
+  const handleSetContactMcmp = useCallback(
+    async (publicKey: string, mcmpEnabled: boolean) => {
+      try {
+        const updated = await api.setContactMcmpSettings(publicKey, mcmpEnabled);
+        setContacts((prev) => mergeContactIntoList(prev, updated));
+        toast.success('MCMP setting saved');
+      } catch (err) {
+        toast.error('Failed to update MCMP setting', {
+          description: err instanceof Error ? err.message : 'Unknown error',
+        });
+      }
+    },
+    [setContacts]
+  );
+
   const handleSenderClick = useCallback(
     (sender: string) => {
       messageInputRef.current?.appendText(`@[${sender}] `);
@@ -167,6 +203,8 @@ export function useConversationActions({
     handleResendChannelMessage,
     handleSetChannelFloodScopeOverride,
     handleSetChannelPathHashModeOverride,
+    handleSetChannelMcmp,
+    handleSetContactMcmp,
     handleSenderClick,
     handleTrace,
     handlePathDiscovery,

@@ -1,5 +1,5 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
-import { Activity, Ban, ChevronDown, ChevronRight, Search, Star } from 'lucide-react';
+import { Activity, Ban, ChevronDown, ChevronRight, Search, Settings2, Star } from 'lucide-react';
 import {
   AreaChart,
   Area,
@@ -40,6 +40,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '
 import { toast } from './ui/sonner';
 import { useDistanceUnit } from '../contexts/DistanceUnitContext';
 import { useEntranceSettled } from '../hooks/useEntranceSettled';
+import { ContactMcmpSettingsModal } from './ContactMcmpSettingsModal';
 import { CONTACT_TYPE_REPEATER } from '../types';
 import type {
   Contact,
@@ -84,6 +85,7 @@ interface ContactInfoPaneProps {
   onToggleBlockedName?: (name: string) => void;
   trackedTelemetryContacts?: string[];
   onToggleTrackedTelemetryContact?: (publicKey: string) => Promise<void>;
+  onSetContactMcmp: (publicKey: string, mcmpEnabled: boolean) => Promise<void>;
 }
 
 export function ContactInfoPane({
@@ -102,6 +104,7 @@ export function ContactInfoPane({
   onToggleBlockedName,
   trackedTelemetryContacts = [],
   onToggleTrackedTelemetryContact,
+  onSetContactMcmp,
 }: ContactInfoPaneProps) {
   const { distanceUnit } = useDistanceUnit();
   const isNameOnly = contactKey?.startsWith('name:') ?? false;
@@ -111,6 +114,7 @@ export function ContactInfoPane({
   const [loading, setLoading] = useState(false);
   const [telemetryLoading, setTelemetryLoading] = useState(false);
   const [telemetryHistory, setTelemetryHistory] = useState<TelemetryHistoryEntry[]>([]);
+  const [showMcmpSettings, setShowMcmpSettings] = useState(false);
 
   // Get live contact data from contacts array (real-time via WS)
   const liveContact =
@@ -457,6 +461,20 @@ export function ContactInfoPane({
               </button>
             </div>
 
+            {/* MCMP Settings */}
+            {!isRepeater && (
+              <div className="px-5 py-3 border-b border-border">
+                <button
+                  type="button"
+                  className="text-sm flex items-center gap-2 hover:text-primary transition-colors"
+                  onClick={() => setShowMcmpSettings(true)}
+                >
+                  <Settings2 className="h-4.5 w-4.5 text-muted-foreground" aria-hidden="true" />
+                  <span>MCMP Compression</span>
+                </button>
+              </div>
+            )}
+
             {/* Block toggles */}
             {(onToggleBlockedKey || onToggleBlockedName) && (
               <div className="px-5 py-3 border-b border-border space-y-2">
@@ -621,6 +639,18 @@ export function ContactInfoPane({
           </div>
         )}
       </SheetContent>
+
+      {contact && !isRepeater && (
+        <ContactMcmpSettingsModal
+          open={showMcmpSettings}
+          onClose={() => setShowMcmpSettings(false)}
+          contact={contact}
+          onSave={async (mcmpEnabled) => {
+            await onSetContactMcmp(contact.public_key, mcmpEnabled);
+            setShowMcmpSettings(false);
+          }}
+        />
+      )}
     </Sheet>
   );
 }
@@ -837,7 +867,6 @@ function ActivityLineChart<T extends ContactAnalyticsHourlyBucket | ContactAnaly
   tickFormatter: (point: T) => string;
   valueFormatter: (value: number) => string;
 }) {
-  // Reserve the chart's height while the pane animates in (see #317).
   if (!ready) {
     return <div role="img" aria-label={ariaLabel} style={{ height: ACTIVITY_CHART_HEIGHT }} />;
   }
@@ -1028,7 +1057,6 @@ function ContactTelemetrySection({
   }, [latestEntry]);
   const fetchedAt = latestEntry?.timestamp ?? null;
 
-  // Extract GPS from sensors
   const gpsSensor = sensors.find(
     (s) => s.type_name === 'gps' && typeof s.value === 'object' && s.value !== null
   );
@@ -1038,10 +1066,8 @@ function ContactTelemetrySection({
     typeof gpsValue.latitude === 'number' &&
     typeof gpsValue.longitude === 'number';
 
-  // Non-GPS sensors for display
   const displaySensors = sensors.filter((s) => s.type_name !== 'gps');
 
-  // Build disambiguated labels
   const labels = useMemo(() => {
     const counts = new Map<string, number>();
     return displaySensors.map((s) => {
@@ -1052,7 +1078,6 @@ function ContactTelemetrySection({
     });
   }, [displaySensors]);
 
-  // Discover unique LPP sensor series from history for charting
   const sensorSeries = useMemo(() => {
     const seen = new Map<string, { type_name: string; channel: number }>();
     for (const entry of telemetryHistory) {
@@ -1073,7 +1098,6 @@ function ContactTelemetrySection({
   const [selectedMetric, setSelectedMetric] = useState<string | null>(null);
   const activeMetric = selectedMetric ?? (sensorSeries.length > 0 ? sensorSeries[0].key : null);
 
-  // Build chart data for selected metric
   const chartData = useMemo(() => {
     if (!activeMetric) return [];
     const series = sensorSeries.find((s) => s.key === activeMetric);

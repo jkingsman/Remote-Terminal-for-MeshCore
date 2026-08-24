@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts';
-import { Star } from 'lucide-react';
+import { Settings2, Star } from 'lucide-react';
 import { api } from '../api';
 import { formatTime } from '../utils/messageParser';
 import { handleKeyboardActivate } from '../utils/a11y';
 import { useEntranceSettled } from '../hooks/useEntranceSettled';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from './ui/sheet';
 import { toast } from './ui/sonner';
+import { ChannelMcmpSettingsModal } from './ChannelMcmpSettingsModal';
+import { ChannelPathHashModeOverrideModal } from './ChannelPathHashModeOverrideModal';
 import type { Channel, ChannelDetail, PathHashWidthStats } from '../types';
 
 interface ChannelInfoPaneProps {
@@ -14,6 +16,15 @@ interface ChannelInfoPaneProps {
   onClose: () => void;
   channels: Channel[];
   onToggleFavorite: (type: 'channel' | 'contact', id: string) => void;
+  onSetChannelMcmp: (
+    channelKey: string,
+    mcmpEnabled: boolean,
+    mcmpSignEnabled: boolean
+  ) => Promise<void>;
+  onSetChannelPathHashModeOverride: (
+    channelKey: string,
+    pathHashModeOverride: number | null
+  ) => Promise<void>;
 }
 
 export function ChannelInfoPane({
@@ -21,10 +32,14 @@ export function ChannelInfoPane({
   onClose,
   channels,
   onToggleFavorite,
+  onSetChannelMcmp,
+  onSetChannelPathHashModeOverride,
 }: ChannelInfoPaneProps) {
   const [detail, setDetail] = useState<ChannelDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [showKey, setShowKey] = useState(false);
+  const [showMcmpSettings, setShowMcmpSettings] = useState(false);
+  const [showPathHashModeOverride, setShowPathHashModeOverride] = useState(false);
 
   // Get live channel data from channels array (real-time via WS)
   const liveChannel = channelKey ? (channels.find((c) => c.key === channelKey) ?? null) : null;
@@ -141,6 +156,26 @@ export function ChannelInfoPane({
               </button>
             </div>
 
+            {/* MCMP & Routing Settings */}
+            <div className="px-5 py-3 border-b border-border space-y-2">
+              <button
+                type="button"
+                className="text-sm flex items-center gap-2 hover:text-primary transition-colors"
+                onClick={() => setShowMcmpSettings(true)}
+              >
+                <Settings2 className="h-4.5 w-4.5 text-muted-foreground" aria-hidden="true" />
+                <span>MCMP Compression</span>
+              </button>
+              <button
+                type="button"
+                className="text-sm flex items-center gap-2 hover:text-primary transition-colors"
+                onClick={() => setShowPathHashModeOverride(true)}
+              >
+                <Settings2 className="h-4.5 w-4.5 text-muted-foreground" aria-hidden="true" />
+                <span>Path Hop Width Override</span>
+              </button>
+            </div>
+
             {/* Message Activity */}
             {detail && detail.message_counts.all_time > 0 && (
               <div className="px-5 py-3 border-b border-border">
@@ -217,6 +252,30 @@ export function ChannelInfoPane({
           </div>
         )}
       </SheetContent>
+
+      {/* Settings modals */}
+      {channel && (
+        <ChannelMcmpSettingsModal
+          open={showMcmpSettings}
+          onClose={() => setShowMcmpSettings(false)}
+          channel={channel}
+          onSave={async (mcmpEnabled, mcmpSignEnabled) => {
+            await onSetChannelMcmp(channel.key, mcmpEnabled, mcmpSignEnabled);
+            setShowMcmpSettings(false);
+          }}
+        />
+      )}
+      {channel && (
+        <ChannelPathHashModeOverrideModal
+          open={showPathHashModeOverride}
+          onClose={() => setShowPathHashModeOverride(false)}
+          channel={channel}
+          onSave={async (mode) => {
+            await onSetChannelPathHashModeOverride(channel.key, mode);
+            setShowPathHashModeOverride(false);
+          }}
+        />
+      )}
     </Sheet>
   );
 }
@@ -268,7 +327,6 @@ function HopWidthChart({ stats, ready }: { stats: PathHashWidthStats; ready: boo
   return (
     <div className="flex items-center gap-3">
       <div className="flex-shrink-0" style={{ width: 90, height: 90 }}>
-        {/* Reserve the box while the pane animates in (see #317). */}
         {ready && (
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>

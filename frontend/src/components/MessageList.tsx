@@ -40,10 +40,8 @@ interface MessageListProps {
   loading: boolean;
   loadingOlder?: boolean;
   hasOlderMessages?: boolean;
-  /** Id of the oldest unread message, from the server. Null when nothing is unread. */
   unreadMarkerMessageId?: number | null;
   onDismissUnreadMarker?: () => void;
-  /** Called when the unread boundary is not in loaded history and must be jumped to. */
   onNavigateToUnread?: (messageId: number) => void;
   onSenderClick?: (sender: string) => void;
   onLoadOlder?: () => void;
@@ -61,7 +59,6 @@ interface MessageListProps {
   preSorted?: boolean;
 }
 
-// Renders a MeshCore Open GIF payload, falling back to the raw text on load error.
 function GifPayload({ gifId, rawText }: { gifId: string; rawText: string }) {
   const [failed, setFailed] = useState(false);
   if (failed) {
@@ -87,8 +84,6 @@ function GifPayload({ gifId, rawText }: { gifId: string; rawText: string }) {
   );
 }
 
-// Renders a MeshCore Open reaction generically (emoji + "reacted"); the target
-// message is not resolved (see issue #291).
 function ReactionPayload({ emoji }: { emoji: string }) {
   return (
     <span className="inline-flex items-center gap-1.5">
@@ -98,7 +93,6 @@ function ReactionPayload({ emoji }: { emoji: string }) {
   );
 }
 
-// Render a bare payload body (no reply prefix) into its rich node, or null.
 function renderPayloadBody(body: string): ReactNode | null {
   const gifId = parseGif(body);
   if (gifId) {
@@ -111,11 +105,6 @@ function renderPayloadBody(body: string): ReactNode | null {
   return null;
 }
 
-// Recognize a MeshCore Open payload and render it. Handles both a whole-message
-// payload ("g:<id>") and a reply-prefixed one ("@[Name] g:<id>") — the form
-// meshcore-open sends when a GIF/reaction is a reply, which otherwise renders as
-// raw text (issue #291). Returns null when the content is not a recognized
-// payload, so the caller renders normally.
 function renderMeshcoreOpenPayload(
   content: string,
   radioName?: string,
@@ -128,8 +117,6 @@ function renderMeshcoreOpenPayload(
   if (split) {
     const body = renderPayloadBody(split.body);
     if (body) {
-      // Preserve the reply mention (rendered as a normal @[Name] mention) so the
-      // GIF/reaction still reads as a reply to that person.
       return (
         <span className="inline-flex flex-wrap items-center gap-1.5">
           {renderTextWithMentions(split.mention, radioName, onChannelReferenceClick)}
@@ -141,23 +128,10 @@ function renderMeshcoreOpenPayload(
   return null;
 }
 
-/**
- * Starting guess for an unmeasured row: a single-line message with its header.
- * Rows are measured for real once they scroll into view.
- */
 const ESTIMATED_MESSAGE_HEIGHT = 64;
-
-/** Stand-in viewport height for when the scroll container cannot be measured. */
 const FALLBACK_VIEWPORT_HEIGHT = 800;
-/**
- * Frames a pending bottom-pin may re-assert itself for. Row heights start as
- * estimates and converge over the first few measurement passes, so the pin has to
- * outlive them; the budget stops a list that can never reach the bottom (a
- * container stuck at zero height) from re-scrolling forever.
- */
 const BOTTOM_SCROLL_FRAME_BUDGET = 20;
 
-// URL regex for linkifying plain text
 const URL_PATTERN =
   /https?:\/\/(www\.)?[-a-zA-Z0-9@:%._+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_+.~#?&//=]*)/g;
 
@@ -213,7 +187,6 @@ function renderChannelReferences(
   return parts;
 }
 
-// Helper to convert URLs and channel references in a plain text string into rich content
 function linkifyText(
   text: string,
   keyPrefix: string,
@@ -264,7 +237,6 @@ function linkifyText(
   return parts;
 }
 
-// Helper to render text with highlighted @[Name] mentions and clickable URLs
 function renderTextWithMentions(
   text: string,
   radioName?: string,
@@ -277,7 +249,6 @@ function renderTextWithMentions(
   let keyIndex = 0;
 
   while ((match = mentionPattern.exec(text)) !== null) {
-    // Add text before the match (with linkification)
     if (match.index > lastIndex) {
       parts.push(
         ...linkifyText(
@@ -306,7 +277,6 @@ function renderTextWithMentions(
     lastIndex = match.index + match[0].length;
   }
 
-  // Add remaining text after last match (with linkification)
   if (lastIndex < text.length) {
     parts.push(...linkifyText(text.slice(lastIndex), `post-${keyIndex}`, onChannelReferenceClick));
   }
@@ -314,7 +284,6 @@ function renderTextWithMentions(
   return parts.length > 0 ? parts : text;
 }
 
-// Clickable hop count badge that opens the path modal
 interface HopCountBadgeProps {
   paths: MessagePath[];
   onClick: () => void;
@@ -350,7 +319,6 @@ function HopCountBadge({ paths, onClick, variant }: HopCountBadgeProps) {
   );
 }
 
-// Region scope badge for messages that arrived via a transport-routed (region-scoped) packet.
 function RegionBadge({ region }: { region: string }) {
   return (
     <span
@@ -359,6 +327,28 @@ function RegionBadge({ region }: { region: string }) {
     >
       {region}
     </span>
+  );
+}
+
+/** Lock icon for MCMP v3 messages. Grey for unsigned, green for valid signature. */
+function McmpLockIcon({ status }: { status: 'unsigned' | 'valid' }) {
+  const colorClass = status === 'valid' ? 'text-emerald-500' : 'text-muted-foreground';
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={cn('ml-1.5 inline-block h-3 w-3 align-middle', colorClass)}
+      aria-label={status === 'valid' ? 'Valid MCMP signature' : 'Unsigned MCMP message'}
+      title={status === 'valid' ? 'Valid MCMP signature' : 'Unsigned MCMP message'}
+    >
+      <rect x="4" y="11" width="16" height="10" rx="2" />
+      <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+    </svg>
   );
 }
 
@@ -412,20 +402,9 @@ export function MessageList({
   const listRef = useRef<HTMLDivElement>(null);
   const prevMessagesLengthRef = useRef<number>(0);
   const isInitialLoadRef = useRef<boolean>(true);
-  // A pending request to pin the list to the newest message.
-  //
-  // Rows are measured lazily, so the total size at mount is a guess built from
-  // estimates. A single scrollToIndex against that guess gets undone by the
-  // measurement passes that follow — and under StrictMode's double-invoked
-  // effects it is undone completely, leaving the view stranded at the top. So
-  // the request is held open and re-asserted as measurements land, rather than
-  // fired once and marked done.
   const pendingBottomScrollRef = useRef(false);
   const [bottomScrollNonce, setBottomScrollNonce] = useState(0);
   const virtualSpacerRef = useRef<HTMLDivElement>(null);
-  // Distance from the scroll container's content origin down to the first row.
-  // Non-zero because the container carries p-4 and can show a loading/older
-  // banner above the rows; see the scrollMargin note on the virtualizer.
   const [scrollMargin, setScrollMargin] = useState(0);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [selectedPath, setSelectedPath] = useState<{
@@ -453,20 +432,17 @@ export function MessageList({
   const targetScrolledRef = useRef(false);
   const unreadMarkerRef = useRef<HTMLButtonElement | HTMLDivElement | null>(null);
 
-  // Capture scroll state in the scroll handler BEFORE any state updates
   const scrollStateRef = useRef({
     scrollTop: 0,
     scrollHeight: 0,
     clientHeight: 0,
     wasNearTop: false,
-    wasNearBottom: true, // Default to true so initial messages scroll to bottom
+    wasNearBottom: true,
   });
 
-  // Track conversation key to detect when entire message set changes
   const prevConvKeyRef = useRef<string | null>(null);
 
   const handleAnalyzePacket = useCallback(async (message: Message) => {
-    // Extract signal from the first path if available
     const firstPath = message.paths?.[0];
     packetSignalOverrideRef.current =
       firstPath && (firstPath.rssi != null || firstPath.snr != null)
@@ -509,9 +485,6 @@ export function MessageList({
     }
   }, []);
 
-  // Sort messages by received_at ascending (oldest first)
-  // Note: Deduplication is handled by useConversationMessages.observeMessage()
-  // and the database UNIQUE constraint on (type, conversation_key, text, sender_timestamp)
   const sortedMessages = useMemo(
     () =>
       preSorted
@@ -519,37 +492,22 @@ export function MessageList({
         : [...messages].sort((a, b) => a.received_at - b.received_at || a.id - b.id),
     [messages, preSorted]
   );
-  /**
-   * Only the visible window of messages is mounted. A long channel history otherwise
-   * costs a full render of every message on any update — hundreds of milliseconds once
-   * a conversation has a few thousand messages, which stalls everything else on the
-   * main thread, typing included.
-   *
-   * Heights are measured, not assumed: messages vary wildly (one line, a wrapped
-   * paragraph, path badges, the unread divider), so `estimateSize` is only the starting
-   * guess for rows that have not been on screen yet.
-   */
+
+  // Filter out incoming channel messages with invalid MCMP signatures.
+  // Unsigned and valid-signed messages remain visible.
+  const visibleMessages = useMemo(
+    () => sortedMessages.filter((msg) => msg.mcmp_signature_status !== 'invalid'),
+    [sortedMessages]
+  );
+
   const virtualizer = useVirtualizer({
-    count: sortedMessages.length,
+    count: visibleMessages.length,
     getScrollElement: () => listRef.current,
     estimateSize: () => ESTIMATED_MESSAGE_HEIGHT,
-    // Rows do not start at the scroll container's origin: the container has p-4
-    // padding and may render an "older messages" banner above them. Without this
-    // the virtualizer's offsets are short by that distance, so every
-    // scrollToIndex with 'start'/'center' lands high by 16-48px — and the error
-    // moves as the banner appears and disappears during pagination.
     scrollMargin,
-    // String sentinel for the transient window past the end of a shrunken list:
-    // a bare index would share the keyspace with message ids and poison the
-    // measurement cache for whichever message happens to have that id.
-    getItemKey: (index) => sortedMessages[index]?.id ?? `__idx:${index}`,
+    getItemKey: (index) => visibleMessages[index]?.id ?? `__idx:${index}`,
     overscan: 8,
-    // A row that measures zero has not really been laid out yet (hidden pane, images
-    // still loading). Keep the estimate instead, or the window balloons to compensate.
     measureElement: (element) => element.getBoundingClientRect().height || ESTIMATED_MESSAGE_HEIGHT,
-    // A viewport that measures zero (before first layout, a hidden tab, jsdom) would
-    // otherwise collapse the window to nothing and render an empty list. Fall back to a
-    // nominal height so we always mount a plausible screenful.
     observeElementRect: (instance, cb) => {
       const element = instance.scrollElement;
       if (!element) return;
@@ -565,14 +523,10 @@ export function MessageList({
   });
   const virtualRows = virtualizer.getVirtualItems();
 
-  // Re-measured whenever something above the rows can change height.
   useLayoutEffect(() => {
     const spacer = virtualSpacerRef.current;
     const list = listRef.current;
     if (!spacer || !list) return;
-    // Relative to the scroll container's *content* origin, so it is independent
-    // of the current scroll position. offsetTop is not usable here: the two
-    // elements can resolve to different offsetParents.
     const next = Math.round(
       spacer.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop
     );
@@ -592,13 +546,9 @@ export function MessageList({
     setBottomScrollNonce((n) => n + 1);
   }, []);
 
-  // Drives a pending bottom-pin across a bounded run of frames. Deliberately not
-  // keyed on the virtualizer's total size: that churns on every measurement pass,
-  // which would re-enter this effect continuously. A fixed frame budget converges
-  // as rows are measured and then stops on its own.
   useEffect(() => {
     if (!pendingBottomScrollRef.current) return;
-    if (sortedMessages.length === 0) return;
+    if (visibleMessages.length === 0) return;
 
     let frames = 0;
     let raf = 0;
@@ -607,16 +557,12 @@ export function MessageList({
       const list = listRef.current;
       if (!pendingBottomScrollRef.current || !list) return;
 
-      // Something other than us moved the scroll (a programmatic scrollTop, a
-      // restored position, assistive tech). Gesture handlers only catch a human
-      // at the wheel, so also bail when the position we last set has been moved
-      // upward — the pin must never fight another writer.
       if (lastAppliedTop !== null && list.scrollTop < lastAppliedTop - 1) {
         pendingBottomScrollRef.current = false;
         return;
       }
 
-      scrollToIndex(sortedMessages.length - 1, 'end');
+      scrollToIndex(visibleMessages.length - 1, 'end');
       lastAppliedTop = list.scrollTop;
 
       const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight <= 1;
@@ -628,78 +574,54 @@ export function MessageList({
     };
     raf = requestAnimationFrame(step);
     return () => cancelAnimationFrame(raf);
-  }, [bottomScrollNonce, sortedMessages.length, scrollToIndex]);
+  }, [bottomScrollNonce, visibleMessages.length, scrollToIndex]);
 
-  // Any deliberate scroll gesture cancels the pending pin, so the retry loop can
-  // never fight a user who has started reading back through history.
   const cancelBottomScroll = useCallback(() => {
     pendingBottomScrollRef.current = false;
   }, []);
 
-  // Handle scroll position AFTER render
   useLayoutEffect(() => {
     if (!listRef.current) return;
 
     const messagesAdded = messages.length - prevMessagesLengthRef.current;
 
-    // Detect if messages are from a different conversation (handles the case where
-    // the key prop remount consumes isInitialLoadRef on stale data from the previous
-    // conversation before the cache restore effect sets the correct messages)
     const convKey = messages.length > 0 ? messages[0].conversation_key : null;
     const conversationChanged = convKey !== null && convKey !== prevConvKeyRef.current;
     if (convKey !== null) prevConvKeyRef.current = convKey;
 
-    if ((isInitialLoadRef.current || conversationChanged) && messages.length > 0) {
-      // Initial load or conversation switch - pin to the newest message. Requested
-      // rather than performed here; see pendingBottomScrollRef.
-      //
-      // Unless we are loading *at* a specific message: jump-to-message and
-      // jump-to-unread clear the list before fetching a window around their
-      // target, which trips both the initial-load and conversation-changed
-      // branches. Pinning to the bottom here would then discard the target scroll
-      // a frame later, stranding the user at the newest message instead.
+    if ((isInitialLoadRef.current || conversationChanged) && visibleMessages.length > 0) {
       if (!targetMessageId) {
         requestBottomScroll();
       }
       isInitialLoadRef.current = false;
     } else if (messagesAdded > 0 && prevMessagesLengthRef.current > 0) {
       if (scrollStateRef.current.wasNearTop) {
-        // User was near top (loading older) - keep the message that was on top in place.
-        // Prepended rows are unmeasured, so anchoring by index beats height arithmetic.
         scrollToIndex(messagesAdded, 'start');
       } else if (scrollStateRef.current.wasNearBottom && !hasNewerMessagesRef.current) {
-        // User was near bottom - follow new messages (including sent).
-        // Skip when browsing mid-history (hasNewerMessages) so that forward-pagination
-        // appends in place instead of chasing the bottom in an infinite load loop.
         requestBottomScroll();
       }
     }
 
     prevMessagesLengthRef.current = messages.length;
-  }, [messages, sortedMessages.length, scrollToIndex, requestBottomScroll, targetMessageId]);
+  }, [messages, visibleMessages.length, scrollToIndex, requestBottomScroll, targetMessageId]);
 
-  // Scroll to target message and highlight it
   useLayoutEffect(() => {
-    if (!targetMessageId || targetScrolledRef.current || messages.length === 0) return;
-    const targetIndex = sortedMessages.findIndex((msg) => msg.id === targetMessageId);
+    if (!targetMessageId || targetScrolledRef.current || visibleMessages.length === 0) return;
+    const targetIndex = visibleMessages.findIndex((msg) => msg.id === targetMessageId);
     if (targetIndex === -1) return;
 
-    // Prevent the initial-load layout effect from overriding our scroll, and drop
-    // any bottom pin already queued by an earlier pass over the same commit.
     isInitialLoadRef.current = false;
     pendingBottomScrollRef.current = false;
     scrollToIndex(targetIndex, 'center');
     setHighlightedMessageId(targetMessageId);
     targetScrolledRef.current = true;
     onTargetReached?.();
-  }, [messages, sortedMessages, targetMessageId, onTargetReached, scrollToIndex]);
+  }, [visibleMessages, targetMessageId, onTargetReached, scrollToIndex]);
 
-  // Reset target scroll tracking when targetMessageId changes
   useEffect(() => {
     targetScrolledRef.current = false;
   }, [targetMessageId]);
 
-  // Reset initial load flag when conversation changes (messages becomes empty then filled)
   useEffect(() => {
     if (messages.length === 0) {
       isInitialLoadRef.current = true;
@@ -715,7 +637,6 @@ export function MessageList({
     }
   }, [messages.length]);
 
-  // Track resendable outgoing CHAN messages (within 30s window)
   useEffect(() => {
     if (!onResendChannelMessage) return;
 
@@ -730,7 +651,6 @@ export function MessageList({
 
       newResendable.add(msg.id);
 
-      // Schedule removal if not already tracked
       if (!timers.has(msg.id)) {
         const timer = setTimeout(() => {
           setResendableIds((prev) => {
@@ -767,19 +687,11 @@ export function MessageList({
     };
   }, [messages, onResendChannelMessage]);
 
-  /**
-   * Located by message id, not by timestamp. The previous `received_at > boundary`
-   * scan returned 0 — the top of the loaded window — whenever the real boundary was
-   * further back than anything loaded, so the divider silently pointed at the wrong
-   * message. Matching on identity returns -1 in that case, which is the truth: the
-   * boundary is elsewhere, and `boundaryOutsideWindow` below offers to go to it.
-   */
   const unreadMarkerIndex = useMemo(() => {
     if (unreadMarkerMessageId == null) return -1;
-    return sortedMessages.findIndex((msg) => msg.id === unreadMarkerMessageId);
-  }, [sortedMessages, unreadMarkerMessageId]);
+    return visibleMessages.findIndex((msg) => msg.id === unreadMarkerMessageId);
+  }, [visibleMessages, unreadMarkerMessageId]);
 
-  // Unread exists, but the message it starts at has not been loaded.
   const boundaryOutsideWindow = unreadMarkerMessageId != null && unreadMarkerIndex === -1;
 
   const syncJumpToUnreadVisibility = useCallback(() => {
@@ -787,7 +699,6 @@ export function MessageList({
       setShowJumpToUnread(false);
       return;
     }
-    // Boundary is real but out of the loaded window: always offer the jump.
     if (boundaryOutsideWindow) {
       setShowJumpToUnread(true);
       return;
@@ -826,7 +737,6 @@ export function MessageList({
     setShowJumpToUnread(!markerVisible);
   }, [jumpToUnreadDismissed, unreadMarkerIndex, boundaryOutsideWindow]);
 
-  // Refs for scroll handler to read without causing callback recreation
   const onLoadOlderRef = useRef(onLoadOlder);
   const loadingOlderRef = useRef(loadingOlder);
   const hasOlderMessagesRef = useRef(hasOlderMessages);
@@ -856,8 +766,6 @@ export function MessageList({
     syncJumpToUnreadVisibility();
   }, [messages, syncJumpToUnreadVisibility]);
 
-  // Handle scroll - capture state and detect when user is near top/bottom
-  // Stable callback: reads changing values from refs, never recreated.
   const handleScroll = useCallback(() => {
     if (!listRef.current) return;
 
@@ -891,16 +799,14 @@ export function MessageList({
     syncJumpToUnreadVisibility();
   }, [syncJumpToUnreadVisibility]);
 
-  // Scroll to bottom handler (or jump to bottom if viewing historical messages)
   const scrollToBottom = useCallback(() => {
     if (hasNewerMessages && onJumpToBottom) {
       onJumpToBottom();
       return;
     }
-    scrollToIndex(sortedMessages.length - 1, 'end');
-  }, [hasNewerMessages, onJumpToBottom, scrollToIndex, sortedMessages.length]);
+    scrollToIndex(visibleMessages.length - 1, 'end');
+  }, [hasNewerMessages, onJumpToBottom, scrollToIndex, visibleMessages.length]);
 
-  // Sender info for outgoing messages (used by path modal on own messages)
   const selfSenderInfo = useMemo<SenderInfo>(
     () => ({
       name: config?.name || 'Unknown',
@@ -912,17 +818,14 @@ export function MessageList({
     [config?.name, config?.public_key, config?.lat, config?.lon, config?.path_hash_mode]
   );
 
-  // Derive live so the byte-perfect button disables if the 30s window expires while modal is open
   const isSelectedMessageResendable =
     selectedPath?.messageId !== undefined && resendableIds.has(selectedPath.messageId);
 
-  // Look up contact by public key
   const getContact = (conversationKey: string | null): Contact | null => {
     if (!conversationKey) return null;
     return contacts.find((c) => c.public_key === conversationKey) || null;
   };
 
-  // Look up contact by name (for channel messages where we parse sender from text)
   const getContactByName = (name: string): Contact | null => {
     return contacts.find((c) => c.name === name) || null;
   };
@@ -938,7 +841,6 @@ export function MessageList({
     );
   };
 
-  // Build sender info for path modal
   const getSenderInfo = (
     msg: Message,
     contact: Contact | null,
@@ -1008,7 +910,6 @@ export function MessageList({
       }
     }
 
-    // For channel messages, try to find contact by parsed sender name
     if (parsedSender) {
       const senderContact = getContactByName(parsedSender);
       if (senderContact) {
@@ -1022,7 +923,6 @@ export function MessageList({
         };
       }
     }
-    // Fallback: unknown sender
     return {
       name: parsedSender || 'Unknown',
       publicKeyOrPrefix: msg.conversation_key || '',
@@ -1048,7 +948,6 @@ export function MessageList({
     );
   }
 
-  // Helper to get a unique sender key for grouping messages
   const getSenderKey = (
     msg: Message,
     senderName: string | null,
@@ -1091,18 +990,11 @@ export function MessageList({
         >
           {virtualRows.map((virtualRow) => {
             const index = virtualRow.index;
-            const msg = sortedMessages[index];
-            // The virtualizer can briefly hold indices from a longer previous list
-            // (conversation switch, blocked-sender refilter). Rendering ahead of
-            // that would dereference undefined and blank the whole chat pane.
+            const msg = visibleMessages[index];
             if (!msg) return null;
-            // For DMs, look up contact; for channel messages, use parsed sender
             const contact = msg.type === 'PRIV' ? getContact(msg.conversation_key) : null;
             const isRoomServer = contact?.type === CONTACT_TYPE_ROOM;
 
-            // Only parse "sender: text" prefix for channel messages — DMs never carry
-            // an in-text sender prefix, so parsing them would incorrectly strip
-            // user text that happens to contain a colon (e.g. "TEST1: TEST2").
             const { sender, content } =
               msg.type === 'PRIV'
                 ? { sender: null, content: msg.text }
@@ -1129,13 +1021,12 @@ export function MessageList({
               displaySender !== 'Unknown' &&
               displaySender !== CORRUPT_SENDER_LABEL;
 
-            // Determine if we should show avatar (first message in a chunk from same sender)
             const currentSenderKey = getSenderKey(
               msg,
               directSenderName || channelSenderName,
               isCorruptChannelMessage
             );
-            const prevMsg = sortedMessages[index - 1];
+            const prevMsg = visibleMessages[index - 1];
             const prevParsedSender =
               prevMsg && prevMsg.type === 'CHAN' ? parseSenderFromText(prevMsg.text).sender : null;
             const prevSenderKey = prevMsg
@@ -1154,7 +1045,6 @@ export function MessageList({
             const showAvatar = !msg.outgoing && isFirstInGroup;
             const isFirstMessage = index === 0;
 
-            // Get avatar info for incoming messages
             let avatarName: string | null = null;
             let avatarKey: string = '';
             let avatarVariant: 'default' | 'corrupt' = 'default';
@@ -1173,7 +1063,6 @@ export function MessageList({
                 avatarKey = `corrupt:${msg.id}`;
                 avatarVariant = 'corrupt';
               } else {
-                // Channel message: use stored sender identity first, then parsed/fallback display name
                 avatarName =
                   channelSenderName || (displaySender !== 'Unknown' ? displaySender : null);
                 avatarKey =
@@ -1188,17 +1077,11 @@ export function MessageList({
                 : `View info for ${avatarKey.slice(0, 12)}`;
 
             return (
-              // Absolutely positioned so the scroll container keeps a stable total height
-              // while only the visible window is mounted. `flex flex-col` matters: it makes
-              // child margins (group spacing, the unread divider) part of the measured height.
               <div
                 key={msg.id}
                 data-index={index}
                 ref={virtualizer.measureElement}
                 className="absolute left-0 top-0 flex w-full flex-col pb-0.5"
-                // start is measured from the scroll container's origin, which
-                // scrollMargin accounts for; the spacer already sits that far
-                // down, so subtract it back out when positioning within it.
                 style={{ transform: `translateY(${virtualRow.start - scrollMargin}px)` }}
               >
                 {unreadMarkerIndex === index &&
@@ -1311,6 +1194,11 @@ export function MessageList({
                             }
                           />
                         )}
+                        {!msg.outgoing &&
+                          (msg.mcmp_signature_status === 'unsigned' ||
+                            msg.mcmp_signature_status === 'valid') && (
+                            <McmpLockIcon status={msg.mcmp_signature_status} />
+                          )}
                         {msg.region && <RegionBadge region={msg.region} />}
                       </div>
                     )}
@@ -1346,6 +1234,11 @@ export function MessageList({
                               }
                             />
                           )}
+                          {!msg.outgoing &&
+                            (msg.mcmp_signature_status === 'unsigned' ||
+                              msg.mcmp_signature_status === 'valid') && (
+                              <McmpLockIcon status={msg.mcmp_signature_status} />
+                            )}
                           {msg.region && <RegionBadge region={msg.region} />}
                         </>
                       )}
@@ -1420,7 +1313,6 @@ export function MessageList({
         )}
       </div>
 
-      {/* Scroll to bottom button */}
       {showJumpToUnread && (
         <div className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2">
           <div className="pointer-events-auto flex h-9 items-center overflow-hidden rounded-full border border-border bg-card shadow-lg transition-all hover:scale-105">
@@ -1428,14 +1320,10 @@ export function MessageList({
               type="button"
               onClick={() => {
                 if (boundaryOutsideWindow && unreadMarkerMessageId != null) {
-                  // Not in loaded history: hand off to the jump-to-message path,
-                  // which loads a window around the boundary instead of paging
-                  // everything between here and there.
                   onNavigateToUnread?.(unreadMarkerMessageId);
                 } else if (unreadMarkerRef.current?.scrollIntoView) {
                   unreadMarkerRef.current.scrollIntoView({ block: 'center' });
                 } else {
-                  // The marker row is outside the rendered window — scroll by index.
                   scrollToIndex(unreadMarkerIndex, 'center');
                 }
                 setJumpToUnreadDismissed(true);
@@ -1484,7 +1372,6 @@ export function MessageList({
         </button>
       )}
 
-      {/* Path modal */}
       {selectedPath && (
         <PathModal
           open={true}
