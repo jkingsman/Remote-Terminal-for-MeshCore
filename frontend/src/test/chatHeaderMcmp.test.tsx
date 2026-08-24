@@ -58,8 +58,10 @@ const baseProps = {
   onDeleteContact: noop,
 };
 
-describe('ChatHeader MCMP toggle', () => {
-  it('enables compression for a channel that has it off', () => {
+const FEATURES_BUTTON = { name: 'Conversation features' };
+
+describe('ChatHeader conversation-features modal', () => {
+  it('opens the modal and enables MCMP for a channel that has it off', () => {
     const key = 'AA'.repeat(16);
     const channel = makeChannel(key, '#general', false);
     const conversation: Conversation = { type: 'channel', id: key, name: '#general' };
@@ -74,11 +76,15 @@ describe('ChatHeader MCMP toggle', () => {
       />
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Enable MCMP compression' }));
+    // The toggle is not shown until the modal is opened.
+    expect(screen.queryByRole('switch', { name: /MCMP compression/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', FEATURES_BUTTON));
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Enable MCMP compression' }));
     expect(onSetMcmpEnabled).toHaveBeenCalledWith('channel', key, true);
   });
 
-  it('disables compression for a channel that has it on', () => {
+  it('shows the toggle on for a channel that has MCMP enabled, and disables it', () => {
     const key = 'BB'.repeat(16);
     const channel = makeChannel(key, '#general', true);
     const conversation: Conversation = { type: 'channel', id: key, name: '#general' };
@@ -93,11 +99,34 @@ describe('ChatHeader MCMP toggle', () => {
       />
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Disable MCMP compression' }));
+    fireEvent.click(screen.getByRole('button', FEATURES_BUTTON));
+    const toggle = screen.getByRole('switch', { name: 'Disable MCMP compression' });
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(toggle);
     expect(onSetMcmpEnabled).toHaveBeenCalledWith('channel', key, false);
   });
 
-  it('does not render the toggle without an onSetMcmpEnabled handler', () => {
+  it('opens the modal for a regular contact', () => {
+    const key = 'ab'.repeat(32);
+    const contact: Contact = { ...makeRoomContact(key, 'Alice'), type: 1 };
+    const conversation: Conversation = { type: 'contact', id: key, name: 'Alice' };
+    const onSetMcmpEnabled = vi.fn();
+
+    render(
+      <ChatHeader
+        {...baseProps}
+        conversation={conversation}
+        contacts={[contact]}
+        onSetMcmpEnabled={onSetMcmpEnabled}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', FEATURES_BUTTON));
+    fireEvent.click(screen.getByRole('switch', { name: 'Enable MCMP compression' }));
+    expect(onSetMcmpEnabled).toHaveBeenCalledWith('contact', key, true);
+  });
+
+  it('does not render the features button without an onSetMcmpEnabled handler', () => {
     const key = 'CC'.repeat(16);
     const conversation: Conversation = { type: 'channel', id: key, name: '#general' };
 
@@ -109,10 +138,10 @@ describe('ChatHeader MCMP toggle', () => {
       />
     );
 
-    expect(screen.queryByRole('button', { name: /MCMP compression/ })).toBeNull();
+    expect(screen.queryByRole('button', FEATURES_BUTTON)).toBeNull();
   });
 
-  it('does not offer compression for room servers', () => {
+  it('does not offer features for room servers', () => {
     const key = 'dd'.repeat(32);
     const room = makeRoomContact(key, 'Ops Room');
     const conversation: Conversation = { type: 'contact', id: key, name: 'Ops Room' };
@@ -126,6 +155,6 @@ describe('ChatHeader MCMP toggle', () => {
       />
     );
 
-    expect(screen.queryByRole('button', { name: /MCMP compression/ })).toBeNull();
+    expect(screen.queryByRole('button', FEATURES_BUTTON)).toBeNull();
   });
 });
