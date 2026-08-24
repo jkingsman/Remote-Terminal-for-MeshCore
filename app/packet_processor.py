@@ -7,9 +7,6 @@ This module handles:
 - Decrypting direct messages with stored contact keys (if private key available)
 - Creating message entries for successfully decrypted packets
 - Broadcasting updates via WebSocket
-
-This is the primary path for message processing when channel/contact keys
-are offloaded from the radio to the server.
 """
 
 import asyncio
@@ -30,6 +27,7 @@ from app.decoder import (
     verify_advert_signature,
 )
 from app.keystore import get_private_key, get_public_key, has_private_key
+from app.mcmp import McmpAppCodec
 from app.models import (
     Contact,
     ContactUpsert,
@@ -161,14 +159,6 @@ async def run_historical_dm_decryption(
         packet_timestamp,
     ) in RawPacketRepository.stream_undecrypted_text_messages():
         total += 1
-        # Note: passing our_public_key=None disables the outbound hash check in
-        # try_decrypt_dm (only the inbound check src_hash == their_first_byte runs).
-        # For the 255/256 case where our first byte differs from the contact's,
-        # outgoing packets fail the inbound check and are skipped — which is correct
-        # since outgoing DMs are stored directly by the send endpoint.
-        # For the 1/256 case where bytes match, an outgoing packet may decrypt
-        # successfully, but the dual-hash direction check below correctly identifies
-        # it and the DB dedup constraint prevents a duplicate insert.
         result = try_decrypt_dm(
             packet_data,
             private_key_bytes,
@@ -177,9 +167,6 @@ async def run_historical_dm_decryption(
         )
 
         if result is not None:
-            # Determine direction using both hashes (mirrors _process_direct_message
-            # logic at lines 806-818) to handle the 1/256 case where our first
-            # public key byte matches the contact's.
             src_hash = result.src_hash.lower()
             dest_hash = result.dest_hash.lower()
             our_first_byte = format(our_public_key_bytes[0], "02x").lower()
@@ -187,12 +174,8 @@ async def run_historical_dm_decryption(
             if src_hash == our_first_byte and dest_hash != our_first_byte:
                 outgoing = True
             else:
-                # Incoming, ambiguous (both match), or neither matches.
-                # Default to incoming — outgoing DMs are stored by the send
-                # endpoint, so historical decryption only recovers incoming.
                 outgoing = False
 
-            # Extract path from the raw packet for storage
             packet_info = parse_packet(packet_data)
             path_hex = packet_info.path.hex() if packet_info else None
             path_len = packet_info.path_length if packet_info else None
@@ -206,7 +189,7 @@ async def run_historical_dm_decryption(
                 path=path_hex,
                 path_len=path_len,
                 outgoing=outgoing,
-                realtime=False,  # Historical decryption should not trigger fanout
+                realtime=False,
             )
 
             if msg_id is not None:
@@ -222,7 +205,6 @@ async def run_historical_dm_decryption(
         total,
     )
 
-    # Notify frontend
     if decrypted_count > 0:
         name = display_name or contact_public_key_hex[:12]
         broadcast_success(
@@ -291,12 +273,6 @@ async def process_raw_packet(
     Process an incoming raw packet.
 
     This is the main entry point for all incoming RF packets.
-
-    Note: Packets are deduplicated by payload hash in the database. If we receive
-    a duplicate payload (same payload, different path), we still broadcast it to
-    the frontend for realtime packet-feed fidelity. Some payload types are also
-    intentionally reprocessed on duplicate arrival so message-level dedup/path
-    merge logic and advert/path-history tracking still see each observation.
     """
     ts = timestamp or int(time.time())
     observation_id = next(_raw_observation_counter)
@@ -304,7 +280,6 @@ async def process_raw_packet(
     packet_id, is_new_packet = await RawPacketRepository.create(raw_bytes, ts)
     raw_hex = raw_bytes.hex()
 
-    # Parse packet to get type
     packet_info = parse_packet(raw_bytes)
     payload_type = packet_info.payload_type if packet_info else None
     payload_type_name = payload_type.name if payload_type else "Unknown"
@@ -316,7 +291,6 @@ async def process_raw_packet(
             packet_id,
         )
 
-    # Log packet arrival at debug level
     path_hex = packet_info.path.hex() if packet_info and packet_info.path else ""
     route_type_name = (
         getattr(packet_info.route_type, "name", packet_info.route_type)
@@ -346,13 +320,8 @@ async def process_raw_packet(
         "sender": None,
     }
 
-    # Compute packet hash once for threading into message broadcasts (used by bot fanout).
     pkt_hash = calculate_packet_hash(raw_bytes)
 
-    # Resolve regional flood-scope for transport-routed packets. The transport code
-    # is a keyed MAC over the payload, so we recompute it for each known region name
-    # and keep the first match. Only transport-routed packets carry codes, so this is
-    # skipped for the common (unscoped) flood/direct case.
     transport_code: int | None = None
     region: str | None = None
     if packet_info is not None and packet_info.transport_codes is not None:
@@ -368,10 +337,6 @@ async def process_raw_packet(
         except Exception:
             logger.debug("Region resolution failed for packet %d", packet_id, exc_info=True)
 
-    # Process packets based on payload type
-    # For GROUP_TEXT, we always try to decrypt even for duplicate packets - the message
-    # deduplication in create_message_from_decrypted handles adding paths to existing messages.
-    # This is more reliable than trying to look up the message via raw packet linking.
     if payload_type == PayloadType.GROUP_TEXT:
         decrypt_result = await _process_group_text(
             raw_bytes,
@@ -388,12 +353,9 @@ async def process_raw_packet(
             result.update(decrypt_result)
 
     elif payload_type == PayloadType.ADVERT:
-        # Process all advert arrivals (even payload-hash duplicates) so the
-        # advert-history table retains recent path observations.
         await _process_advertisement(raw_bytes, ts, packet_info)
 
     elif payload_type == PayloadType.TEXT_MESSAGE:
-        # Try to decrypt direct messages using stored private key and known contacts
         decrypt_result = await _process_direct_message(
             raw_bytes,
             packet_id,
@@ -412,14 +374,6 @@ async def process_raw_packet(
         await _process_path_packet(raw_bytes, ts, packet_info)
 
     elif payload_type == PayloadType.ACK:
-        # Standalone ACK packets carry the 4-byte ack code in cleartext (the
-        # firmware just memcpy's the uint32 into the payload). A contact answers
-        # a *direct*-routed DM with one of these, whereas a *flood*-routed DM is
-        # answered with a PATH-return that has the ACK embedded (handled above in
-        # _process_path_packet). We match directly from the raw RF packet so DM
-        # delivery confirmation does not depend on the radio also surfacing a
-        # separate EventType.ACK host control frame, which some companion
-        # firmwares (e.g. pyMC over TCP) do not reliably emit for direct ACKs.
         if packet_info is not None and len(packet_info.payload) >= 4:
             ack_code = packet_info.payload[:4].hex()
             matched = await apply_dm_ack_code(ack_code, broadcast_fn=broadcast_event)
@@ -428,8 +382,6 @@ async def process_raw_packet(
             else:
                 logger.debug("Buffered/ignored standalone ACK %s from raw packet", ack_code)
 
-    # Always broadcast raw packet for the packet feed UI (even duplicates)
-    # This enables the frontend cracker to see all incoming packets in real-time
     broadcast_payload = RawPacketBroadcast(
         id=packet_id,
         observation_id=observation_id,
@@ -474,11 +426,9 @@ async def _process_group_text(
     Tries all known channel keys to decrypt.
     Creates a message entry if successful (or adds path to existing if duplicate).
     """
-    # Try to decrypt with all known channel keys
     channels = await ChannelRepository.get_all()
 
     for channel in channels:
-        # Convert hex key to bytes for decryption
         try:
             channel_key_bytes = bytes.fromhex(channel.key)
         except ValueError:
@@ -488,17 +438,27 @@ async def _process_group_text(
         if not decrypted:
             continue
 
-        # Successfully decrypted!
         logger.debug("Decrypted GroupText for channel %s: %s", channel.name, decrypted.message[:50])
 
-        # Create message (or add path to existing if duplicate)
-        # This handles both new messages and echoes of our own outgoing messages
+        # Decode MCMP v3 payload if present
+        message_text = decrypted.message
+        if message_text.lstrip().startswith("mcmp3:"):
+            decoded_msg = McmpAppCodec.try_decode_text_payload_message(message_text)
+            if decoded_msg is not None:
+                message_text = decoded_msg.text
+                logger.debug(
+                    "Decoded MCMP v3 channel message (signature_status=%s)",
+                    decoded_msg.signature_status,
+                )
+            else:
+                logger.warning("Failed to decode MCMP v3 payload, keeping raw text")
+
         msg_id = await create_message_from_decrypted(
             packet_id=packet_id,
             channel_key=channel.key,
             channel_name=channel.name,
             sender=decrypted.sender,
-            message_text=decrypted.message,
+            message_text=message_text,
             timestamp=decrypted.timestamp,
             received_at=timestamp,
             path=packet_info.path.hex() if packet_info else None,
@@ -514,13 +474,12 @@ async def _process_group_text(
             "decrypted": True,
             "channel_name": channel.name,
             "sender": decrypted.sender,
-            "message_id": msg_id,  # None if duplicate, msg_id if new
+            "message_id": msg_id,
             "channel_key": channel.key,
             "sender_timestamp": decrypted.timestamp,
-            "message": decrypted.message,
+            "message": message_text,
         }
 
-    # Couldn't decrypt with any known key
     return None
 
 
@@ -529,12 +488,7 @@ async def _process_advertisement(
     timestamp: int,
     packet_info: PacketInfo | None = None,
 ) -> None:
-    """
-    Process an advertisement packet.
-
-    Extracts contact info and updates the database/broadcasts to clients.
-    """
-    # Parse packet to get path info if not already provided
+    """Process an advertisement packet."""
     if packet_info is None:
         packet_info = parse_packet(raw_bytes)
     if packet_info is None:
@@ -546,12 +500,6 @@ async def _process_advertisement(
         logger.debug("Failed to parse advertisement payload")
         return
 
-    # Reject adverts whose Ed25519 signature does not verify against the embedded
-    # public key. MeshCore firmware (Mesh.cpp onRecvPacket) drops forged/corrupted
-    # adverts at exactly this check; without it a bit-flipped advert would be
-    # ingested as a phantom contact with a mangled public key (issue #315). The raw
-    # packet is already stored (see process_raw_packet) and still surfaces in the
-    # debug feed — only contact creation/update is gated here, matching firmware.
     if not verify_advert_signature(packet_info.payload):
         logger.warning(
             "Dropping advertisement with invalid signature from %s (packet %s)",
@@ -563,7 +511,6 @@ async def _process_advertisement(
     new_path_len = packet_info.path_length
     new_path_hex = packet_info.path.hex() if packet_info.path else ""
 
-    # Try to find existing contact
     existing = await ContactRepository.get_by_key(advert.public_key.lower())
 
     logger.debug(
@@ -576,15 +523,10 @@ async def _process_advertisement(
         new_path_len,
     )
 
-    # Use device_role from advertisement for contact type (1=Chat, 2=Repeater, 3=Room, 4=Sensor).
-    # Persist advert freshness fields using the server receive wall clock so
-    # route selection is not affected by sender clock skew.
     contact_type = (
         advert.device_role if advert.device_role > 0 else (existing.type if existing else 0)
     )
 
-    # Check discovery_blocked_types: skip new contacts whose type is blocked.
-    # Existing contacts are always updated (location, name, last_seen, etc.).
     if existing is None and contact_type > 0:
         from app.repository import AppSettingsRepository
 
@@ -605,14 +547,11 @@ async def _process_advertisement(
         lon=advert.lon,
         last_advert=timestamp,
         last_seen=timestamp,
-        first_seen=timestamp,  # COALESCE in upsert preserves existing value
+        first_seen=timestamp,
     )
 
-    # Upsert the contact BEFORE recording advert paths so the parent row
-    # exists when foreign key enforcement is enabled.
     await ContactRepository.upsert(contact_upsert)
 
-    # Keep recent unique advert paths for all contacts.
     await ContactAdvertPathRepository.record_observation(
         public_key=advert.public_key.lower(),
         path_hex=new_path_hex,
@@ -631,8 +570,6 @@ async def _process_advertisement(
         log=logger,
     )
 
-    # Read back from DB so the broadcast includes all fields (last_contacted,
-    # last_read_at, flags, on_radio, etc.) matching the REST Contact shape exactly.
     db_contact = await ContactRepository.get_by_key(advert.public_key.lower())
     if db_contact:
         broadcast_event("contact", db_contact.model_dump())
@@ -650,8 +587,6 @@ async def _process_advertisement(
             Contact(**contact_upsert.model_dump(exclude_none=True)).model_dump(),
         )
 
-    # For new contacts, optionally attempt to decrypt any historical DMs we may have stored
-    # This is controlled by the auto_decrypt_dm_on_advert setting
     if existing is None:
         from app.repository import AppSettingsRepository
 
@@ -673,13 +608,8 @@ async def _process_direct_message(
 ) -> dict | None:
     """
     Process a TEXT_MESSAGE (direct message) packet.
-
-    Uses the stored private key and tries to decrypt with known contacts.
-    The src_hash (first byte of sender's public key) is used to narrow down
-    candidate contacts for decryption.
     """
     if not has_private_key():
-        # No private key available - can't decrypt DMs
         return None
 
     private_key = get_private_key()
@@ -687,64 +617,43 @@ async def _process_direct_message(
     if private_key is None or our_public_key is None:
         return None
 
-    # Parse packet to get the payload for src_hash extraction
     if packet_info is None:
         packet_info = parse_packet(raw_bytes)
     if packet_info is None or packet_info.payload is None:
         return None
 
-    # Extract src_hash from payload (second byte: [dest_hash:1][src_hash:1][MAC:2][ciphertext])
     if len(packet_info.payload) < 4:
         return None
 
     dest_hash = format(packet_info.payload[0], "02x").lower()
     src_hash = format(packet_info.payload[1], "02x").lower()
 
-    # Check if this message involves us (either as sender or recipient)
     our_first_byte = format(our_public_key[0], "02x").lower()
 
-    # Determine direction based on which hash matches us:
-    # - dest_hash == us AND src_hash != us -> incoming (addressed to us from someone else)
-    # - src_hash == us AND dest_hash != us -> outgoing (we sent to someone else)
-    # - Both match us -> ambiguous (our first byte matches contact's), default to incoming
-    # - Neither matches us -> not our message
     if dest_hash == our_first_byte and src_hash != our_first_byte:
-        is_outgoing = False  # Definitely incoming
+        is_outgoing = False
     elif src_hash == our_first_byte and dest_hash != our_first_byte:
-        is_outgoing = True  # Definitely outgoing
+        is_outgoing = True
     elif dest_hash == our_first_byte and src_hash == our_first_byte:
-        # Ambiguous: our first byte matches contact's first byte (1/256 chance)
-        # Default to incoming since dest_hash matching us is more indicative
         is_outgoing = False
         logger.debug("Ambiguous DM direction (first bytes match), defaulting to incoming")
     else:
-        # Neither hash matches us - not our message
         return None
 
-    # Find candidate contacts based on the relevant hash
-    # For incoming: match src_hash (sender's first byte)
-    # For outgoing: match dest_hash (recipient's first byte)
     match_hash = dest_hash if is_outgoing else src_hash
 
-    # Get contacts matching the first byte of public key via targeted SQL query
     candidate_contacts = await ContactRepository.get_by_pubkey_first_byte(match_hash)
 
     if not candidate_contacts:
-        logger.debug(
-            "No contacts found matching hash %s for DM decryption",
-            match_hash,
-        )
+        logger.debug("No contacts found matching hash %s for DM decryption", match_hash)
         return None
 
-    # Try decrypting with each candidate contact
     for contact in candidate_contacts:
         try:
             contact_public_key = bytes.fromhex(contact.public_key)
         except ValueError:
             continue
 
-        # For incoming messages, pass our_public_key to enable the dest_hash filter
-        # For outgoing messages, skip the filter (dest_hash is the recipient, not us)
         result = try_decrypt_dm(
             raw_bytes,
             private_key,
@@ -753,11 +662,6 @@ async def _process_direct_message(
         )
 
         if result is not None:
-            # In the ambiguous direction case (both first bytes match), we
-            # defaulted to incoming.  Check if a matching outgoing message
-            # already exists — if so, this is actually our own outgoing echo
-            # and should be treated as such instead of creating a duplicate
-            # incoming row.
             effective_outgoing = is_outgoing
             if not is_outgoing and dest_hash == src_hash:
                 existing_outgoing = await MessageRepository.get_by_content(
@@ -774,14 +678,23 @@ async def _process_direct_message(
                         existing_outgoing.id,
                     )
 
+            # Decode MCMP v3 payload if present (no signature verification for DMs)
+            message_text = result.message
+            if message_text.lstrip().startswith("mcmp3:"):
+                decoded_msg = McmpAppCodec.try_decode_text_payload_message(message_text)
+                if decoded_msg is not None:
+                    message_text = decoded_msg.text
+                    logger.debug("Decoded MCMP v3 direct message")
+                else:
+                    logger.warning("Failed to decode MCMP v3 DM payload, keeping raw text")
+
             logger.debug(
                 "Decrypted DM %s contact %s: %s",
                 "to" if effective_outgoing else "from",
                 contact.name or contact.public_key[:12],
-                result.message[:50] if result.message else "",
+                message_text[:50] if message_text else "",
             )
 
-            # Create message (or add path to existing if duplicate)
             msg_id = await create_dm_message_from_decrypted(
                 packet_id=packet_id,
                 decrypted=result,
@@ -805,10 +718,9 @@ async def _process_direct_message(
                 "message_id": msg_id,
                 "contact_key": contact.public_key,
                 "sender_timestamp": result.timestamp,
-                "message": result.message,
+                "message": message_text,
             }
 
-    # Couldn't decrypt with any known contact
     logger.debug("Could not decrypt DM with any of %d candidate contacts", len(candidate_contacts))
     return None
 
