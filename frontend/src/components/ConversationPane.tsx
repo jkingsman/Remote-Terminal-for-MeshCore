@@ -410,6 +410,14 @@ export function ConversationPane({
           disabled={!health?.radio_connected}
           conversationType={activeConversation.type}
           senderName={config?.name}
+          voiceConversation={
+            activeConversation.id
+              ? {
+                  type: activeConversation.type === 'contact' ? 'PRIV' : 'CHAN',
+                  key: activeConversation.id,
+                }
+              : undefined
+          }
           placeholder={
             !health?.radio_connected
               ? 'Radio not connected'

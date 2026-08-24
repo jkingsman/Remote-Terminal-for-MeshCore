@@ -43,7 +43,7 @@ COPY --from=frontend-builder /build/dist ./frontend/dist
 # Create data directory for SQLite database
 RUN mkdir -p /app/data
 
-RUN apt-get update && apt-get install -y --no-install-recommends jq \
+RUN apt-get update && apt-get install -y --no-install-recommends jq libcodec2-1.2 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY run.sh ./
