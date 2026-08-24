@@ -25,11 +25,11 @@ export function ContactMcmpSettingsModal({
   contact,
   onSave,
 }: ContactMcmpSettingsModalProps) {
-  const [mcmpEnabled, setMcmpEnabled] = useState(contact.mcmp_enabled);
+  const [mcmpEnabled, setMcmpEnabled] = useState<boolean>(contact.mcmp_enabled ?? false);
   const [saving, setSaving] = useState(false);
 
   useState(() => {
-    setMcmpEnabled(contact.mcmp_enabled);
+    setMcmpEnabled(contact.mcmp_enabled ?? false);
   });
 
   const handleSave = async () => {

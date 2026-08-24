@@ -25,14 +25,16 @@ export function ChannelMcmpSettingsModal({
   channel,
   onSave,
 }: ChannelMcmpSettingsModalProps) {
-  const [mcmpEnabled, setMcmpEnabled] = useState(channel.mcmp_enabled);
-  const [mcmpSignEnabled, setMcmpSignEnabled] = useState(channel.mcmp_sign_enabled);
+  const [mcmpEnabled, setMcmpEnabled] = useState<boolean>(channel.mcmp_enabled ?? false);
+  const [mcmpSignEnabled, setMcmpSignEnabled] = useState<boolean>(
+    channel.mcmp_sign_enabled ?? false
+  );
   const [saving, setSaving] = useState(false);
 
-  // Reset when opening or channel changes
+  // Сброс при открытии/изменении канала
   useState(() => {
-    setMcmpEnabled(channel.mcmp_enabled);
-    setMcmpSignEnabled(channel.mcmp_sign_enabled);
+    setMcmpEnabled(channel.mcmp_enabled ?? false);
+    setMcmpSignEnabled(channel.mcmp_sign_enabled ?? false);
   });
 
   const handleSave = async () => {

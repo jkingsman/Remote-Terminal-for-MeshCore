@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts';
+import { useEffect, useState } from 'react';
 import { Settings2, Star } from 'lucide-react';
 import { api } from '../api';
 import { formatTime } from '../utils/messageParser';
@@ -9,7 +8,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '
 import { toast } from './ui/sonner';
 import { ChannelMcmpSettingsModal } from './ChannelMcmpSettingsModal';
 import { ChannelPathHashModeOverrideModal } from './ChannelPathHashModeOverrideModal';
-import type { Channel, ChannelDetail, PathHashWidthStats } from '../types';
+import type { Channel, ChannelDetail } from '../types';
 
 interface ChannelInfoPaneProps {
   channelKey: string | null;
@@ -222,7 +221,21 @@ export function ChannelInfoPane({
             {detail && detail.path_hash_width_24h.total_packets > 0 && (
               <div className="px-5 py-3 border-b border-border">
                 <SectionLabel>Hop Byte Widths (24h)</SectionLabel>
-                <HopWidthChart stats={detail.path_hash_width_24h} ready={chartReady} />
+                {/* Для простоты показываем числовые данные без графика */}
+                <div className="text-sm space-y-1">
+                  <InfoItem
+                    label="1-byte"
+                    value={detail.path_hash_width_24h.single_byte.toLocaleString()}
+                  />
+                  <InfoItem
+                    label="2-byte"
+                    value={detail.path_hash_width_24h.double_byte.toLocaleString()}
+                  />
+                  <InfoItem
+                    label="3-byte"
+                    value={detail.path_hash_width_24h.triple_byte.toLocaleString()}
+                  />
+                </div>
               </div>
             )}
 
@@ -272,7 +285,7 @@ export function ChannelInfoPane({
           onClose={() => setShowPathHashModeOverride(false)}
           channelName={channel.name}
           currentOverride={channel.path_hash_mode_override ?? null}
-          radioDefault={0}  // Заглушка, если нет config; в будущем можно передавать реальное значение
+          radioDefault={0}
           onSetOverride={(value) => {
             onSetChannelPathHashModeOverride(channel.key, value);
             setShowPathHashModeOverride(false);
@@ -283,4 +296,19 @@ export function ChannelInfoPane({
   );
 }
 
-// ... остальные функции без изменений ...
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <h3 className="text-[0.625rem] uppercase tracking-wider text-muted-foreground font-medium mb-1.5">
+      {children}
+    </h3>
+  );
+}
+
+function InfoItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <span className="text-muted-foreground text-xs">{label}</span>
+      <p className="font-medium text-sm leading-tight">{value}</p>
+    </div>
+  );
+}
