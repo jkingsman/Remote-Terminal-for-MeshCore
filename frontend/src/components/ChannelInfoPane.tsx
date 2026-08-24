@@ -3,7 +3,6 @@ import { Settings2, Star } from 'lucide-react';
 import { api } from '../api';
 import { formatTime } from '../utils/messageParser';
 import { handleKeyboardActivate } from '../utils/a11y';
-import { useEntranceSettled } from '../hooks/useEntranceSettled';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from './ui/sheet';
 import { toast } from './ui/sonner';
 import { ChannelMcmpSettingsModal } from './ChannelMcmpSettingsModal';
@@ -41,7 +40,6 @@ export function ChannelInfoPane({
   const [showPathHashModeOverride, setShowPathHashModeOverride] = useState(false);
 
   const liveChannel = channelKey ? (channels.find((c) => c.key === channelKey) ?? null) : null;
-  const chartReady = useEntranceSettled(channelKey !== null);
 
   useEffect(() => {
     setShowKey(false);
@@ -221,7 +219,6 @@ export function ChannelInfoPane({
             {detail && detail.path_hash_width_24h.total_packets > 0 && (
               <div className="px-5 py-3 border-b border-border">
                 <SectionLabel>Hop Byte Widths (24h)</SectionLabel>
-                {/* Для простоты показываем числовые данные без графика */}
                 <div className="text-sm space-y-1">
                   <InfoItem
                     label="1-byte"
