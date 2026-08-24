@@ -330,9 +330,11 @@ function RegionBadge({ region }: { region: string }) {
   );
 }
 
-/** Lock icon for MCMP v3 messages. Grey for unsigned, green for valid signature. */
-function McmpLockIcon({ status }: { status: 'unsigned' | 'valid' }) {
-  const colorClass = status === 'valid' ? 'text-emerald-500' : 'text-muted-foreground';
+/** Lock icon for MCMP v3 messages. Grey for unsigned/unverifiable, green for valid signature. */
+function McmpLockIcon({ status }: { status: 'unsigned' | 'valid' | 'unverifiable' }) {
+  const isVerified = status === 'valid';
+  const colorClass = isVerified ? 'text-emerald-500' : 'text-muted-foreground';
+  const label = isVerified ? 'Valid MCMP signature' : 'Unverified MCMP signature';
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -344,9 +346,9 @@ function McmpLockIcon({ status }: { status: 'unsigned' | 'valid' }) {
       strokeLinejoin="round"
       className={cn('ml-1.5 inline-block h-3 w-3 align-middle', colorClass)}
       role="img"
-      aria-label={status === 'valid' ? 'Valid MCMP signature' : 'Unsigned MCMP message'}
+      aria-label={label}
     >
-      <title>{status === 'valid' ? 'Valid MCMP signature' : 'Unsigned MCMP message'}</title>
+      <title>{label}</title>
       <rect x="4" y="11" width="16" height="10" rx="2" />
       <path d="M8 11V7a4 4 0 0 1 8 0v4" />
     </svg>
@@ -495,7 +497,7 @@ export function MessageList({
   );
 
   // Filter out incoming channel messages with invalid MCMP signatures.
-  // Unsigned and valid-signed messages remain visible.
+  // Unsigned, valid-signed, and unverifiable messages remain visible.
   const visibleMessages = useMemo(
     () => sortedMessages.filter((msg) => msg.mcmp_signature_status !== 'invalid'),
     [sortedMessages]
@@ -1197,8 +1199,17 @@ export function MessageList({
                         )}
                         {!msg.outgoing &&
                           (msg.mcmp_signature_status === 'unsigned' ||
-                            msg.mcmp_signature_status === 'valid') && (
-                            <McmpLockIcon status={msg.mcmp_signature_status} />
+                            msg.mcmp_signature_status === 'valid' ||
+                            msg.mcmp_signature_status === 'unverifiable') && (
+                            <McmpLockIcon
+                              status={
+                                msg.mcmp_signature_status === 'valid'
+                                  ? 'valid'
+                                  : msg.mcmp_signature_status === 'unsigned'
+                                    ? 'unsigned'
+                                    : 'unverifiable'
+                              }
+                            />
                           )}
                         {msg.region && <RegionBadge region={msg.region} />}
                       </div>
@@ -1237,8 +1248,17 @@ export function MessageList({
                           )}
                           {!msg.outgoing &&
                             (msg.mcmp_signature_status === 'unsigned' ||
-                              msg.mcmp_signature_status === 'valid') && (
-                              <McmpLockIcon status={msg.mcmp_signature_status} />
+                              msg.mcmp_signature_status === 'valid' ||
+                              msg.mcmp_signature_status === 'unverifiable') && (
+                              <McmpLockIcon
+                                status={
+                                  msg.mcmp_signature_status === 'valid'
+                                    ? 'valid'
+                                    : msg.mcmp_signature_status === 'unsigned'
+                                      ? 'unsigned'
+                                      : 'unverifiable'
+                                }
+                              />
                             )}
                           {msg.region && <RegionBadge region={msg.region} />}
                         </>
