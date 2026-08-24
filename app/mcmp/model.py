@@ -27,7 +27,6 @@ class UnicodeBlock:
 
 
 class MeshCompressionModel:
-    # Constants from Dart MeshCompressor
     CDF_SCALE = 1 << 20
     PRECISION = 32
     FULL = 1 << PRECISION
@@ -45,7 +44,6 @@ class MeshCompressionModel:
     EOF = '\x03'
     ESC = '\x04'
 
-    # Unicode blocks (modern)
     UNICODE_BLOCKS: List[UnicodeBlock] = [
         UnicodeBlock(0, 0x0400, 0x04FF),
         UnicodeBlock(1, 0x0100, 0x024F),
@@ -85,11 +83,16 @@ class MeshCompressionModel:
     def from_json(cls, json_dict: dict) -> 'MeshCompressionModel':
         order = int(json_dict['o'])
         vocab = list(json_dict['v'])
-        # Ensure EOF and ESC are in vocab
         for sym in [cls.EOF, cls.ESC]:
             if sym not in vocab:
                 vocab.append(sym)
-        vocab.sort()
+
+        # Dart List<String>.sort() compares by UTF-16 code units.
+        # Python str.sort compares by Unicode code points.
+        # For emoji and other supplementary characters this gives a different order,
+        # which breaks arithmetic-coding compatibility.
+        # Sorting by utf-16-be bytes reproduces Dart's ordering exactly.
+        vocab.sort(key=lambda s: s.encode('utf-16-be'))
 
         raw_counts = json_dict['c']
         counts: List[Dict[str, Dict[str, int]]] = []
@@ -153,7 +156,6 @@ class MeshCompressionModel:
 
         effective_script_boost = self.SCRIPT_BOOST * 4 if max_match_order <= 2 else self.SCRIPT_BOOST
 
-        # Determine context script
         context_script = None
         for i in range(len(context) - 1, -1, -1):
             ch = context[i]
@@ -202,7 +204,6 @@ class MeshCompressionModel:
                         continue
                     freqs[idx] += int(count * factor)
 
-        # Normalize to CDF_SCALE
         total_freq = sum(freqs)
         if total_freq != self.CDF_SCALE:
             diff = self.CDF_SCALE - total_freq
