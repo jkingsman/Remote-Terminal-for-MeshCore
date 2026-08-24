@@ -85,7 +85,7 @@ interface ContactInfoPaneProps {
   onToggleBlockedName?: (name: string) => void;
   trackedTelemetryContacts?: string[];
   onToggleTrackedTelemetryContact?: (publicKey: string) => Promise<void>;
-  onSetContactMcmp: (publicKey: string, mcmpEnabled: boolean) => Promise<void>;
+  onSetContactMcmp?: (publicKey: string, mcmpEnabled: boolean) => Promise<void>;
 }
 
 export function ContactInfoPane({
@@ -462,7 +462,7 @@ export function ContactInfoPane({
             </div>
 
             {/* MCMP Settings */}
-            {!isRepeater && (
+            {!isRepeater && onSetContactMcmp && (
               <div className="px-5 py-3 border-b border-border">
                 <button
                   type="button"
@@ -640,7 +640,7 @@ export function ContactInfoPane({
         )}
       </SheetContent>
 
-      {contact && !isRepeater && (
+      {contact && !isRepeater && onSetContactMcmp && (
         <ContactMcmpSettingsModal
           open={showMcmpSettings}
           onClose={() => setShowMcmpSettings(false)}
@@ -1044,7 +1044,6 @@ function ContactTelemetrySection({
   const [chartExpanded, setChartExpanded] = useState(false);
   const [toggling, setToggling] = useState(false);
 
-  // Latest telemetry snapshot from history
   const latestEntry =
     telemetryHistory.length > 0 ? telemetryHistory[telemetryHistory.length - 1] : null;
   const sensors: LppSensor[] = useMemo(() => {
@@ -1216,7 +1215,6 @@ function ContactTelemetrySection({
             </>
           )}
 
-          {/* History chart */}
           {telemetryHistory.length > 1 && sensorSeries.length > 0 && (
             <div className="mt-2">
               <button
@@ -1294,7 +1292,6 @@ function ContactTelemetrySection({
             </div>
           )}
 
-          {/* Tracking toggle */}
           {onToggleTracked && (
             <div className="mt-2 pt-2 border-t border-border/50">
               <button
