@@ -242,6 +242,32 @@ export function App() {
     [setContacts, setChannels]
   );
 
+  const handleSetMcmpEnabled = useCallback(
+    async (type: 'channel' | 'contact', id: string, enabled: boolean, version: number) => {
+      const apply = (nextEnabled: boolean, nextVersion: number) => {
+        const patch = { mcmp_enabled: nextEnabled, mcmp_version: nextVersion };
+        if (type === 'contact') {
+          setContacts((prev) => prev.map((c) => (c.public_key === id ? { ...c, ...patch } : c)));
+        } else {
+          setChannels((prev) => prev.map((c) => (c.key === id ? { ...c, ...patch } : c)));
+        }
+      };
+      // Capture prior state so a failure reverts to exactly what it was.
+      const prior =
+        type === 'contact'
+          ? contacts.find((c) => c.public_key === id)
+          : channels.find((c) => c.key === id);
+      apply(enabled, version); // optimistic
+      try {
+        await api.setMcmpEnabled(type, id, enabled, version);
+      } catch {
+        apply(prior?.mcmp_enabled ?? false, prior?.mcmp_version ?? 2); // revert
+        toast.error('Failed to update compression');
+      }
+    },
+    [contacts, channels, setContacts, setChannels]
+  );
+
   // useConversationRouter is called second — it receives channels/contacts as inputs
   const {
     activeConversation,
@@ -583,6 +609,7 @@ export function App() {
     onPathDiscovery: handlePathDiscovery,
     onToggleFavorite: handleToggleFavorite,
     onToggleMute: handleToggleMute,
+    onSetMcmpEnabled: handleSetMcmpEnabled,
     onDeleteContact: handleDeleteContact,
     onDeleteChannel: handleDeleteChannel,
     onSetChannelFloodScopeOverride: handleSetChannelFloodScopeOverride,

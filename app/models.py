@@ -112,6 +112,8 @@ class Contact(BaseModel):
     last_seen: int | None = None
     on_radio: bool = False
     favorite: bool = False
+    mcmp_enabled: bool = False  # Opt-in: MCMP-compress outbound messages to this contact
+    mcmp_version: int = 2  # MCMP transport when enabled: 2 = mcmp2:, 3 = mcmp3: container
     last_contacted: int | None = None  # Last time we sent/received a message
     last_read_at: int | None = None  # Server-side read state tracking
     first_seen: int | None = None
@@ -357,6 +359,8 @@ class Channel(BaseModel):
     last_read_at: int | None = None  # Server-side read state tracking
     favorite: bool = False
     muted: bool = False
+    mcmp_enabled: bool = False  # Opt-in: MCMP-compress outbound messages to this channel
+    mcmp_version: int = 2  # MCMP transport when enabled: 2 = mcmp2:, 3 = mcmp3: container
 
 
 class ChannelMessageCounts(BaseModel):
@@ -544,6 +548,41 @@ class SendChannelMessageRequest(SendMessageRequest):
             "persisted flood_scope_override for this send only."
         ),
     )
+
+
+class McmpEstimateRequest(BaseModel):
+    """A draft message whose compressed wire size the compose counter needs."""
+
+    # Bounded: compression is synchronous CPU work on the event loop, and real
+    # messages are a few hundred bytes. The cap keeps a hostile/oversized body
+    # from stalling the server (~1.3 us/char).
+    text: str = Field(default="", max_length=4096)
+    version: int = Field(default=2, ge=2, le=3, description="MCMP transport: 2 or 3")
+
+
+class McmpEstimateResponse(BaseModel):
+    """Compressed wire size of a draft, for the live compose counter."""
+
+    wire_bytes: int = Field(description="UTF-8 byte length the text occupies on the wire")
+    compressed: bool = Field(description="True if MCMP actually shrank the text")
+
+
+class McmpEnabledRequest(BaseModel):
+    """Configure MCMP compression for a conversation (contact or channel)."""
+
+    type: Literal["contact", "channel"]
+    id: str
+    enabled: bool
+    # Optional so the toggle can be flipped without touching the version; when
+    # provided, sets the transport (2 = mcmp2:, 3 = mcmp3: container).
+    version: int | None = Field(default=None, ge=2, le=3)
+
+
+class McmpEnabledResponse(BaseModel):
+    type: Literal["contact", "channel"]
+    id: str
+    enabled: bool
+    version: int
 
 
 class RepeaterLoginRequest(BaseModel):

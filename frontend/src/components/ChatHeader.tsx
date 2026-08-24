@@ -1,10 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
-import { Bell, BellOff, ChevronsLeftRight, Globe2, Info, Route, Star, Trash2 } from 'lucide-react';
+import {
+  Bell,
+  BellOff,
+  ChevronsLeftRight,
+  Globe2,
+  Info,
+  Route,
+  SlidersHorizontal,
+  Star,
+  Trash2,
+} from 'lucide-react';
 import { toast } from './ui/sonner';
 import { DirectTraceIcon } from './DirectTraceIcon';
 import { ContactPathDiscoveryModal } from './ContactPathDiscoveryModal';
 import { ChannelFloodScopeOverrideModal } from './ChannelFloodScopeOverrideModal';
 import { ChannelPathHashModeOverrideModal } from './ChannelPathHashModeOverrideModal';
+import { ConversationFeaturesModal } from './ConversationFeaturesModal';
 import { handleKeyboardActivate } from '../utils/a11y';
 import { isPublicChannelKey } from '../utils/publicChannel';
 import { stripRegionScopePrefix, floodScopeOverrideLabel } from '../utils/regionScope';
@@ -33,6 +44,12 @@ interface ChatHeaderProps {
   onOpenPushSettings?: () => void;
   onToggleFavorite: (type: 'channel' | 'contact', id: string) => void;
   onToggleMute?: (key: string) => void;
+  onSetMcmpEnabled?: (
+    type: 'channel' | 'contact',
+    id: string,
+    enabled: boolean,
+    version: number
+  ) => void;
   onSetChannelFloodScopeOverride?: (key: string, floodScopeOverride: string) => void;
   onSetChannelPathHashModeOverride?: (key: string, pathHashModeOverride: number | null) => void;
   onDeleteChannel: (key: string) => void;
@@ -59,6 +76,7 @@ export function ChatHeader({
   onOpenPushSettings,
   onToggleFavorite,
   onToggleMute,
+  onSetMcmpEnabled,
   onSetChannelFloodScopeOverride,
   onSetChannelPathHashModeOverride,
   onDeleteChannel,
@@ -70,6 +88,7 @@ export function ChatHeader({
   const [pathDiscoveryOpen, setPathDiscoveryOpen] = useState(false);
   const [channelOverrideOpen, setChannelOverrideOpen] = useState(false);
   const [pathHashModeOverrideOpen, setPathHashModeOverrideOpen] = useState(false);
+  const [featuresOpen, setFeaturesOpen] = useState(false);
   const [notifDropdownOpen, setNotifDropdownOpen] = useState(false);
   const notifDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -78,6 +97,7 @@ export function ChatHeader({
     setPathDiscoveryOpen(false);
     setChannelOverrideOpen(false);
     setPathHashModeOverrideOpen(false);
+    setFeaturesOpen(false);
     setNotifDropdownOpen(false);
   }, [conversation.id]);
 
@@ -130,6 +150,27 @@ export function ChatHeader({
       : conversation.type === 'channel'
         ? (activeChannel?.favorite ?? false)
         : false;
+  // Per-conversation MeshCore Open features (MCMP compression today) live in a
+  // modal opened from the header. Offered for regular DMs and channels; not for
+  // room servers (posts route through the room server, tighter budget) or
+  // repeaters (handled by a separate console).
+  const mcmpEnabled =
+    conversation.type === 'contact'
+      ? (activeContact?.mcmp_enabled ?? false)
+      : conversation.type === 'channel'
+        ? (activeChannel?.mcmp_enabled ?? false)
+        : false;
+  const mcmpVersion =
+    conversation.type === 'contact'
+      ? (activeContact?.mcmp_version ?? 2)
+      : (activeChannel?.mcmp_version ?? 2);
+  const showFeaturesButton =
+    !!onSetMcmpEnabled &&
+    ((conversation.type === 'contact' && !activeContactIsRoomServer) ||
+      conversation.type === 'channel');
+  // Any feature enabled -> highlight the button so active features are visible
+  // without opening the modal.
+  const anyFeatureEnabled = mcmpEnabled;
   const favoriteTitle =
     conversation.type === 'contact'
       ? isFav
@@ -467,6 +508,22 @@ export function ChatHeader({
             />
           </button>
         )}
+        {showFeaturesButton && (
+          <button
+            className="p-1 rounded hover:bg-accent text-lg leading-none transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            onClick={() => setFeaturesOpen(true)}
+            title="Conversation features (compression, …)"
+            aria-label="Conversation features"
+          >
+            <SlidersHorizontal
+              className={cn(
+                'h-4 w-4',
+                anyFeatureEnabled ? 'text-primary' : 'text-muted-foreground'
+              )}
+              aria-hidden="true"
+            />
+          </button>
+        )}
         {(conversation.type === 'channel' || conversation.type === 'contact') && (
           <button
             className="p-1 rounded hover:bg-accent text-lg leading-none transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -527,6 +584,18 @@ export function ChatHeader({
           currentOverride={activePathHashModeOverride}
           radioDefault={config?.path_hash_mode ?? 0}
           onSetOverride={(value) => onSetChannelPathHashModeOverride(conversation.id, value)}
+        />
+      )}
+      {showFeaturesButton && onSetMcmpEnabled && (
+        <ConversationFeaturesModal
+          open={featuresOpen}
+          onClose={() => setFeaturesOpen(false)}
+          conversationType={conversation.type as 'channel' | 'contact'}
+          conversationId={conversation.id}
+          conversationName={conversation.name}
+          mcmpEnabled={mcmpEnabled}
+          mcmpVersion={mcmpVersion}
+          onSetMcmpEnabled={onSetMcmpEnabled}
         />
       )}
     </header>

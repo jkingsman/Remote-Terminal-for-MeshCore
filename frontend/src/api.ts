@@ -447,6 +447,22 @@ export const api = {
       body: JSON.stringify({ key }),
     }),
 
+  // MCMP compression (per conversation)
+  setMcmpEnabled: (type: 'channel' | 'contact', id: string, enabled: boolean, version?: number) =>
+    fetchJson<{ type: 'channel' | 'contact'; id: string; enabled: boolean; version: number }>(
+      '/settings/mcmp/set',
+      {
+        method: 'POST',
+        body: JSON.stringify({ type, id, enabled, version }),
+      }
+    ),
+
+  estimateMcmp: (text: string, version = 2) =>
+    fetchJson<{ wire_bytes: number; compressed: boolean }>('/messages/mcmp-estimate', {
+      method: 'POST',
+      body: JSON.stringify({ text, version }),
+    }),
+
   // Fanout
   getFanoutConfigs: () => fetchJson<FanoutConfig[]>('/fanout'),
   createFanoutConfig: (config: {
