@@ -25,6 +25,7 @@ import { SettingsRadioAppSection } from './settings/SettingsRadioAppSection';
 import { SettingsFanoutSection } from './settings/SettingsFanoutSection';
 import { SettingsDatabaseSection } from './settings/SettingsDatabaseSection';
 import { SettingsAboutSection } from './settings/SettingsAboutSection';
+import { SettingsHttpsSection } from './settings/SettingsHttpsSection';
 
 interface SettingsModalBaseProps {
   open: boolean;
@@ -117,6 +118,7 @@ export function SettingsModal(props: SettingsModalProps) {
   const [expandedSections, setExpandedSections] = useState<Record<SettingsSection, boolean>>({
     radio: false,
     local: false,
+    https: false,
     'radio-app': false,
     fanout: false,
     database: false,
@@ -280,6 +282,13 @@ export function SettingsModal(props: SettingsModalProps) {
                 </div>
               </div>
             ))}
+        </section>
+      )}
+
+      {shouldRenderSection('https') && (
+        <section className={sectionWrapperClass}>
+          {renderSectionHeader('https')}
+          {isSectionVisible('https') && <SettingsHttpsSection className={sectionContentClass} />}
         </section>
       )}
 

@@ -60,6 +60,27 @@ import type {
 
 const API_BASE = './api';
 
+export interface VoiceSessionStatus {
+  session_id: string;
+  state: string;
+  duration_ms: number;
+  packet_count: number;
+  received_count: number;
+  missing_indices: number[];
+}
+
+export interface ImageSessionStatus {
+  session_id: string;
+  state: string;
+  format: 0 | 1;
+  width: number;
+  height: number;
+  size_bytes: number;
+  fragment_count: number;
+  received_count: number;
+  missing_indices: number[];
+}
+
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   const hasBody = options?.body !== undefined;
   const res = await fetch(`${API_BASE}${url}`, {
@@ -103,6 +124,50 @@ interface DecryptResult {
 }
 
 export const api = {
+  sendImage: async (
+    conversationType: 'PRIV' | 'CHAN',
+    conversationKey: string,
+    image: { blob: Blob; format: 0 | 1; width: number; height: number }
+  ) => {
+    const query = new URLSearchParams({
+      conversation_type: conversationType,
+      conversation_key: conversationKey,
+      format_id: String(image.format),
+      width: String(image.width),
+      height: String(image.height),
+    });
+    const response = await fetch(`${API_BASE}/images/send?${query}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: image.blob,
+    });
+    if (!response.ok)
+      throw new Error((await response.json().catch(() => null))?.detail || response.statusText);
+    return response.json();
+  },
+  fetchImage: (messageId: number) =>
+    fetchJson<ImageSessionStatus>(`/images/messages/${messageId}/fetch`, { method: 'POST' }),
+  getImageSession: (sessionId: string) =>
+    fetchJson<ImageSessionStatus>(`/images/sessions/${sessionId}`),
+  imageContentUrl: (sessionId: string) => `${API_BASE}/images/sessions/${sessionId}/content`,
+  sendVoice: async (conversationType: 'PRIV' | 'CHAN', conversationKey: string, pcm: Blob) => {
+    const response = await fetch(
+      `${API_BASE}/voice/send?conversation_type=${conversationType}&conversation_key=${encodeURIComponent(conversationKey)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: pcm,
+      }
+    );
+    if (!response.ok)
+      throw new Error((await response.json().catch(() => null))?.detail || response.statusText);
+    return response.json();
+  },
+  fetchVoice: (messageId: number) =>
+    fetchJson<VoiceSessionStatus>(`/voice/messages/${messageId}/fetch`, { method: 'POST' }),
+  getVoiceSession: (sessionId: string) =>
+    fetchJson<VoiceSessionStatus>(`/voice/sessions/${sessionId}`),
+  voiceAudioUrl: (sessionId: string) => `${API_BASE}/voice/sessions/${sessionId}/audio`,
   // Health
   getHealth: () => fetchJson<HealthStatus>('/health'),
 

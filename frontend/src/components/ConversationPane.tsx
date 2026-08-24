@@ -433,6 +433,14 @@ export function ConversationPane({
           disabled={!health?.radio_connected}
           conversationType={activeConversation.type}
           senderName={config?.name}
+          voiceConversation={
+            activeConversation.id
+              ? {
+                  type: activeConversation.type === 'contact' ? 'PRIV' : 'CHAN',
+                  key: activeConversation.id,
+                }
+              : undefined
+          }
           mcmpEnabled={activeMcmpEnabled}
           mcmpVersion={activeMcmpVersion}
           placeholder={

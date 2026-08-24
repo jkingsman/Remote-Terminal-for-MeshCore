@@ -68,6 +68,7 @@ from app.routers import (
     debug,
     fanout,
     health,
+    images,
     messages,
     packets,
     push,
@@ -77,6 +78,7 @@ from app.routers import (
     rooms,
     settings,
     statistics,
+    voice,
     ws,
 )
 from app.security import add_optional_basic_auth_middleware
@@ -237,6 +239,8 @@ app.include_router(read_state.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")
 app.include_router(statistics.router, prefix="/api")
 app.include_router(push.router, prefix="/api")
+app.include_router(voice.router, prefix="/api")
+app.include_router(images.router, prefix="/api")
 app.include_router(ws.router, prefix="/api")
 
 # Serve frontend static files in production
