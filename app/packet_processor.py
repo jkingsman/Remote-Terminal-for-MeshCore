@@ -28,6 +28,7 @@ from app.decoder import (
 )
 from app.keystore import get_private_key, get_public_key, has_private_key
 from app.mcmp import McmpAppCodec
+from app.mcmp.verifier import verify_channel_message
 from app.models import (
     Contact,
     ContactUpsert,
@@ -450,6 +451,21 @@ async def _process_group_text(
                     "Decoded MCMP v3 channel message (signature_status=%s)",
                     decoded_msg.signature_status,
                 )
+
+                # Verify signature if present
+                if decoded_msg.signature:
+                    verification = await verify_channel_message(
+                        decoded_msg=decoded_msg,
+                        sender_name=decrypted.sender,
+                        channel_key_bytes=channel_key_bytes,
+                    )
+                    logger.info(
+                        "MCMP signature verification for channel %s: %s",
+                        channel.name,
+                        verification.status,
+                    )
+                else:
+                    logger.debug("MCMP message is unsigned")
             else:
                 logger.warning("Failed to decode MCMP v3 payload, keeping raw text")
 

@@ -74,6 +74,13 @@ class ChannelPathHashModeOverrideRequest(BaseModel):
     )
 
 
+class ChannelMcmpSettingsRequest(BaseModel):
+    mcmp_enabled: bool = Field(default=False, description="Enable MCMP compression for this channel")
+    mcmp_sign_enabled: bool = Field(
+        default=False, description="Enable MCMP v3 signing for this channel (requires mcmp_enabled)"
+    )
+
+
 def _derive_channel_identity(
     requested_name: str,
     request_key: str | None = None,
@@ -126,12 +133,6 @@ def _normalize_bulk_hashtag_name(name: str) -> str | None:
     normalized = trimmed.lstrip("#").strip()
     if not normalized:
         return None
-    # Hashtag channel names are hashed verbatim (matching meshcore_py / meshcore-cli /
-    # meshcore.js), so any character is permitted — '&', capitals, accents, etc. all map
-    # to a valid SHA256-derived key. Character normalization (lowercasing / charset
-    # restriction) is a client-side display choice, applied by the caller before submit.
-    # The on-radio name field holds 32 UTF-8 bytes including the leading '#', so cap there
-    # to keep the stored label and the derived key in sync across clients.
     if len(f"#{normalized}".encode()) > 32:
         return None
     return f"#{normalized}"
@@ -240,7 +241,6 @@ async def create_channel(request: CreateChannelRequest) -> Channel:
 
     logger.info("Creating channel %s: %s (hashtag=%s)", key_hex, channel_name, is_hashtag)
 
-    # Store in database only - radio sync happens at send time
     await ChannelRepository.upsert(
         key=key_hex,
         name=channel_name,
@@ -354,12 +354,6 @@ async def set_channel_flood_scope_override(
     if not channel:
         raise HTTPException(status_code=404, detail="Channel not found")
 
-    # Tri-state persisted override:
-    #   blank        -> None: clear the override, inherit the global scope
-    #   "*" / "0"    -> canonical unscoped marker: force unscoped even over a global
-    #   region name  -> "#Region": scope this channel
-    # NOTE: at this (channel-override) layer blank means "clear/inherit", so we must
-    # check for blank *before* is_unscoped() (which also treats "" as unscoped).
     raw_override = (request.flood_scope_override or "").strip()
     if raw_override == "":
         override: str | None = None
@@ -402,13 +396,27 @@ async def set_channel_path_hash_mode_override(
     return refreshed
 
 
+@router.post("/{key}/mcmp", response_model=Channel)
+async def set_channel_mcmp_settings(key: str, request: ChannelMcmpSettingsRequest) -> Channel:
+    """Set MCMP compression and signing flags for a channel."""
+    channel = await ChannelRepository.get_by_key(key)
+    if not channel:
+        raise HTTPException(status_code=404, detail="Channel not found")
+
+    await ChannelRepository.set_mcmp_enabled(channel.key, request.mcmp_enabled)
+    await ChannelRepository.set_mcmp_sign_enabled(channel.key, request.mcmp_sign_enabled)
+
+    refreshed = await ChannelRepository.get_by_key(channel.key)
+    if refreshed is None:
+        raise HTTPException(status_code=500, detail="Channel disappeared after update")
+
+    _broadcast_channel_update(refreshed)
+    return refreshed
+
+
 @router.delete("/{key}")
 async def delete_channel(key: str) -> dict:
-    """Delete a channel from the database by key.
-
-    Note: This does not clear the channel from the radio. The radio's channel
-    slots are managed separately (channels are loaded temporarily when sending).
-    """
+    """Delete a channel from the database by key."""
     if is_public_channel_key(key):
         raise HTTPException(
             status_code=400, detail="The canonical Public channel cannot be deleted"
