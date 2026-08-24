@@ -4,12 +4,6 @@ import sys
 # ---------------------------------------------------------------------------
 # Windows event-loop advisory for MQTT fanout
 # ---------------------------------------------------------------------------
-# On Windows, uvicorn's default event loop (ProactorEventLoop) does not
-# implement add_reader()/add_writer(), which paho-mqtt (via aiomqtt) requires.
-# We cannot fix this from inside the app — the loop is already created by the
-# time this module is imported.  Log a prominent warning so Windows operators
-# who want MQTT know to add ``--loop none`` to their uvicorn command.
-# ---------------------------------------------------------------------------
 if sys.platform == "win32":
     import asyncio as _asyncio
 
@@ -104,6 +98,18 @@ async def lifespan(app: FastAPI):
     await db.connect()
     logger.info("Database connected")
 
+    # Initialize MCMP compressor model (non-fatal if missing)
+    from app.mcmp.compressor import MeshCompressor
+
+    try:
+        await MeshCompressor.instance.initialize()
+        if MeshCompressor.instance.is_ready:
+            logger.info("MCMP compressor model loaded")
+        else:
+            logger.warning("MCMP compressor model not loaded; mcmp3 encoding will be disabled")
+    except Exception:
+        logger.exception("Failed to initialize MCMP compressor")
+
     # Initialize VAPID keys for Web Push (generates on first run)
     from app.push.vapid import ensure_vapid_keys
 
@@ -186,13 +192,7 @@ async def radio_disconnected_handler(request: Request, exc: RadioDisconnectedErr
 
 @app.middleware("http")
 async def log_server_errors(request: Request, call_next):
-    """Capture 5xx errors and unhandled exceptions into the log ring buffer.
-
-    Starlette writes unhandled-exception tracebacks to stderr, bypassing
-    Python logging, so they never reach the debug dump.  This middleware
-    catches them and logs via ``logger.exception()`` so the full traceback
-    is preserved in the ring buffer for the ``GET /api/debug`` snapshot.
-    """
+    """Capture 5xx errors and unhandled exceptions into the log ring buffer."""
     try:
         response = await call_next(request)
     except Exception:
