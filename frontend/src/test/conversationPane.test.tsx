@@ -302,6 +302,63 @@ describe('ConversationPane', () => {
     });
   });
 
+  it('resets the room chat gate when switching to a different room', async () => {
+    const makeRoom = (key: string, name: string): Contact => ({
+      public_key: key,
+      name,
+      type: 3,
+      flags: 0,
+      direct_path: null,
+      direct_path_len: -1,
+      direct_path_hash_mode: -1,
+      last_advert: null,
+      lat: null,
+      lon: null,
+      last_seen: null,
+      on_radio: false,
+      favorite: false,
+      last_contacted: null,
+      last_read_at: null,
+      first_seen: null,
+    });
+    const roomA = makeRoom('cc'.repeat(32), 'Room A');
+    const roomB = makeRoom('dd'.repeat(32), 'Room B');
+    const contacts = [roomA, roomB];
+
+    const { rerender } = render(
+      <ConversationPane
+        {...createProps({
+          activeConversation: { type: 'contact', id: roomA.public_key, name: roomA.name ?? '' },
+          contacts,
+        })}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Authenticate room' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('message-input')).toBeInTheDocument();
+    });
+
+    // Switch to a different room: the auth gate must reset (no chat) until the
+    // new room re-authenticates — otherwise it inherits Room A's authenticated
+    // state. (The render-time reset also avoids clobbering the panel's own mount
+    // report; that timing is browser-verified.)
+    rerender(
+      <ConversationPane
+        {...createProps({
+          activeConversation: { type: 'contact', id: roomB.public_key, name: roomB.name ?? '' },
+          contacts,
+        })}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('room-server-panel')).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('message-input')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('message-list')).not.toBeInTheDocument();
+  });
+
   it('passes unread marker props to MessageList only for channel conversations', async () => {
     render(
       <ConversationPane

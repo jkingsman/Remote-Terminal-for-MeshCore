@@ -17,11 +17,6 @@ vi.mock('../api', () => ({
   },
 }));
 
-// Suppress BotCodeEditor lazy load in tests
-vi.mock('../components/BotCodeEditor', () => ({
-  BotCodeEditor: () => <textarea data-testid="bot-code-editor" />,
-}));
-
 import { api } from '../api';
 
 const mockedApi = vi.mocked(api);
@@ -136,7 +131,7 @@ describe('SettingsFanoutSection', () => {
     const optionButtons = within(dialog)
       .getAllByRole('button')
       .filter((button) => button.hasAttribute('aria-pressed'));
-    expect(optionButtons).toHaveLength(11);
+    expect(optionButtons).toHaveLength(12);
     expect(within(dialog).getByRole('button', { name: 'Close' })).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Create' })).toBeInTheDocument();
     expect(
@@ -166,7 +161,10 @@ describe('SettingsFanoutSection', () => {
       within(dialog).getByRole('button', { name: startsWithAccessibleName('Amazon SQS') })
     ).toBeInTheDocument();
     expect(
-      within(dialog).getByRole('button', { name: startsWithAccessibleName('Python Bot') })
+      within(dialog).getByRole('button', { name: startsWithAccessibleName('Discord Bridge') })
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByRole('button', { name: startsWithAccessibleName('Telegram Bridge') })
     ).toBeInTheDocument();
     expect(
       within(dialog).getByRole('button', { name: startsWithAccessibleName('Map Upload') })
@@ -184,36 +182,59 @@ describe('SettingsFanoutSection', () => {
     expect(genericCommunityIndex).toBeLessThan(meshRankIndex);
   });
 
-  it('shows bot option in add integration dialog when bots are enabled', async () => {
+  it('no longer offers the Python Bot integration type', async () => {
     renderSection();
-    const dialog = await openCreateIntegrationDialog();
-    expect(
-      within(dialog).getByRole('button', { name: startsWithAccessibleName('Python Bot') })
-    ).toBeInTheDocument();
-  });
-
-  it('shows bots disabled banner when bots_disabled', async () => {
-    renderSection({ health: { ...baseHealth, bots_disabled: true } });
-    await waitFor(() => {
-      expect(screen.getByText(/Bot system is disabled/)).toBeInTheDocument();
-    });
-  });
-
-  it('shows restart-scoped bots disabled messaging when disabled until restart', async () => {
-    renderSection({
-      health: { ...baseHealth, bots_disabled: true, bots_disabled_source: 'until_restart' },
-    });
-    await waitFor(() => {
-      expect(screen.getByText(/disabled until the server restarts/i)).toBeInTheDocument();
-    });
-  });
-
-  it('hides bot option from add integration dialog when bots_disabled', async () => {
-    renderSection({ health: { ...baseHealth, bots_disabled: true } });
     const dialog = await openCreateIntegrationDialog();
     expect(
       within(dialog).queryByRole('button', { name: startsWithAccessibleName('Python Bot') })
     ).not.toBeInTheDocument();
+  });
+
+  it('shows the bots-have-moved banner on the list view', async () => {
+    renderSection();
+    await waitFor(() => {
+      expect(screen.getByText('Python bots have moved.')).toBeInTheDocument();
+      expect(screen.getByText(/now live in the Bots workspace/)).toBeInTheDocument();
+    });
+  });
+
+  it('new Discord Bridge draft shows mapping and moderation fields', async () => {
+    renderSection();
+    await openCreateIntegrationDialog();
+    selectCreateIntegration('Discord Bridge');
+    confirmCreateIntegration();
+
+    await waitFor(() => {
+      expect(screen.getByText('← Back to list')).toBeInTheDocument();
+      expect(screen.getByLabelText('Name')).toHaveValue('Discord Bridge #1');
+      expect(screen.getByText('Bridged channels → Discord webhooks')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '+ Add mapping' })).toBeInTheDocument();
+      expect(screen.getByLabelText('Profanity filter')).toBeInTheDocument();
+      expect(screen.getByText("Also bridge this app's own outgoing messages")).toBeInTheDocument();
+    });
+    // Scope is fixed server-side — no scope selector for bridges.
+    expect(screen.queryByText('Forward raw packets')).not.toBeInTheDocument();
+    expect(mockedApi.createFanoutConfig).not.toHaveBeenCalled();
+  });
+
+  it('new Telegram Bridge draft shows token and chat mapping fields', async () => {
+    renderSection();
+    await openCreateIntegrationDialog();
+    selectCreateIntegration('Telegram Bridge');
+    confirmCreateIntegration();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Name')).toHaveValue('Telegram Bridge #1');
+      expect(screen.getByLabelText('Bot API token')).toBeInTheDocument();
+      expect(screen.getByText('Bridged channels → Telegram chats')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '+ Add mapping' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '+ Add mapping' }));
+    await waitFor(() => {
+      expect(screen.getByLabelText('Mapping 1 channel')).toBeInTheDocument();
+      expect(screen.getByLabelText('Mapping 1 chat id')).toBeInTheDocument();
+    });
   });
 
   it('lists existing configs after load', async () => {

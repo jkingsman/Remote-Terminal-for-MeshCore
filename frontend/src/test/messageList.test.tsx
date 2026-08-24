@@ -1,9 +1,10 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MessageList } from '../components/MessageList';
+import { api } from '../api';
 import { PathHopWidthProvider } from '../contexts/PathHopWidthContext';
 import { CONTACT_TYPE_ROOM, type Contact, type Message } from '../types';
 
@@ -513,5 +514,61 @@ describe('MessageList channel sender rendering', () => {
     const mounted = container.querySelectorAll('[data-message-id]').length;
     expect(mounted).toBeGreaterThan(0);
     expect(mounted).toBeLessThan(100);
+  });
+});
+
+describe('MessageList image messages', () => {
+  it('renders a completed outgoing IE4 image immediately', () => {
+    render(
+      <MessageList
+        messages={[createMessage({ text: 'IE4:a:0:e:74:4r:1mc', outgoing: true })]}
+        contacts={[]}
+        loading={false}
+      />
+    );
+
+    expect(screen.getByAltText('Image message')).toHaveAttribute(
+      'src',
+      './api/images/sessions/0000000a/content'
+    );
+  });
+
+  it('shows tap-to-load progress and renders the completed image', async () => {
+    const fetchSpy = vi.spyOn(api, 'fetchImage').mockResolvedValue({
+      session_id: '0000000a',
+      state: 'receiving',
+      format: 0,
+      width: 256,
+      height: 171,
+      size_bytes: 2100,
+      fragment_count: 14,
+      received_count: 4,
+      missing_indices: [],
+    });
+    vi.spyOn(api, 'getImageSession').mockResolvedValue({
+      session_id: '0000000a',
+      state: 'complete',
+      format: 0,
+      width: 256,
+      height: 171,
+      size_bytes: 2100,
+      fragment_count: 14,
+      received_count: 14,
+      missing_indices: [],
+    });
+    render(
+      <MessageList
+        messages={[createMessage({ text: 'IE4:a:0:e:74:4r:1mc', sender_name: 'Alice' })]}
+        contacts={[]}
+        loading={false}
+      />
+    );
+    expect(screen.getByText('Tap to load')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Load image' }));
+    expect(await screen.findByText('4/14')).toBeVisible();
+    await waitFor(() => expect(screen.getByAltText('Image message')).toBeVisible(), {
+      timeout: 2000,
+    });
+    expect(fetchSpy).toHaveBeenCalledWith(1);
   });
 });

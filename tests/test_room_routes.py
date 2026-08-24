@@ -6,7 +6,7 @@ import pytest
 from fastapi import HTTPException
 from meshcore import EventType
 
-from app.models import CommandRequest, RepeaterLoginRequest
+from app.models import CommandRequest, RoomLoginRequest
 from app.radio import radio_manager
 from app.repository import ContactRepository
 from app.routers.repeaters import send_repeater_command
@@ -91,7 +91,7 @@ class TestRoomLogin:
             patch("app.routers.rooms.radio_manager.require_connected", return_value=mc),
             patch.object(radio_manager, "_meshcore", mc),
         ):
-            response = await room_login(ROOM_KEY, RepeaterLoginRequest(password="hello"))
+            response = await room_login(ROOM_KEY, RoomLoginRequest(password="hello"))
 
         assert response.status == "ok"
         assert response.authenticated is True
@@ -106,7 +106,7 @@ class TestRoomLogin:
             patch.object(radio_manager, "_meshcore", mc),
         ):
             with pytest.raises(HTTPException) as exc:
-                await room_login(ROOM_KEY, RepeaterLoginRequest(password="hello"))
+                await room_login(ROOM_KEY, RoomLoginRequest(password="hello"))
 
         assert exc.value.status_code == 400
 

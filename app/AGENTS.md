@@ -56,6 +56,7 @@ app/
 │   ├── vapid.py                 # VAPID key generation, storage, caching
 │   ├── send.py                  # pywebpush wrapper (async via thread executor)
 │   └── manager.py               # Push dispatch: filter, build payload, concurrent send
+├── bots/                # Bots workspace engine: triggers, cron, feeds, i18n (see bots/AGENTS_bots.md)
 ├── fanout/              # Fanout bus: MQTT, bots, webhooks, Apprise, SQS (see fanout/AGENTS_fanout.md)
 ├── telemetry_interval.py # Shared telemetry interval math for tracked-repeater scheduler
 ├── path_utils.py        # Path hex rendering and hop-width helpers
@@ -166,6 +167,14 @@ The retry deliberately does not re-run `_ensure_on_radio` — re-adding the cont
 - Incoming PRIV message uniqueness (`idx_messages_incoming_priv_dedup`): `(type, conversation_key, text, COALESCE(sender_timestamp, 0), COALESCE(sender_key, ''))` where `type = 'PRIV' AND outgoing = 0` — `sender_key` was added in migration 056 to distinguish room-server posts from different senders in the same second.
 - Duplicate insert is treated as an echo/repeat: the new path (if any) is appended, and the ACK count is incremented only for outgoing channel messages. Incoming direct messages with the same dedup identity also collapse onto one stored row, with later observations merging path data instead of creating a second DM.
 
+### MCMP text compression
+
+- MCMP (`app/compression/`) is a Python port of meshcore-open's arithmetic text compressor (n-gram model in `models/model-en-ru.json`), wire-compatible with it and dimapanov/mesh-compressor. Compressed bodies ride as ordinary message text behind an `mcmp2:` (v2) or `mcmp3:` (v3 metadata container) prefix.
+- **Decode on ingest:** `decode_incoming_body()` is called at every message ingest route — `create_message_from_decrypted` and `create_fallback_channel_message` (channels, raw-RF + get_msg) and `_store_direct_message` (DMs) — so the DB/search/bots see plaintext and content dedup stays consistent across routes. It never raises; a non-MCMP or malformed body is stored unchanged.
+- **Encode on send:** opt-in per conversation via `contacts.mcmp_enabled` / `channels.mcmp_enabled` (migration 066); the transport is selectable via `mcmp_version` (2 or 3; migration 067, default 2). `message_send.py` compresses only the transmitted body — v2 uses "only if smaller", v3 always wraps its container (carrying the message timestamp). The stored/broadcast text stays plaintext. `encode_outbound(text, version=, timestamp=)` is deterministic (v3 uses the sender timestamp) so DM retries and channel resends send identical bytes.
+- **Bots:** MCMP is transparent to bots. Incoming handlers see decoded plaintext (decode runs at ingest, before the broadcast the bot engine consumes), and `ctx.reply`/`send`/`send_dm` go through the same send path, so bot replies compress per the target conversation's `mcmp_enabled`/`mcmp_version`. `ctx.reply_split` sizes parts by their *compressed* wire length when the conversation has MCMP enabled (`split_text_compressed`), so it packs more text per message.
+- **Not implemented:** v3 Ed25519 signing (needs firmware) — v3 is sent unsigned and signed v3 from peers is decoded with the signature skipped, never verified. Decode is lenient (no re-encode verify) to tolerate cross-libm float drift.
+
 ### Region scope decoding (transport codes)
 
 - `ROUTE_TYPE_TRANSPORT_FLOOD`/`ROUTE_TYPE_TRANSPORT_DIRECT` packets carry a 4-byte transport-code block; `parse_packet_envelope` exposes it as `transport_codes = (code_1, code_2)` (little-endian uint16s; `code_2` is reserved/0).
@@ -273,10 +282,15 @@ Web Push is a standalone subsystem in `app/push/`, separate from the fanout modu
 - `GET /contacts/{public_key}/repeater/telemetry-history` — stored telemetry history for a repeater (read-only, no radio access)
 - `POST /contacts/{public_key}/telemetry` — on-demand CayenneLPP telemetry from any contact (persists in `contact_telemetry_history`)
 - `GET /contacts/{public_key}/telemetry-history` — stored LPP telemetry history for a contact (read-only)
-- `POST /contacts/{public_key}/room/login` — one attempt on the effective route, then one flood retry on timeout
+- `POST /contacts/{public_key}/room/login` — one attempt on the effective route, then one flood retry on timeout. Body `{password?, use_stored_credential?}`: `password` is three-state (`null`/absent = guest unless `use_stored_credential`, `""` = guest, else the password); `use_stored_credential=true` logs in with the room's server-side stored credential and never returns it.
 - `POST /contacts/{public_key}/room/status`
 - `POST /contacts/{public_key}/room/lpp-telemetry`
 - `POST /contacts/{public_key}/room/acl`
+- `GET /contacts/{public_key}/room/poll` — room poll/credential status; booleans only, never the stored credential
+- `PUT /contacts/{public_key}/room/poll` — set stored credential (`credential_action` keep/set/clear; `credential=""` stores a guest login) and/or the background poll schedule; enabling polling requires a stored credential
+- `DELETE /contacts/{public_key}/room/poll` — remove the stored credential and disable polling
+
+The background room poller (`app/radio_sync.py` `_room_poll_loop`, started post-connect) periodically logs in to each subscribed room with its stored credential so the server enqueues its message delta; the existing drain/dedup pipeline captures it. Reliability rests on the incoming-message dedup (re-pulling an overlapping delta is a no-op), a durable per-room subscription (`room_poll_subscriptions`), the shared radio lock (`radio_operation(blocking=False, suspend_auto_fetch=True)` — busy = skip), and exponential backoff; an explicit `LOGIN_FAILED` disables the subscription. MeshCore has no message cursor, so this is "keep the session current + drain," never "fetch since N".
 
 ### Channels
 - `GET /channels`
@@ -294,6 +308,7 @@ Web Push is a standalone subsystem in `app/push/`, separate from the fanout modu
 - `POST /messages/direct`
 - `POST /messages/channel`
 - `POST /messages/channel/{message_id}/resend`
+- `POST /messages/mcmp-estimate` — compressed wire size of a draft (`{text, version}` → `{wire_bytes, compressed}`) for the live compose counter; pure computation, `text` capped at 4096 chars
 
 ### Packets
 - `GET /packets/undecrypted/count`
@@ -317,6 +332,7 @@ Web Push is a standalone subsystem in `app/push/`, separate from the fanout modu
 - `POST /settings/tracked-telemetry-contacts/toggle` — toggle tracked LPP telemetry for any contact (max 8)
 - `GET /settings/tracked-telemetry-contacts/schedule` — contact telemetry scheduling (shared ceiling with repeaters)
 - `POST /settings/muted-channels/toggle`
+- `POST /settings/mcmp/set` — configure MCMP for a conversation (`{type: "contact"|"channel", id, enabled, version?}`; `version` 2 or 3, omit to leave unchanged); broadcasts a `contact`/`channel` event
 
 ### Fanout
 - `GET /fanout` — list all fanout configs

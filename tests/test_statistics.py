@@ -650,3 +650,41 @@ class TestStatisticsEndpoint:
         assert response.status_code == 200
         payload = response.json()
         assert payload["noise_floor_24h"] == noise_floor_history
+
+
+class TestMultibyteRollout:
+    @pytest.mark.asyncio
+    async def test_counts_nodes_by_direct_route_hop_width(self, test_db):
+        """Node-level multibyte adoption: counts by direct_path_hash_mode, split by type."""
+        conn = test_db.conn
+        rows = [
+            ("aa" * 32, 1, 1),  # client, 1-byte
+            ("bb" * 32, 1, 2),  # client, 2-byte
+            ("cc" * 32, 2, 2),  # repeater, 2-byte
+            ("dd" * 32, 2, 3),  # repeater, 3-byte
+            ("ee" * 32, 2, 1),  # repeater, 1-byte
+            ("ff" * 32, 1, None),  # no known route width — excluded
+        ]
+        for key, contact_type, hash_mode in rows:
+            await conn.execute(
+                "INSERT INTO contacts (public_key, type, direct_path_hash_mode) VALUES (?, ?, ?)",
+                (key, contact_type, hash_mode),
+            )
+        await conn.commit()
+
+        result = await StatisticsRepository.get_all()
+        rollout = result["multibyte_rollout"]
+
+        assert rollout["contacts_with_route"] == 5
+        assert rollout["contacts_multibyte"] == 3
+        assert rollout["single_byte"] == 2
+        assert rollout["double_byte"] == 2
+        assert rollout["triple_byte"] == 1
+        assert rollout["repeaters_with_route"] == 3
+        assert rollout["repeaters_multibyte"] == 2
+
+    @pytest.mark.asyncio
+    async def test_empty_rollout(self, test_db):
+        result = await StatisticsRepository.get_all()
+        assert result["multibyte_rollout"]["contacts_with_route"] == 0
+        assert result["multibyte_rollout"]["contacts_multibyte"] == 0

@@ -1,0 +1,26 @@
+name: "RemoteTerm"
+description: "RemoteTerm-for-MeshCore-With-Bots"
+version: "1.4.0"
+slug: "remoteterm"
+init: false
+arch:
+  - aarch64
+  - amd64
+  - armhf
+  - armv7
+  - i386
+startup: services
+options:
+  MESHCORE_TCP_HOST: 192.168.1.1
+  MESHCORE_TCP_PORT: 5000
+  MESHCORE_DATABASE_PATH: "data/meshcore.db"
+schema:
+  MESHCORE_TCP_HOST: str
+  MESHCORE_TCP_PORT: port
+  MESHCORE_DATABASE_PATH: str
+ports:
+  8000/tcp: null
+map:
+- type: addon_config
+  read_only: false
+  path: /app/data

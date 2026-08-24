@@ -315,6 +315,49 @@ async def on_ack(event: "Event") -> None:
         logger.debug("ACK code %s does not match any pending messages", ack_code)
 
 
+async def on_raw_data(event: "Event") -> None:
+    """Handle full PUSH_CODE_RAW_DATA payloads used by interoperable media."""
+    from app.services.image import handle_raw_image_payload
+    from app.services.radio_runtime import radio_runtime
+    from app.services.voice import handle_raw_voice_payload
+
+    raw = event.payload.get("payload", b"")
+    if isinstance(raw, str):
+        try:
+            raw = bytes.fromhex(raw)
+        except ValueError:
+            return
+    if isinstance(raw, (bytes, bytearray)):
+        payload = bytes(raw)
+        if not await handle_raw_image_payload(payload, radio_runtime):
+            await handle_raw_voice_payload(payload, radio_runtime)
+
+
+def install_full_raw_data_adapter(meshcore) -> None:
+    """Work around meshcore-py 2.3.7 truncating RAW_DATA pushes to four bytes."""
+    from meshcore.events import Event
+    from meshcore.packets import PacketType
+
+    reader = meshcore._reader
+    if getattr(reader, "_remoteterm_full_raw_data", False):
+        return
+    original = reader.handle_rx
+
+    async def handle_rx(data: bytearray) -> None:
+        if data and data[0] == PacketType.RAW_DATA.value and len(data) >= 3:
+            payload = {
+                "SNR": int.from_bytes(data[1:2], "little", signed=True) / 4,
+                "RSSI": int.from_bytes(data[2:3], "little", signed=True),
+                "payload": bytes(data[3:]),
+            }
+            await reader.dispatcher.dispatch(Event(EventType.RAW_DATA, payload))
+            return
+        await original(data)
+
+    reader.handle_rx = handle_rx
+    reader._remoteterm_full_raw_data = True
+
+
 def register_event_handlers(meshcore) -> None:
     """Register event handlers with the MeshCore instance.
 
@@ -343,4 +386,6 @@ def register_event_handlers(meshcore) -> None:
     _active_subscriptions.append(meshcore.subscribe(EventType.PATH_UPDATE, on_path_update))
     _active_subscriptions.append(meshcore.subscribe(EventType.NEW_CONTACT, on_new_contact))
     _active_subscriptions.append(meshcore.subscribe(EventType.ACK, on_ack))
+    _active_subscriptions.append(meshcore.subscribe(EventType.RAW_DATA, on_raw_data))
+    install_full_raw_data_adapter(meshcore)
     logger.info("Event handlers registered")

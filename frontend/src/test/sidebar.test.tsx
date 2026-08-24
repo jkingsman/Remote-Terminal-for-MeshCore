@@ -363,6 +363,18 @@ describe('Sidebar section summaries', () => {
     });
   });
 
+  it('shows the statistics tool row and selects it', () => {
+    const { onSelectConversation } = renderSidebar();
+
+    fireEvent.click(screen.getByText('Statistics'));
+
+    expect(onSelectConversation).toHaveBeenCalledWith({
+      type: 'statistics',
+      id: 'statistics',
+      name: 'Statistics',
+    });
+  });
+
   it('sorts each section independently and persists per-section sort preferences', () => {
     const publicChannel = makeChannel('AA'.repeat(16), 'Public');
     const zebraChannel = makeChannel('BB'.repeat(16), '#zebra');

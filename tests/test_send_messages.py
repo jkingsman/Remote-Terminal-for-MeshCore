@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from meshcore import EventType
 
 import app.services.message_send as message_send_service
+from app.compression.mcmp import try_decode_incoming
 from app.models import (
     SendChannelMessageRequest,
     SendDirectMessageRequest,
@@ -2079,3 +2080,148 @@ class TestChannelSendLockScope:
         ack_events = [entry for entry in broadcasts if entry["type"] == "message_acked"]
         assert len(message_events) == 1
         assert len(ack_events) == 1
+
+
+# A message long enough that MCMP actually shrinks it (short strings stay plain).
+_MCMP_LONG_TEXT = "Battery at 40%, switching to power save and checking channel five for traffic."
+
+
+class TestMcmpCompression:
+    """Outbound MCMP compression is applied per-conversation when opted in.
+
+    Only the transmitted body is compressed; the stored/broadcast text stays
+    plaintext so history, search and dedup are unaffected.
+    """
+
+    @pytest.mark.asyncio
+    async def test_dm_compressed_on_wire_when_enabled(self, test_db):
+        mc = _make_mc()
+        pub_key = "1a" * 32
+        await _insert_contact(pub_key, "Alice")
+        assert await ContactRepository.set_mcmp_enabled(pub_key, True)
+
+        broadcasts = []
+        with (
+            patch("app.routers.messages.radio_manager.require_connected", return_value=mc),
+            patch.object(radio_manager, "_meshcore", mc),
+            patch(
+                "app.routers.messages.broadcast_event",
+                side_effect=lambda t, d, **k: broadcasts.append({"type": t, "data": d}),
+            ),
+        ):
+            await send_direct_message(
+                SendDirectMessageRequest(destination=pub_key, text=_MCMP_LONG_TEXT)
+            )
+
+        sent = mc.commands.send_msg.await_args.kwargs["msg"]
+        assert sent.startswith("mcmp2:")
+        assert len(sent.encode("utf-8")) < len(_MCMP_LONG_TEXT.encode("utf-8"))
+        decoded = try_decode_incoming(sent)
+        assert decoded is not None and decoded.text == _MCMP_LONG_TEXT
+        # Stored/broadcast text is the plaintext, not the compressed wire form.
+        msg_events = [b for b in broadcasts if b["type"] == "message"]
+        assert msg_events and msg_events[0]["data"]["text"] == _MCMP_LONG_TEXT
+
+    @pytest.mark.asyncio
+    async def test_dm_plaintext_on_wire_when_disabled(self, test_db):
+        mc = _make_mc()
+        pub_key = "2b" * 32
+        await _insert_contact(pub_key, "Alice")  # mcmp_enabled defaults off
+
+        with (
+            patch("app.routers.messages.radio_manager.require_connected", return_value=mc),
+            patch.object(radio_manager, "_meshcore", mc),
+            patch("app.routers.messages.broadcast_event"),
+        ):
+            await send_direct_message(
+                SendDirectMessageRequest(destination=pub_key, text=_MCMP_LONG_TEXT)
+            )
+
+        assert mc.commands.send_msg.await_args.kwargs["msg"] == _MCMP_LONG_TEXT
+
+    @pytest.mark.asyncio
+    async def test_channel_compressed_body_when_enabled(self, test_db):
+        mc = _make_mc(name="MyNode")
+        chan_key = "3c" * 16
+        await ChannelRepository.upsert(key=chan_key, name="#general")
+        assert await ChannelRepository.set_mcmp_enabled(chan_key, True)
+
+        with (
+            patch("app.routers.messages.radio_manager.require_connected", return_value=mc),
+            patch.object(radio_manager, "_meshcore", mc),
+            patch("app.routers.messages.broadcast_event"),
+        ):
+            message = await send_channel_message(
+                SendChannelMessageRequest(channel_key=chan_key, text=_MCMP_LONG_TEXT)
+            )
+
+        # The wire body is compressed and carries no sender prefix (the firmware
+        # prepends "<name>: "); the stored row keeps the plaintext with prefix.
+        sent = mc.commands.send_chan_msg.await_args.kwargs["msg"]
+        assert sent.startswith("mcmp2:")
+        decoded = try_decode_incoming(sent)
+        assert decoded is not None and decoded.text == _MCMP_LONG_TEXT
+        assert message.text == f"MyNode: {_MCMP_LONG_TEXT}"
+
+    @pytest.mark.asyncio
+    async def test_channel_plaintext_body_when_disabled(self, test_db):
+        mc = _make_mc(name="MyNode")
+        chan_key = "4d" * 16
+        await ChannelRepository.upsert(key=chan_key, name="#general")
+
+        with (
+            patch("app.routers.messages.radio_manager.require_connected", return_value=mc),
+            patch.object(radio_manager, "_meshcore", mc),
+            patch("app.routers.messages.broadcast_event"),
+        ):
+            await send_channel_message(
+                SendChannelMessageRequest(channel_key=chan_key, text=_MCMP_LONG_TEXT)
+            )
+
+        assert mc.commands.send_chan_msg.await_args.kwargs["msg"] == _MCMP_LONG_TEXT
+
+    @pytest.mark.asyncio
+    async def test_dm_uses_v3_transport_when_selected(self, test_db):
+        mc = _make_mc()
+        pub_key = "5e" * 32
+        await _insert_contact(pub_key, "Alice")
+        assert await ContactRepository.set_mcmp_enabled(pub_key, True)
+        assert await ContactRepository.set_mcmp_version(pub_key, 3)
+
+        with (
+            patch("app.routers.messages.radio_manager.require_connected", return_value=mc),
+            patch.object(radio_manager, "_meshcore", mc),
+            patch("app.routers.messages.broadcast_event"),
+        ):
+            await send_direct_message(
+                SendDirectMessageRequest(destination=pub_key, text=_MCMP_LONG_TEXT)
+            )
+
+        sent = mc.commands.send_msg.await_args.kwargs["msg"]
+        assert sent.startswith("mcmp3:")
+        decoded = try_decode_incoming(sent)
+        assert decoded is not None and decoded.text == _MCMP_LONG_TEXT and decoded.version == "v3"
+
+    @pytest.mark.asyncio
+    async def test_channel_uses_v3_transport_when_selected(self, test_db):
+        mc = _make_mc(name="MyNode")
+        chan_key = "6f" * 16
+        await ChannelRepository.upsert(key=chan_key, name="#general")
+        assert await ChannelRepository.set_mcmp_enabled(chan_key, True)
+        assert await ChannelRepository.set_mcmp_version(chan_key, 3)
+
+        with (
+            patch("app.routers.messages.radio_manager.require_connected", return_value=mc),
+            patch.object(radio_manager, "_meshcore", mc),
+            patch("app.routers.messages.broadcast_event"),
+        ):
+            message = await send_channel_message(
+                SendChannelMessageRequest(channel_key=chan_key, text=_MCMP_LONG_TEXT)
+            )
+
+        sent = mc.commands.send_chan_msg.await_args.kwargs["msg"]
+        assert sent.startswith("mcmp3:")
+        decoded = try_decode_incoming(sent)
+        assert decoded is not None and decoded.text == _MCMP_LONG_TEXT
+        # Stored row is still plaintext with the sender prefix.
+        assert message.text == f"MyNode: {_MCMP_LONG_TEXT}"

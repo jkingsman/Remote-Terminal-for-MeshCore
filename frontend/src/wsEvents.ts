@@ -1,4 +1,12 @@
-import type { Channel, Contact, HealthStatus, Message, MessagePath, RawPacket } from './types';
+import type {
+  BotLogEntry,
+  Channel,
+  Contact,
+  HealthStatus,
+  Message,
+  MessagePath,
+  RawPacket,
+} from './types';
 
 export interface MessageAckedPayload {
   message_id: number;
@@ -35,6 +43,7 @@ export type KnownWsEvent =
   | { type: 'channel_deleted'; data: ChannelDeletedPayload }
   | { type: 'raw_packet'; data: RawPacket }
   | { type: 'message_acked'; data: MessageAckedPayload }
+  | { type: 'bot_log'; data: BotLogEntry }
   | { type: 'error'; data: ToastPayload }
   | { type: 'success'; data: ToastPayload }
   | { type: 'pong'; data?: null };
@@ -68,6 +77,7 @@ export function parseWsEvent(raw: string): ParsedWsEvent {
     case 'channel_deleted':
     case 'raw_packet':
     case 'message_acked':
+    case 'bot_log':
     case 'error':
     case 'success':
       return {

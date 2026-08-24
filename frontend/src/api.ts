@@ -29,6 +29,8 @@ import type {
   RepeaterAclResponse,
   RepeaterAdvertIntervalsResponse,
   RepeaterLoginResponse,
+  RoomPollConfigRequest,
+  RoomPollStatus,
   RepeaterLppTelemetryResponse,
   RepeaterNeighborsResponse,
   RepeaterNodeInfoResponse,
@@ -43,9 +45,41 @@ import type {
   StatisticsResponse,
   TraceResponse,
   UnreadCounts,
+  Bot,
+  BotEngineSettings,
+  BotEngineStatus,
+  BotFeed,
+  BotLibraryEntry,
+  BotLogEntry,
+  BotRun,
+  BotSchedule,
+  BotStats,
+  BotTestResponse,
+  BotUpdatePayload,
 } from './types';
 
 const API_BASE = './api';
+
+export interface VoiceSessionStatus {
+  session_id: string;
+  state: string;
+  duration_ms: number;
+  packet_count: number;
+  received_count: number;
+  missing_indices: number[];
+}
+
+export interface ImageSessionStatus {
+  session_id: string;
+  state: string;
+  format: 0 | 1;
+  width: number;
+  height: number;
+  size_bytes: number;
+  fragment_count: number;
+  received_count: number;
+  missing_indices: number[];
+}
 
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   const hasBody = options?.body !== undefined;
@@ -90,6 +124,50 @@ interface DecryptResult {
 }
 
 export const api = {
+  sendImage: async (
+    conversationType: 'PRIV' | 'CHAN',
+    conversationKey: string,
+    image: { blob: Blob; format: 0 | 1; width: number; height: number }
+  ) => {
+    const query = new URLSearchParams({
+      conversation_type: conversationType,
+      conversation_key: conversationKey,
+      format_id: String(image.format),
+      width: String(image.width),
+      height: String(image.height),
+    });
+    const response = await fetch(`${API_BASE}/images/send?${query}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: image.blob,
+    });
+    if (!response.ok)
+      throw new Error((await response.json().catch(() => null))?.detail || response.statusText);
+    return response.json();
+  },
+  fetchImage: (messageId: number) =>
+    fetchJson<ImageSessionStatus>(`/images/messages/${messageId}/fetch`, { method: 'POST' }),
+  getImageSession: (sessionId: string) =>
+    fetchJson<ImageSessionStatus>(`/images/sessions/${sessionId}`),
+  imageContentUrl: (sessionId: string) => `${API_BASE}/images/sessions/${sessionId}/content`,
+  sendVoice: async (conversationType: 'PRIV' | 'CHAN', conversationKey: string, pcm: Blob) => {
+    const response = await fetch(
+      `${API_BASE}/voice/send?conversation_type=${conversationType}&conversation_key=${encodeURIComponent(conversationKey)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: pcm,
+      }
+    );
+    if (!response.ok)
+      throw new Error((await response.json().catch(() => null))?.detail || response.statusText);
+    return response.json();
+  },
+  fetchVoice: (messageId: number) =>
+    fetchJson<VoiceSessionStatus>(`/voice/messages/${messageId}/fetch`, { method: 'POST' }),
+  getVoiceSession: (sessionId: string) =>
+    fetchJson<VoiceSessionStatus>(`/voice/sessions/${sessionId}`),
+  voiceAudioUrl: (sessionId: string) => `${API_BASE}/voice/sessions/${sessionId}/audio`,
   // Health
   getHealth: () => fetchJson<HealthStatus>('/health'),
 
@@ -369,6 +447,22 @@ export const api = {
       body: JSON.stringify({ key }),
     }),
 
+  // MCMP compression (per conversation)
+  setMcmpEnabled: (type: 'channel' | 'contact', id: string, enabled: boolean, version?: number) =>
+    fetchJson<{ type: 'channel' | 'contact'; id: string; enabled: boolean; version: number }>(
+      '/settings/mcmp/set',
+      {
+        method: 'POST',
+        body: JSON.stringify({ type, id, enabled, version }),
+      }
+    ),
+
+  estimateMcmp: (text: string, version = 2) =>
+    fetchJson<{ wire_bytes: number; compressed: boolean }>('/messages/mcmp-estimate', {
+      method: 'POST',
+      body: JSON.stringify({ text, version }),
+    }),
+
   // Fanout
   getFanoutConfigs: () => fetchJson<FanoutConfig[]>('/fanout'),
   createFanoutConfig: (config: {
@@ -462,10 +556,25 @@ export const api = {
     }),
   contactTelemetryHistory: (publicKey: string) =>
     fetchJson<TelemetryHistoryEntry[]>(`/contacts/${publicKey}/telemetry-history`),
-  roomLogin: (publicKey: string, password: string) =>
+  roomLogin: (publicKey: string, opts: { password?: string; useStoredCredential?: boolean } = {}) =>
     fetchJson<RepeaterLoginResponse>(`/contacts/${publicKey}/room/login`, {
       method: 'POST',
-      body: JSON.stringify({ password }),
+      // password may legitimately be "" (guest); only omit it when unset so the
+      // backend falls back to the stored credential.
+      body: JSON.stringify({
+        ...(opts.password !== undefined ? { password: opts.password } : {}),
+        use_stored_credential: opts.useStoredCredential ?? false,
+      }),
+    }),
+  getRoomPoll: (publicKey: string) => fetchJson<RoomPollStatus>(`/contacts/${publicKey}/room/poll`),
+  setRoomPoll: (publicKey: string, config: RoomPollConfigRequest) =>
+    fetchJson<RoomPollStatus>(`/contacts/${publicKey}/room/poll`, {
+      method: 'PUT',
+      body: JSON.stringify(config),
+    }),
+  deleteRoomPoll: (publicKey: string) =>
+    fetchJson<RoomPollStatus>(`/contacts/${publicKey}/room/poll`, {
+      method: 'DELETE',
     }),
   roomStatus: (publicKey: string) =>
     fetchJson<RepeaterStatusResponse>(`/contacts/${publicKey}/room/status`, {
@@ -502,5 +611,114 @@ export const api = {
     fetchJson<string[]>('/push/conversations/toggle', {
       method: 'POST',
       body: JSON.stringify({ key }),
+    }),
+
+  // Bots workspace
+  getBots: () => fetchJson<Bot[]>('/bots'),
+  getBot: (id: string) => fetchJson<Bot>(`/bots/${id}`),
+  createBot: (body: {
+    name: string;
+    category?: string;
+    description?: string;
+    code?: string;
+    enabled?: boolean;
+    from_builtin_key?: string | null;
+  }) => fetchJson<Bot>('/bots', { method: 'POST', body: JSON.stringify(body) }),
+  updateBot: (id: string, body: BotUpdatePayload) =>
+    fetchJson<Bot>(`/bots/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  deleteBot: (id: string) => fetchJson<{ status: string }>(`/bots/${id}`, { method: 'DELETE' }),
+  resetBot: (id: string) => fetchJson<Bot>(`/bots/${id}/reset`, { method: 'POST' }),
+  testBot: (
+    id: string,
+    body: {
+      text: string;
+      is_dm?: boolean;
+      sender_name?: string;
+      sender_key?: string | null;
+      channel_key?: string | null;
+      channel_name?: string | null;
+    }
+  ) =>
+    fetchJson<BotTestResponse>(`/bots/${id}/test`, { method: 'POST', body: JSON.stringify(body) }),
+  getBotLibrary: () => fetchJson<BotLibraryEntry[]>('/bots/library'),
+  getBotRuns: (botId?: string, limit = 50) =>
+    fetchJson<BotRun[]>(
+      `/bots/runs?limit=${limit}${botId ? `&bot_id=${encodeURIComponent(botId)}` : ''}`
+    ),
+  getBotStats: (window: '1h' | '24h' | '7d') => fetchJson<BotStats>(`/bots/stats?window=${window}`),
+  getBotLogs: (limit = 200) => fetchJson<BotLogEntry[]>(`/bots/logs?limit=${limit}`),
+  getBotEngine: () => fetchJson<BotEngineStatus>('/bots/engine'),
+  updateBotEngine: (body: Partial<BotEngineSettings>) =>
+    fetchJson<BotEngineStatus>('/bots/engine', { method: 'PATCH', body: JSON.stringify(body) }),
+  // Bots kill switch: reuses disableBotsUntilRestart() above — the server now
+  // silences BOTH the legacy fanout bot modules and the Bots workspace engine
+  // from either endpoint.
+  getBotSchedules: () => fetchJson<BotSchedule[]>('/bots/schedules/all'),
+  createBotSchedule: (body: {
+    label: string;
+    cron: string;
+    channel_key: string;
+    message: string;
+    flood_scope?: string | null;
+    enabled?: boolean;
+  }) => fetchJson<BotSchedule>('/bots/schedules', { method: 'POST', body: JSON.stringify(body) }),
+  updateBotSchedule: (
+    id: string,
+    body: Partial<{
+      label: string;
+      cron: string;
+      channel_key: string;
+      message: string;
+      flood_scope: string | null;
+      enabled: boolean;
+    }>
+  ) =>
+    fetchJson<BotSchedule>(`/bots/schedules/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  deleteBotSchedule: (id: string) =>
+    fetchJson<{ status: string }>(`/bots/schedules/${id}`, { method: 'DELETE' }),
+  validateCron: (cron: string) =>
+    fetchJson<{ valid: boolean; error: string | null; next_runs: number[] }>(
+      `/bots/schedules/validate-cron?cron=${encodeURIComponent(cron)}`
+    ),
+  getBotFeeds: () => fetchJson<BotFeed[]>('/bots/feeds/all'),
+  createBotFeed: (body: {
+    name: string;
+    feed_type: 'rss' | 'api';
+    url: string;
+    channel_key: string;
+    interval_seconds?: number;
+    format?: string;
+    items_path?: string | null;
+    max_posts_per_check?: number;
+    enabled?: boolean;
+  }) => fetchJson<BotFeed>('/bots/feeds', { method: 'POST', body: JSON.stringify(body) }),
+  updateBotFeed: (
+    id: string,
+    body: Partial<{
+      name: string;
+      feed_type: 'rss' | 'api';
+      url: string;
+      channel_key: string;
+      interval_seconds: number;
+      format: string;
+      items_path: string | null;
+      max_posts_per_check: number;
+      enabled: boolean;
+    }>
+  ) => fetchJson<BotFeed>(`/bots/feeds/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  deleteBotFeed: (id: string) =>
+    fetchJson<{ status: string }>(`/bots/feeds/${id}`, { method: 'DELETE' }),
+  testBotFeed: (body: {
+    url: string;
+    feed_type: 'rss' | 'api';
+    items_path?: string | null;
+    format?: string;
+  }) =>
+    fetchJson<{ item_count: number; preview: string[] }>('/bots/feeds/test', {
+      method: 'POST',
+      body: JSON.stringify(body),
     }),
 };

@@ -12,6 +12,14 @@ If instructed to "run all tests" or "get ready for a commit" or other summative,
 
 This is the repo's end-to-end quality gate. It runs backend/frontend autofixers first, then type checking, tests, and the standard frontend build. All checks must pass green, and the script may leave formatting/lint edits behind.
 
+**When creating a pull request, always ask the user whether the `version` in `config.yaml` should be bumped — and propose a specific bump.** Base the suggestion on the change, following semantic versioning (`MAJOR.MINOR.PATCH`):
+
+- **Patch** — bug fixes and small/minor changes (e.g. `1.0.0` → `1.0.1`).
+- **Minor** — enhancements or non-trivial new functionality that isn't just a tiny tweak, with no breaking changes (e.g. `1.0.0` → `1.1.0`).
+- **Major** — breaking changes (e.g. `1.0.0` → `2.0.0`).
+
+Suggest the bump you think fits, but let the user confirm (or override) the version before it is changed; do not bump it silently.
+
 ## Overview
 
 A web interface for MeshCore mesh radio networks. The backend connects to a MeshCore-compatible radio over Serial, TCP, or BLE and exposes REST/WebSocket APIs. The React frontend provides real-time messaging and radio configuration.
@@ -21,6 +29,7 @@ A web interface for MeshCore mesh radio networks. The backend connects to a Mesh
 - `frontend/AGENTS.md` - Frontend (React, state management, WebSocket, components)
 
 Ancillary AGENTS.md files which should generally not be reviewed unless specific work is being performed on those features include:
+- `app/bots/AGENTS_bots.md` - Bots workspace (DB-stored Python bots, triggers, scheduler, feeds, engine)
 - `app/fanout/AGENTS_fanout.md` - Fanout bus architecture (MQTT, bots, webhooks, Apprise, SQS)
 - `frontend/src/components/visualizer/AGENTS_packet_visualizer.md` - Packet visualizer (force-directed graph, advert-path identity, layout engine)
 

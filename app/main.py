@@ -58,14 +58,17 @@ from app.radio_sync import (
     stop_message_polling,
     stop_periodic_advert,
     stop_periodic_sync,
+    stop_room_polling,
     stop_telemetry_collect,
 )
 from app.routers import (
+    bots,
     channels,
     contacts,
     debug,
     fanout,
     health,
+    images,
     messages,
     packets,
     push,
@@ -75,6 +78,7 @@ from app.routers import (
     rooms,
     settings,
     statistics,
+    voice,
     ws,
 )
 from app.security import add_optional_basic_auth_middleware
@@ -131,6 +135,19 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("Failed to start fanout modules")
 
+    # Seed the built-in bot library and start the bot engine
+    from app.bots.engine import bot_engine
+    from app.bots.library import ensure_seeded
+
+    try:
+        await ensure_seeded()
+    except Exception:
+        logger.exception("Failed to seed bot library")
+    try:
+        await bot_engine.start()
+    except Exception:
+        logger.exception("Failed to start bot engine")
+
     startup_radio_task = asyncio.create_task(_startup_radio_connect_and_setup())
     app.state.startup_radio_task = startup_radio_task
 
@@ -143,6 +160,7 @@ async def lifespan(app: FastAPI):
             await startup_radio_task
         except asyncio.CancelledError:
             pass
+    await bot_engine.stop()
     await fanout_manager.stop_all()
     await radio_manager.stop_connection_monitor()
     await stop_background_contact_reconciliation()
@@ -151,6 +169,7 @@ async def lifespan(app: FastAPI):
     await stop_periodic_advert()
     await stop_periodic_sync()
     await stop_telemetry_collect()
+    await stop_room_polling()
     if radio_manager.meshcore:
         await radio_manager.meshcore.stop_auto_message_fetching()
     await radio_manager.disconnect()
@@ -207,6 +226,8 @@ async def log_server_errors(request: Request, call_next):
 app.include_router(health.router, prefix="/api")
 app.include_router(debug.router, prefix="/api")
 app.include_router(fanout.router, prefix="/api")
+app.include_router(bots.router, prefix="/api")
+app.include_router(bots.hooks_router, prefix="/api")
 app.include_router(radio.router, prefix="/api")
 app.include_router(contacts.router, prefix="/api")
 app.include_router(repeaters.router, prefix="/api")
@@ -218,6 +239,8 @@ app.include_router(read_state.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")
 app.include_router(statistics.router, prefix="/api")
 app.include_router(push.router, prefix="/api")
+app.include_router(voice.router, prefix="/api")
+app.include_router(images.router, prefix="/api")
 app.include_router(ws.router, prefix="/api")
 
 # Serve frontend static files in production

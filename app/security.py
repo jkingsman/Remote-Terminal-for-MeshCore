@@ -1,7 +1,5 @@
 """ASGI middleware for optional app-wide HTTP Basic authentication."""
 
-from __future__ import annotations
-
 import base64
 import binascii
 import json
@@ -20,16 +18,24 @@ _UNAUTHORIZED_BODY = json.dumps({"detail": "Unauthorized"}).encode("utf-8")
 class BasicAuthMiddleware:
     """Protect all HTTP and WebSocket entrypoints with HTTP Basic auth."""
 
-    def __init__(self, app, *, username: str, password: str, realm: str = _AUTH_REALM) -> None:
+    def __init__(
+        self,
+        app,
+        *,
+        username: str,
+        password: str,
+        realm: str = _AUTH_REALM,
+    ) -> None:
         self.app = app
         self.username = username
         self.password = password
         self.realm = realm
-        self._challenge_value = f'Basic realm="{realm}", charset="UTF-8"'.encode("latin-1")
+        self._challenge_value = (f'Basic realm="{realm}", charset="UTF-8"').encode("latin-1")
 
     def _is_authorized(self, scope: dict[str, Any]) -> bool:
         headers = Headers(scope=scope)
         authorization = headers.get("authorization")
+
         if not authorization:
             return False
 
@@ -94,7 +100,15 @@ class BasicAuthMiddleware:
 
     async def __call__(self, scope, receive, send) -> None:
         scope_type = scope["type"]
+
         if scope_type not in {"http", "websocket"}:
+            await self.app(scope, receive, send)
+            return
+
+        # Every HTTP hook is independently gated by its enabled bot's
+        # webhook_token. Slugs are operator-editable, so exempt the namespace
+        # rather than one hard-coded SMS slug.
+        if scope_type == "http" and str(scope.get("path", "")).startswith("/api/hooks/"):
             await self.app(scope, receive, send)
             return
 
@@ -111,6 +125,7 @@ class BasicAuthMiddleware:
 
 def add_optional_basic_auth_middleware(app, settings) -> None:
     """Enable app-wide basic auth when configured via environment variables."""
+
     if not settings.basic_auth_enabled:
         return
 

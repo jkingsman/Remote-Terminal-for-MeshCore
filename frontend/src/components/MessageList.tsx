@@ -32,6 +32,157 @@ import { toast } from './ui/sonner';
 import { handleKeyboardActivate } from '../utils/a11y';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { cn } from '@/lib/utils';
+import { Download, ImageOff, Loader2, Play, X } from 'lucide-react';
+import { parseVoiceEnvelope } from '../utils/voiceEnvelope';
+import { estimateImageTransmitSeconds, parseImageEnvelope } from '../utils/imageEnvelope';
+
+function ImageMessage({ message, content }: { message: Message; content: string }) {
+  const envelope = parseImageEnvelope(content);
+  const [state, setState] = useState<'idle' | 'loading' | 'complete' | 'unavailable'>(
+    message.outgoing ? 'complete' : 'idle'
+  );
+  const [received, setReceived] = useState(message.outgoing ? (envelope?.fragmentCount ?? 0) : 0);
+  const [fullscreen, setFullscreen] = useState(false);
+  if (!envelope) return null;
+
+  const load = async () => {
+    if (state === 'loading') return;
+    setState('loading');
+    try {
+      let session = await api.fetchImage(message.id);
+      setReceived(session.received_count);
+      for (let attempt = 0; session.state !== 'complete' && attempt < 40; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 750));
+        session = await api.getImageSession(session.session_id);
+        setReceived(session.received_count);
+      }
+      if (session.state !== 'complete') throw new Error('Image fragments are not available');
+      setState('complete');
+    } catch (error) {
+      setState('unavailable');
+      toast.error('Image message unavailable', {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+  const contentUrl = api.imageContentUrl(envelope.sessionId);
+  const label = `${envelope.width}×${envelope.height} · ${envelope.format === 0 ? 'AVIF' : 'JPEG'}`;
+  return (
+    <div className="w-48 max-w-full">
+      {state === 'complete' ? (
+        <button
+          type="button"
+          className="block overflow-hidden rounded-md"
+          onClick={() => setFullscreen(true)}
+          aria-label="Open image"
+        >
+          <img src={contentUrl} alt="Image message" className="aspect-square w-48 object-cover" />
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={() => void load()}
+          disabled={state === 'loading'}
+          aria-label="Load image"
+          className="flex aspect-square w-48 flex-col items-center justify-center gap-2 rounded-md bg-muted/60 text-muted-foreground"
+        >
+          {state === 'loading' ? (
+            <Loader2 className="animate-spin" size={30} />
+          ) : state === 'unavailable' ? (
+            <ImageOff size={30} />
+          ) : (
+            <Download size={30} />
+          )}
+          <span className="text-xs">
+            {state === 'loading'
+              ? `${received}/${envelope.fragmentCount}`
+              : state === 'unavailable'
+                ? 'Unavailable — tap to retry'
+                : 'Tap to load'}
+          </span>
+        </button>
+      )}
+      <div className="mt-1 text-[0.6875rem] text-muted-foreground">
+        {label} · {envelope.fragmentCount} fragments · ~
+        {Math.max(
+          1,
+          Math.round(estimateImageTransmitSeconds(envelope.fragmentCount, envelope.sizeBytes))
+        )}
+        s tx/hop
+      </div>
+      {fullscreen && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 p-4"
+          role="dialog"
+          aria-label="Image viewer"
+          onClick={() => setFullscreen(false)}
+        >
+          <button
+            type="button"
+            className="absolute right-4 top-4 rounded-full bg-background/80 p-2 text-foreground"
+            aria-label="Close image"
+            onClick={() => setFullscreen(false)}
+          >
+            <X size={22} />
+          </button>
+          <img
+            src={contentUrl}
+            alt="Image message full size"
+            className="max-h-full max-w-full object-contain"
+            onClick={(event) => event.stopPropagation()}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function VoiceMessage({ message, content }: { message: Message; content: string }) {
+  const envelope = parseVoiceEnvelope(content);
+  const duration = envelope?.durationSeconds ?? 0;
+  const [state, setState] = useState<'idle' | 'loading' | 'unavailable'>('idle');
+  const [progress, setProgress] = useState(0);
+
+  if (!envelope) return null;
+  const play = async () => {
+    setState('loading');
+    try {
+      let session = await api.fetchVoice(message.id);
+      for (let attempt = 0; session.state !== 'complete' && attempt < 20; attempt += 1) {
+        setProgress(session.packet_count ? session.received_count / session.packet_count : 0);
+        await new Promise((resolve) => window.setTimeout(resolve, 750));
+        session = await api.getVoiceSession(session.session_id);
+      }
+      if (session.state !== 'complete') throw new Error('Voice packets are not available');
+      const audio = new Audio(api.voiceAudioUrl(session.session_id));
+      await audio.play();
+      setState('idle');
+    } catch (error) {
+      setState('unavailable');
+      toast.error('Voice message unavailable', {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+  return (
+    <button
+      type="button"
+      onClick={() => void play()}
+      disabled={state === 'loading'}
+      className="flex min-w-40 items-center gap-2"
+      aria-label={`Play ${duration} second voice message`}
+    >
+      {state === 'loading' ? <Loader2 className="animate-spin" size={18} /> : <Play size={18} />}
+      <span>
+        {state === 'unavailable'
+          ? 'Unavailable'
+          : state === 'loading'
+            ? `Fetching ${Math.round(progress * 100)}%`
+            : `${duration}s voice message`}
+      </span>
+    </button>
+  );
+}
 
 interface MessageListProps {
   messages: Message[];
@@ -1315,14 +1466,20 @@ export function MessageList({
                       </div>
                     )}
                     <div className="break-words whitespace-pre-wrap">
-                      {(renderRichPayloads &&
-                        renderMeshcoreOpenPayload(content, radioName, onChannelReferenceClick)) ||
+                      {parseImageEnvelope(content) ? (
+                        <ImageMessage message={msg} content={content} />
+                      ) : parseVoiceEnvelope(content) ? (
+                        <VoiceMessage message={msg} content={content} />
+                      ) : (
+                        (renderRichPayloads &&
+                          renderMeshcoreOpenPayload(content, radioName, onChannelReferenceClick)) ||
                         content.split('\n').map((line, i, arr) => (
                           <span key={i}>
                             {renderTextWithMentions(line, radioName, onChannelReferenceClick)}
                             {i < arr.length - 1 && <br />}
                           </span>
-                        ))}
+                        ))
+                      )}
                       {!showAvatar && (
                         <>
                           <span className="text-[0.625rem] text-muted-foreground ml-2">

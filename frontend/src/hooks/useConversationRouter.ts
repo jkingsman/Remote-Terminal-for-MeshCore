@@ -42,6 +42,15 @@ function resolveConversationFromHash(
       return { type: 'search', id: 'search', name: 'Message Search' };
     case 'trace':
       return { type: 'trace', id: 'trace', name: 'Trace' };
+    case 'statistics':
+      return { type: 'statistics', id: 'statistics', name: 'Statistics' };
+    case 'bots':
+      return {
+        type: 'bots',
+        id: 'bots',
+        name: 'Bots',
+        ...(hashConv.botId ? { botId: hashConv.botId } : {}),
+      };
     case 'channel': {
       const channel = resolveChannelFromHashToken(hashConv.name, channels);
       return channel ? { type: 'channel', id: channel.key, name: channel.name } : null;
@@ -148,6 +157,21 @@ export function useConversationRouter({
       hasSetDefaultConversation.current = true;
       return;
     }
+    if (hashConv?.type === 'statistics') {
+      setActiveConversationState({ type: 'statistics', id: 'statistics', name: 'Statistics' });
+      hasSetDefaultConversation.current = true;
+      return;
+    }
+    if (hashConv?.type === 'bots') {
+      setActiveConversationState({
+        type: 'bots',
+        id: 'bots',
+        name: 'Bots',
+        ...(hashConv.botId ? { botId: hashConv.botId } : {}),
+      });
+      hasSetDefaultConversation.current = true;
+      return;
+    }
 
     // No hash: optionally restore last-viewed non-data conversation if enabled on this device.
     if (!hashConv && getReopenLastConversationEnabled()) {
@@ -157,7 +181,8 @@ export function useConversationRouter({
         (lastViewed.type === 'raw' ||
           lastViewed.type === 'map' ||
           lastViewed.type === 'visualizer' ||
-          lastViewed.type === 'trace')
+          lastViewed.type === 'trace' ||
+          lastViewed.type === 'statistics')
       ) {
         setActiveConversationState(lastViewed);
         hasSetDefaultConversation.current = true;

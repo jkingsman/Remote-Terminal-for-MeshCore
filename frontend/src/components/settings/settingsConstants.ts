@@ -1,10 +1,10 @@
 import {
-  BarChart3,
   Database,
   Info,
   MonitorCog,
   RadioTower,
   Share2,
+  ShieldCheck,
   SlidersHorizontal,
   type LucideIcon,
 } from 'lucide-react';
@@ -12,38 +12,38 @@ import {
 export type SettingsSection =
   | 'radio'
   | 'local'
+  | 'https'
   | 'radio-app'
   | 'database'
   | 'fanout'
-  | 'statistics'
   | 'about';
 
 export const SETTINGS_SECTION_ORDER: SettingsSection[] = [
   'radio',
   'local',
+  'https',
   'fanout',
   'radio-app',
   'database',
-  'statistics',
   'about',
 ];
 
 export const SETTINGS_SECTION_LABELS: Record<SettingsSection, string> = {
   radio: 'Radio',
   local: 'Local Configuration',
+  https: 'HTTPS / TLS',
   'radio-app': 'Radio-App Management',
   database: 'Database',
-  fanout: 'MQTT & Automation',
-  statistics: 'Statistics',
+  fanout: 'Integrations',
   about: 'About',
 };
 
 export const SETTINGS_SECTION_ICONS: Record<SettingsSection, LucideIcon> = {
   radio: RadioTower,
   local: MonitorCog,
+  https: ShieldCheck,
   'radio-app': SlidersHorizontal,
   database: Database,
   fanout: Share2,
-  statistics: BarChart3,
   about: Info,
 };

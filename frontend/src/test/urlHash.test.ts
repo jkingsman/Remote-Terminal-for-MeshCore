@@ -9,6 +9,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   parseHashConversation,
   parseHashSettingsSection,
+  getConversationHash,
   getSettingsHash,
   getMapFocusHash,
   resolveChannelFromHashToken,
@@ -58,6 +59,38 @@ describe('parseHashConversation', () => {
     const result = parseHashConversation();
 
     expect(result).toEqual({ type: 'trace', name: 'trace' });
+  });
+
+  it('parses #bots as bots type', () => {
+    window.location.hash = '#bots';
+
+    const result = parseHashConversation();
+
+    expect(result).toEqual({ type: 'bots', name: 'bots' });
+  });
+
+  it('parses #bots/{id} with a bot editor deep link', () => {
+    window.location.hash = '#bots/abc-123';
+
+    const result = parseHashConversation();
+
+    expect(result).toEqual({ type: 'bots', name: 'bots', botId: 'abc-123' });
+  });
+
+  it('parses #statistics as statistics type', () => {
+    window.location.hash = '#statistics';
+
+    const result = parseHashConversation();
+
+    expect(result).toEqual({ type: 'statistics', name: 'statistics' });
+  });
+
+  it('redirects the legacy #settings/statistics hash to the statistics tool', () => {
+    window.location.hash = '#settings/statistics';
+
+    const result = parseHashConversation();
+
+    expect(result).toEqual({ type: 'statistics', name: 'statistics' });
   });
 
   it('parses #map/focus/PUBKEY with focus key', () => {
@@ -176,6 +209,12 @@ describe('settings URL hashes', () => {
 
   it('returns null for an invalid settings section hash', () => {
     window.location.hash = '#settings/not-a-section';
+
+    expect(parseHashSettingsSection()).toBeNull();
+  });
+
+  it('no longer treats statistics as a settings section', () => {
+    window.location.hash = '#settings/statistics';
 
     expect(parseHashSettingsSection()).toBeNull();
   });
@@ -326,5 +365,25 @@ describe('getMapFocusHash', () => {
     const result = getMapFocusHash('AB CD/12');
 
     expect(result).toBe('#map/focus/AB%20CD%2F12');
+  });
+});
+
+describe('getConversationHash for bots', () => {
+  it('generates #bots for the workspace', () => {
+    expect(getConversationHash({ type: 'bots', id: 'bots', name: 'Bots' })).toBe('#bots');
+  });
+
+  it('generates #bots/{id} for the editor', () => {
+    expect(getConversationHash({ type: 'bots', id: 'bots', name: 'Bots', botId: 'abc-123' })).toBe(
+      '#bots/abc-123'
+    );
+  });
+});
+
+describe('getConversationHash for statistics', () => {
+  it('generates #statistics', () => {
+    expect(getConversationHash({ type: 'statistics', id: 'statistics', name: 'Statistics' })).toBe(
+      '#statistics'
+    );
   });
 });

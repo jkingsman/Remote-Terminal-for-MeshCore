@@ -29,21 +29,27 @@ def _register_module_types() -> None:
         return
     from app.fanout.apprise_mod import AppriseModule
     from app.fanout.bot import BotModule
+    from app.fanout.discord_bridge import DiscordBridgeModule
     from app.fanout.map_upload import MapUploadModule
     from app.fanout.mqtt_community import MqttCommunityModule
     from app.fanout.mqtt_ha import MqttHaModule
     from app.fanout.mqtt_private import MqttPrivateModule
     from app.fanout.sqs import SqsModule
+    from app.fanout.telegram_bridge import TelegramBridgeModule
     from app.fanout.webhook import WebhookModule
 
     _MODULE_TYPES["mqtt_private"] = MqttPrivateModule
     _MODULE_TYPES["mqtt_community"] = MqttCommunityModule
     _MODULE_TYPES["mqtt_ha"] = MqttHaModule
+    # "bot" stays registered so a DB that missed migration 064 still runs its
+    # legacy rows; creating new ones via the API is no longer possible.
     _MODULE_TYPES["bot"] = BotModule
     _MODULE_TYPES["webhook"] = WebhookModule
     _MODULE_TYPES["apprise"] = AppriseModule
     _MODULE_TYPES["sqs"] = SqsModule
     _MODULE_TYPES["map_upload"] = MapUploadModule
+    _MODULE_TYPES["discord_bridge"] = DiscordBridgeModule
+    _MODULE_TYPES["telegram_bridge"] = TelegramBridgeModule
 
 
 def _matches_filter(filter_value: Any, key: str) -> bool:

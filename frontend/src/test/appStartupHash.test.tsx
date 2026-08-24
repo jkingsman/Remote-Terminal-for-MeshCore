@@ -115,6 +115,12 @@ vi.mock('../components/VisualizerView', () => ({
   VisualizerView: () => null,
 }));
 
+vi.mock('../components/bots/BotsView', () => ({
+  BotsView: ({ botId }: { botId: string | null }) => (
+    <div data-testid="bots-view">{botId ?? 'workspace'}</div>
+  ),
+}));
+
 vi.mock('../components/CrackerPanel', () => ({
   CrackerPanel: () => null,
 }));
@@ -237,6 +243,41 @@ describe('App startup hash resolution', () => {
       for (const node of screen.getAllByTestId('active-conversation')) {
         expect(node).toHaveTextContent('trace:trace:Trace');
       }
+    });
+  });
+
+  it('restores the bots workspace from the URL hash instead of falling back to Public', async () => {
+    setHash('#bots');
+
+    render(<App />);
+
+    await waitFor(() => {
+      for (const node of screen.getAllByTestId('active-conversation')) {
+        expect(node).toHaveTextContent('bots:bots:Bots');
+      }
+    });
+    expect(window.location.hash).toBe('#bots');
+    await waitFor(() => {
+      expect(screen.getByTestId('bots-view')).toHaveTextContent('workspace');
+    });
+  });
+
+  it('restores a bots editor deep link with its bot id from the URL hash', async () => {
+    setHash('#bots/abc-123');
+    mocks.api.getChannels.mockResolvedValue([]);
+
+    render(<App />);
+
+    await waitFor(() => {
+      for (const node of screen.getAllByTestId('active-conversation')) {
+        expect(node).toHaveTextContent('bots:bots:Bots');
+      }
+    });
+    // The bot id must survive resolution: the hash keeps the /{id} suffix and
+    // the workspace opens straight into that bot's editor.
+    expect(window.location.hash).toBe('#bots/abc-123');
+    await waitFor(() => {
+      expect(screen.getByTestId('bots-view')).toHaveTextContent('abc-123');
     });
   });
 
@@ -478,6 +519,31 @@ describe('App startup hash resolution', () => {
         for (const node of screen.getAllByTestId('active-conversation')) {
           expect(node).toHaveTextContent(`contact:${aliceContact.public_key}:Alice`);
         }
+      });
+    });
+
+    it('navigates to the bots workspace when popstate fires with a bots hash', async () => {
+      setHash('');
+      render(<App />);
+
+      await waitFor(() => {
+        for (const node of screen.getAllByTestId('active-conversation')) {
+          expect(node).toHaveTextContent(`channel:${publicChannel.key}:Public`);
+        }
+      });
+
+      act(() => {
+        setHash('#bots/abc-123');
+        window.dispatchEvent(new PopStateEvent('popstate', { state: null }));
+      });
+
+      await waitFor(() => {
+        for (const node of screen.getAllByTestId('active-conversation')) {
+          expect(node).toHaveTextContent('bots:bots:Bots');
+        }
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId('bots-view')).toHaveTextContent('abc-123');
       });
     });
 

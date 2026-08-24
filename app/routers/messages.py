@@ -3,8 +3,11 @@ import time
 
 from fastapi import APIRouter, HTTPException, Query
 
+from app.compression import encode_outbound
 from app.event_handlers import track_pending_ack
 from app.models import (
+    McmpEstimateRequest,
+    McmpEstimateResponse,
     Message,
     MessagesAroundResponse,
     ResendChannelMessageResponse,
@@ -23,6 +26,24 @@ from app.websocket import broadcast_error, broadcast_event
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/messages", tags=["messages"])
+
+
+@router.post("/mcmp-estimate", response_model=McmpEstimateResponse)
+async def estimate_mcmp(request: McmpEstimateRequest) -> McmpEstimateResponse:
+    """Compressed wire size of a draft message, for the live compose counter.
+
+    When a conversation has MCMP enabled the frontend shows this byte count
+    against the packet budget instead of the raw length, so the effective
+    character capacity grows as compressible text is typed. Pure computation --
+    no radio involved.
+    """
+    # Timestamp only affects v3 (fixed 4 bytes), so a placeholder is fine for the
+    # size estimate.
+    encoded = encode_outbound(request.text, version=request.version, timestamp=0)
+    return McmpEstimateResponse(
+        wire_bytes=len(encoded.encode("utf-8")),
+        compressed=encoded != request.text,
+    )
 
 
 @router.get("/around/{message_id}", response_model=MessagesAroundResponse)

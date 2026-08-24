@@ -1,5 +1,14 @@
 import { useEffect, useRef, useCallback } from 'react';
-import type { Channel, HealthStatus, Contact, Message, MessagePath, RawPacket } from './types';
+import type {
+  BotLogEntry,
+  Channel,
+  HealthStatus,
+  Contact,
+  Message,
+  MessagePath,
+  RawPacket,
+} from './types';
+import { recordBotLog } from './stores/botLogStore';
 import { parseWsEvent } from './wsEvents';
 
 interface ErrorEvent {
@@ -129,6 +138,11 @@ export function useWebSocket(options: UseWebSocketOptions) {
             break;
           case 'raw_packet':
             handlers.onRawPacket?.(msg.data as RawPacket);
+            break;
+          case 'bot_log':
+            // Routed straight to the module-level store (like raw packets):
+            // only the Bots view's Logs tab subscribes.
+            recordBotLog(msg.data as BotLogEntry);
             break;
           case 'message_acked': {
             const ackData = msg.data as {

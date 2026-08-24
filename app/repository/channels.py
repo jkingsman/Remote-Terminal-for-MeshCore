@@ -28,7 +28,7 @@ class ChannelRepository:
         async with db.readonly() as conn:
             async with conn.execute(
                 """
-                SELECT key, name, is_hashtag, on_radio, flood_scope_override, path_hash_mode_override, last_read_at, favorite, muted
+                SELECT key, name, is_hashtag, on_radio, flood_scope_override, path_hash_mode_override, last_read_at, favorite, muted, mcmp_enabled, mcmp_version
                 FROM channels
                 WHERE key = ?
                 """,
@@ -46,6 +46,8 @@ class ChannelRepository:
                 last_read_at=row["last_read_at"],
                 favorite=bool(row["favorite"]),
                 muted=bool(row["muted"]),
+                mcmp_enabled=bool(row["mcmp_enabled"]),
+                mcmp_version=row["mcmp_version"],
             )
         return None
 
@@ -54,7 +56,7 @@ class ChannelRepository:
         async with db.readonly() as conn:
             async with conn.execute(
                 """
-                SELECT key, name, is_hashtag, on_radio, flood_scope_override, path_hash_mode_override, last_read_at, favorite, muted
+                SELECT key, name, is_hashtag, on_radio, flood_scope_override, path_hash_mode_override, last_read_at, favorite, muted, mcmp_enabled, mcmp_version
                 FROM channels
                 ORDER BY name
                 """
@@ -71,6 +73,8 @@ class ChannelRepository:
                 last_read_at=row["last_read_at"],
                 favorite=bool(row["favorite"]),
                 muted=bool(row["muted"]),
+                mcmp_enabled=bool(row["mcmp_enabled"]),
+                mcmp_version=row["mcmp_version"],
             )
             for row in rows
         ]
@@ -93,6 +97,28 @@ class ChannelRepository:
             async with conn.execute(
                 "UPDATE channels SET muted = ? WHERE key = ?",
                 (1 if value else 0, key.upper()),
+            ) as cursor:
+                rowcount = cursor.rowcount
+        return rowcount > 0
+
+    @staticmethod
+    async def set_mcmp_enabled(key: str, value: bool) -> bool:
+        """Enable/disable MCMP compression for a channel. True if a row was found."""
+        async with db.tx() as conn:
+            async with conn.execute(
+                "UPDATE channels SET mcmp_enabled = ? WHERE key = ?",
+                (1 if value else 0, key.upper()),
+            ) as cursor:
+                rowcount = cursor.rowcount
+        return rowcount > 0
+
+    @staticmethod
+    async def set_mcmp_version(key: str, version: int) -> bool:
+        """Set the MCMP transport version (2 or 3) for a channel."""
+        async with db.tx() as conn:
+            async with conn.execute(
+                "UPDATE channels SET mcmp_version = ? WHERE key = ?",
+                (version, key.upper()),
             ) as cursor:
                 rowcount = cursor.rowcount
         return rowcount > 0

@@ -5,16 +5,63 @@
  * behavior for both DM and channel conversations.
  */
 
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 import { MessageInput } from '../components/MessageInput';
+import { api } from '../api';
 import { toast } from '../components/ui/sonner';
+import { api } from '../api';
+import { encodeMeshImage } from '../services/imageCodec';
+
+const voiceCapture = vi.hoisted(() => ({
+  start: vi.fn().mockResolvedValue(undefined),
+  stop: vi.fn().mockResolvedValue({
+    pcm: new Blob(['voice']),
+    durationMs: 500,
+  }),
+  cancel: vi.fn().mockResolvedValue(undefined),
+}));
+const encodedImage = vi.hoisted(() => ({
+  blob: new Blob(['encoded-image'], { type: 'image/jpeg' }),
+  format: 1 as const,
+  width: 128,
+  height: 96,
+}));
+
+vi.mock('../services/voiceCapture', () => ({
+  VoiceCapture: vi.fn(function VoiceCapture() {
+    return voiceCapture;
+  }),
+}));
+
+vi.mock('../services/imageCodec', () => ({
+  encodeMeshImage: vi.fn().mockResolvedValue(encodedImage),
+}));
+
+vi.mock('../api', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../api')>();
+  return {
+    ...original,
+    api: {
+      ...original.api,
+      sendVoice: vi.fn().mockResolvedValue(undefined),
+      sendImage: vi.fn().mockResolvedValue(undefined),
+    },
+  };
+});
 
 // Mock sonner (toast)
 vi.mock('../components/ui/sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
+
+// Mock the API — MessageInput calls api.estimateMcmp for the compressed counter.
+vi.mock('../api', () => ({
+  api: { estimateMcmp: vi.fn() },
+}));
+
+const mockApi = api as unknown as { estimateMcmp: ReturnType<typeof vi.fn> };
 
 const mockToast = toast as unknown as {
   success: ReturnType<typeof vi.fn>;
@@ -32,12 +79,18 @@ describe('MessageInput', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    Object.defineProperty(window, 'PointerEvent', { configurable: true, value: MouseEvent });
+    voiceCapture.start.mockResolvedValue(undefined);
+    voiceCapture.stop.mockResolvedValue({ pcm: new Blob(['voice']), durationMs: 500 });
+    voiceCapture.cancel.mockResolvedValue(undefined);
   });
 
   function renderInput(props: {
     conversationType?: 'contact' | 'channel' | 'raw';
     senderName?: string;
     disabled?: boolean;
+    voice?: boolean;
+    mcmpEnabled?: boolean;
   }) {
     return render(
       <MessageInput
@@ -45,7 +98,9 @@ describe('MessageInput', () => {
         disabled={props.disabled ?? false}
         conversationType={props.conversationType}
         senderName={props.senderName}
+        mcmpEnabled={props.mcmpEnabled}
         placeholder="Type a message..."
+        voiceConversation={props.voice ? { type: 'PRIV', key: 'aa'.repeat(32) } : undefined}
       />
     );
   }
@@ -189,6 +244,57 @@ describe('MessageInput', () => {
     });
   });
 
+  describe('MCMP compressed counter', () => {
+    it('shows the compressed wire size against the budget when enabled', async () => {
+      // 200 raw chars would be over the 156 budget, but they compress to 40
+      // bytes — the counter must reflect the compressed size so more fits.
+      mockApi.estimateMcmp.mockResolvedValue({ wire_bytes: 40, compressed: true });
+      renderInput({ conversationType: 'contact', mcmpEnabled: true });
+
+      const text = 'x'.repeat(200);
+      fireEvent.change(getInput(), { target: { value: text } });
+
+      // Rendered in both desktop and mobile counter variants.
+      await waitFor(() => expect(screen.getAllByText(/40\/156/).length).toBeGreaterThan(0));
+      expect(mockApi.estimateMcmp).toHaveBeenCalledWith(text, 2);
+      // The raw over-budget count is not shown.
+      expect(screen.queryAllByText(/200\/156/).length).toBe(0);
+    });
+
+    it('does not query the backend when compression is off', () => {
+      renderInput({ conversationType: 'contact', mcmpEnabled: false });
+      fireEvent.change(getInput(), { target: { value: 'Hello there' } });
+      // Raw byte count is shown; no estimate call.
+      expect(screen.getByText(/11\/156/)).toBeTruthy();
+      expect(mockApi.estimateMcmp).not.toHaveBeenCalled();
+    });
+
+    it('does not flash "too long" while the compressed estimate is pending', () => {
+      // Estimate never resolves within the test: while pending, a long-but-
+      // compressible draft must NOT show the raw over-budget error.
+      mockApi.estimateMcmp.mockReturnValue(new Promise(() => {}));
+      renderInput({ conversationType: 'contact', mcmpEnabled: true });
+
+      fireEvent.change(getInput(), { target: { value: 'x'.repeat(200) } });
+
+      // Without MCMP this 200-byte draft would be "likely truncated by radio";
+      // with MCMP on and the estimate pending, we stay neutral.
+      expect(screen.queryAllByText(/likely truncated by radio/).length).toBe(0);
+      expect(screen.queryAllByText(/may impact multi-repeater/).length).toBe(0);
+    });
+
+    it('does show "too long" once the compressed size itself exceeds the budget', async () => {
+      // A genuinely over-budget compressed size must still warn.
+      mockApi.estimateMcmp.mockResolvedValue({ wire_bytes: 200, compressed: true });
+      renderInput({ conversationType: 'contact', mcmpEnabled: true });
+
+      fireEvent.change(getInput(), { target: { value: 'x'.repeat(400) } });
+      await waitFor(() =>
+        expect(screen.getAllByText(/likely truncated by radio/).length).toBeGreaterThan(0)
+      );
+    });
+  });
+
   describe('send failure toasts', () => {
     it('shows the radio no-response toast when the send outcome is unknown', async () => {
       onSend.mockRejectedValueOnce(
@@ -206,6 +312,130 @@ describe('MessageInput', () => {
         description:
           'Send command was issued to the radio, but no response was heard back. The message may or may not have sent successfully.',
       });
+    });
+  });
+
+  describe('voice recording', () => {
+    it('places media controls left of the text field and always keeps send visible', () => {
+      renderInput({ conversationType: 'contact', voice: true });
+
+      const image = screen.getByRole('button', { name: /attach image/i });
+      const microphone = screen.getByRole('button', { name: /hold to record voice/i });
+      const input = getInput();
+      expect(
+        image.compareDocumentPosition(microphone) & Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy();
+      expect(
+        microphone.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy();
+      expect(screen.getByRole('button', { name: /^send$/i })).toBeVisible();
+      expect(screen.getByRole('button', { name: /^send$/i })).toBeDisabled();
+    });
+
+    it('preserves text send and keeps image attachment available when text is entered', () => {
+      renderInput({ conversationType: 'contact', voice: true });
+      fireEvent.change(getInput(), { target: { value: 'Hello' } });
+
+      expect(screen.getByRole('button', { name: /^send$/i })).toBeVisible();
+      expect(screen.getByRole('button', { name: /attach image/i })).toBeVisible();
+      expect(screen.getByRole('button', { name: /hold to record voice/i })).toBeVisible();
+    });
+
+    it('shows recording state on pointer down and sends on pointer up', async () => {
+      Object.defineProperty(window, 'isSecureContext', { configurable: true, value: true });
+      renderInput({ conversationType: 'contact', voice: true });
+      const microphone = screen.getByRole('button', { name: /hold to record voice/i });
+
+      fireEvent.pointerDown(microphone, { pointerId: 1 });
+      expect(await screen.findByText('Release to send')).toBeVisible();
+      fireEvent.pointerUp(screen.getByRole('button', { name: /release to send voice/i }), {
+        pointerId: 1,
+      });
+
+      await waitFor(() => expect(api.sendVoice).toHaveBeenCalledTimes(1));
+    });
+
+    it('does not send after the slide-up cancel gesture', async () => {
+      Object.defineProperty(window, 'isSecureContext', { configurable: true, value: true });
+      renderInput({ conversationType: 'contact', voice: true });
+      const microphone = screen.getByRole('button', { name: /hold to record voice/i });
+
+      fireEvent.pointerDown(microphone, { pointerId: 1 });
+      await screen.findByText('Release to send');
+      const recordingMicrophone = screen.getByRole('button', { name: /release to send voice/i });
+      fireEvent.pointerMove(recordingMicrophone, { pointerId: 1, clientY: -100 });
+      expect(screen.getByText('Release to cancel')).toBeVisible();
+      fireEvent.pointerUp(recordingMicrophone, { pointerId: 1 });
+
+      await waitFor(() => expect(voiceCapture.cancel).toHaveBeenCalledTimes(1));
+      expect(api.sendVoice).not.toHaveBeenCalled();
+    });
+
+    it('explains the HTTPS requirement before requesting a microphone', () => {
+      Object.defineProperty(window, 'isSecureContext', { configurable: true, value: false });
+      renderInput({ conversationType: 'contact', voice: true });
+      fireEvent.pointerDown(screen.getByRole('button', { name: /hold to record voice/i }));
+      expect(mockToast.error).toHaveBeenCalledWith(
+        'Voice recording requires HTTPS to access your microphone.',
+        expect.objectContaining({ action: expect.objectContaining({ label: 'Configure HTTPS' }) })
+      );
+    });
+  });
+
+  describe('image attachment', () => {
+    it('opens the picker, previews a selected image, and cancels', async () => {
+      renderInput({ conversationType: 'contact', voice: true });
+      const picker = screen.getByLabelText('Choose image') as HTMLInputElement;
+      const click = vi.spyOn(picker, 'click');
+      fireEvent.click(screen.getByRole('button', { name: /attach image/i }));
+      expect(click).toHaveBeenCalledOnce();
+
+      const file = new File(['source'], 'photo.png', { type: 'image/png' });
+      fireEvent.change(picker, { target: { files: [file] } });
+      expect(await screen.findByAltText('Image attachment preview')).toBeVisible();
+      expect(screen.getByText(/128×96/)).toBeVisible();
+      expect(screen.getByText(/1 fragments/)).toBeVisible();
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+      expect(screen.queryByAltText('Image attachment preview')).not.toBeInTheDocument();
+    });
+
+    it('sends only after preview confirmation', async () => {
+      renderInput({ conversationType: 'contact', voice: true });
+      const file = new File(['source'], 'photo.jpg', { type: 'image/jpeg' });
+      fireEvent.change(screen.getByLabelText('Choose image'), { target: { files: [file] } });
+      expect(await screen.findByAltText('Image attachment preview')).toBeVisible();
+      expect(api.sendImage).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole('button', { name: 'Send image' }));
+      await waitFor(() =>
+        expect(api.sendImage).toHaveBeenCalledWith('PRIV', 'aa'.repeat(32), encodedImage)
+      );
+    });
+
+    it('rejects an invalid image cleanly', async () => {
+      vi.mocked(encodeMeshImage).mockRejectedValueOnce(new Error('Invalid image data'));
+      renderInput({ conversationType: 'contact', voice: true });
+      const file = new File(['bad'], 'broken.png', { type: 'image/png' });
+      fireEvent.change(screen.getByLabelText('Choose image'), { target: { files: [file] } });
+      await waitFor(() =>
+        expect(mockToast.error).toHaveBeenCalledWith('Image unavailable', {
+          description: 'Invalid image data',
+        })
+      );
+      expect(screen.queryByRole('button', { name: 'Send image' })).not.toBeInTheDocument();
+    });
+  });
+
+  describe('emoji picker', () => {
+    it('opens the picker and inserts an emoji into the message', () => {
+      renderInput({ conversationType: 'contact', voice: true });
+
+      fireEvent.click(screen.getByRole('button', { name: 'Add emoji' }));
+      expect(screen.getByRole('dialog', { name: 'Emoji picker' })).toBeVisible();
+      fireEvent.click(screen.getByRole('button', { name: 'Insert 😀' }));
+
+      expect(getInput()).toHaveValue('😀');
+      expect(screen.queryByRole('dialog', { name: 'Emoji picker' })).not.toBeInTheDocument();
+      expect(getSendButton()).toBeEnabled();
     });
   });
 });

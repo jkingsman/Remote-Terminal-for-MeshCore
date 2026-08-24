@@ -1,0 +1,1059 @@
+{
+  "keywords": {
+    "help": [
+      "help"
+    ],
+    "ping": [
+      "ping"
+    ],
+    "test": [
+      "test",
+      "t"
+    ],
+    "wx": [
+      "wx",
+      "weather",
+      "wxa",
+      "wxalert"
+    ],
+    "gwx": [
+      "gwx",
+      "globalweather",
+      "gwxa"
+    ],
+    "aqi": [
+      "aqi",
+      "air",
+      "airquality",
+      "air_quality"
+    ],
+    "solar": [
+      "solar"
+    ],
+    "sun": [
+      "sun"
+    ],
+    "moon": [
+      "moon"
+    ],
+    "hfcond": [
+      "hfcond",
+      "hf"
+    ],
+    "satpass": [
+      "satpass"
+    ],
+    "sports": [
+      "sports",
+      "score",
+      "scores"
+    ],
+    "worldcup": [
+      "wc",
+      "worldcup",
+      "wk"
+    ],
+    "stats": [
+      "stats"
+    ],
+    "channels": [
+      "channels",
+      "channel"
+    ],
+    "path": [
+      "path",
+      "decode",
+      "route"
+    ],
+    "prefix": [
+      "prefix",
+      "repeater",
+      "lookup"
+    ],
+    "repeater": [
+      "repeater",
+      "repeaters",
+      "rp"
+    ],
+    "solarforecast": [
+      "sf",
+      "solarforecast"
+    ],
+    "dice": [
+      "dice"
+    ],
+    "roll": [
+      "roll"
+    ],
+    "joke": [
+      "joke",
+      "jokes"
+    ],
+    "dadjoke": [
+      "dadjoke",
+      "dad joke",
+      "dadjokes",
+      "dad jokes"
+    ],
+    "catfact": [
+      "catfact",
+      "cat",
+      "meow",
+      "purr",
+      "kitten"
+    ],
+    "hacker": [
+      "hacker",
+      "sudo",
+      "ps aux",
+      "grep",
+      "ls -l",
+      "ls -la",
+      "echo $PATH"
+    ],
+    "hello": [
+      "hello",
+      "hi",
+      "hey",
+      "howdy",
+      "greetings",
+      "salutations",
+      "good morning",
+      "good afternoon",
+      "good evening",
+      "good night",
+      "yo",
+      "sup",
+      "whats up",
+      "what's up",
+      "morning",
+      "afternoon",
+      "evening",
+      "night",
+      "gday",
+      "g'day",
+      "hola",
+      "bonjour",
+      "ciao",
+      "namaste",
+      "aloha",
+      "shalom",
+      "konnichiwa",
+      "guten tag",
+      "buenos dias",
+      "buenas tardes",
+      "buenas noches"
+    ],
+    "webviewer": [
+      "webviewer",
+      "web",
+      "viewer",
+      "wv"
+    ],
+    "cmd": [
+      "cmd",
+      "commands"
+    ],
+    "advert": [
+      "advert"
+    ]
+  },
+  "commands": {
+    "help": {
+      "description": "Toont commando's. Gebruik 'help <commando>' voor details.",
+      "general": "MeshCore Bot Help\n\nBeschikbare commando's:\n{commands_list}",
+      "unknown": "Onbekend commando: '{command}'\n\nBeschikbare commando's:\n{available}",
+      "specific": "Help voor '{command}':\n{help_text}",
+      "no_help": "Geen help beschikbaar",
+      "usage_examples": "\nGebruiksvoorbeelden:\n• `help @` - Help voor @{string} syntax\n• `help t` - Help voor t {string} syntax\n• `help advert` - Help voor advert commando\n• `help test` - Help voor test commando\n• `help ping` - Help voor ping commando",
+      "custom_syntax": "\nAangepaste syntax:\n• `t zin` - Bevestiging met zin (kanalen & DM's)\n• `@{string}` - Bevestiging met string (alleen DM's)\n• `advert` - Verstuur flood-advert (alleen DM's, 1 uur cooldown)"
+    },
+    "ping": {
+      "description": "Reageert op 'ping' met 'Pong!'",
+      "response": "Pong!"
+    },
+    "test": {
+      "description": "Reageert op 'test' of 't' met verbindingsinfo",
+      "help": "Reageert op 'test' of 't' met verbindingsinfo"
+    },
+    "wx": {
+      "description": "Weerinfo voor een postcode (gebruik: wx 12345)",
+      "usage": "Gebruik: wx <postcode|plaats> - Voorbeeld: wx 12345 of wx amsterdam of wx parijs, tx",
+      "error_fetching": "Fout bij ophalen weerdata van NOAA",
+      "no_location_zipcode": "Locatie voor postcode {location} niet gevonden",
+      "no_location_city": "Plaats '{location}' niet gevonden in {state}",
+      "error": "Fout bij ophalen weerdata: {error}",
+      "alerts": "{count} waarschuwingen: {text}",
+      "tomorrow_not_available": "Tomorrow's forecast not available",
+      "tomorrow_error": "Error formatting tomorrow's forecast",
+      "multiday_not_available": "{num_days}-day forecast not available",
+      "multiday_error": "Error formatting {num_days}-day forecast"
+    },
+    "gwx": {
+      "description": "Weerinfo voor elke locatie wereldwijd (gebruik: gwx Tokyo)",
+      "help": "Gebruik: gwx <locatie> - Weer voor elke wereldwijde locatie (stad, land of coördinaten)",
+      "usage": "Gebruik: gwx <locatie> - Voorbeeld: gwx Tokyo of gwx Parijs, Frankrijk",
+      "error_fetching": "Fout bij ophalen weerdata",
+      "error_fetching_api": "Fout bij ophalen weerdata van Open-Meteo",
+      "no_location": "Locatie '{location}' niet gevonden",
+      "error": "Fout bij ophalen weerdata: {error}",
+      "tomorrow_not_available": "Tomorrow's forecast not available",
+      "tomorrow_error": "Error formatting tomorrow's forecast",
+      "multiday_not_available": "{num_days}-day forecast not available",
+      "multiday_error": "Error formatting {num_days}-day forecast",
+      "periods": {
+        "today": "Vandaag",
+        "tonight": "Vanavond",
+        "tomorrow": "Morgen"
+      },
+      "weather_descriptions": {
+        "0": "Helder",
+        "1": "Overwegend helder",
+        "2": "Halfbewolkt",
+        "3": "Bewolkt",
+        "45": "Mistig",
+        "48": "Mistig",
+        "51": "Lichte motregen",
+        "53": "Motregen",
+        "55": "Zware motregen",
+        "56": "Lichte ijzel",
+        "57": "IJzel",
+        "61": "Lichte regen",
+        "63": "Regen",
+        "65": "Zware regen",
+        "66": "Lichte ijzel",
+        "67": "IJzel",
+        "71": "Lichte sneeuw",
+        "73": "Sneeuw",
+        "75": "Zware sneeuw",
+        "77": "IJskristallen",
+        "80": "Lichte buien",
+        "81": "Buien",
+        "82": "Zware buien",
+        "85": "Lichte sneeuwbuien",
+        "86": "Sneeuwbuien",
+        "95": "Onweer",
+        "96": "Onweer m/hagel",
+        "99": "Zwaar onweer",
+        "unknown": "Onbekend"
+      },
+      "warnings": {
+        "extreme_heat": "⚠️ Extreme hitte",
+        "extreme_cold": "⚠️ Extreme koude",
+        "heavy_rain": "⚠️ Zware regen",
+        "thunderstorms": "⚠️ Onweer",
+        "heavy_snow": "⚠️ Zware sneeuw",
+        "high_winds": "⚠️ Harde wind ({wind_speed} mph)"
+      }
+    },
+    "sports": {
+      "description": "Sportuitslagen en -schema's (gebruik: sports [team/competitie])",
+      "help": "Sportuitslagen & schema's. Gebruik 'sports' voor standaard teams, 'sports [team]' voor specifiek team, of 'sports [competitie]' voor competitiewedstrijden.",
+      "error_fetching": "Fout bij ophalen sportdata",
+      "error_fetching_league": "Fout bij ophalen {sport} data",
+      "error_fetching_team": "Fout bij ophalen data voor {team}",
+      "no_default_teams": "Geen standaard teams geconfigureerd",
+      "no_games_default": "Geen wedstrijden voor standaard teams",
+      "no_teams_city": "Geen teams voor {city}",
+      "no_games_city": "Geen wedstrijden voor {city} teams",
+      "no_games_league": "Geen wedstrijden voor {sport}",
+      "no_games_team": "Geen wedstrijden voor {team}",
+      "team_not_found": "Team/competitie '{team}' niet gevonden. Probeer: seahawks, mariners, sounders, kraken, storm, chiefs, lfc, mlb, nfl, mls, wnba, epl, etc."
+    },
+    "worldcup": {
+      "description": "FIFA WK-uitslagen, standen & landenwedstrijden (alleen tijdens het toernooi)",
+      "help": "WK-uitslagen. Gebruik 'wc' voor wedstrijden van vandaag, 'wc group [A-L]' voor standen of 'wc [land]' voor wedstrijden van een team.",
+      "not_in_season": "Er is momenteel geen WK aan de gang.",
+      "no_games_today": "Vandaag geen WK-wedstrijden.",
+      "no_games_nation": "Geen WK-wedstrijden gevonden voor {nation}.",
+      "groups_list": "WK-groepen: {groups}. Probeer 'wc group A'.",
+      "group_not_found": "Groep '{group}' niet gevonden. Gebruik een groepsletter, bijv. 'wc group A'.",
+      "nation_not_found": "Land '{nation}' niet gevonden in het huidige WK.",
+      "error_fetching": "Fout bij het ophalen van WK-gegevens"
+    },
+    "stats": {
+      "description": "Statistieken laatste 24 uur. Gebruik 'stats messages', 'stats channels' of 'stats paths' voor specifieke stats.",
+      "help": "24-uurs bot statistieken. Commando's: 'stats' (basis), 'stats messages' (bot gebruikers), 'stats channels' (kanaalactiviteit), 'stats paths' (langste routes)",
+      "disabled": "Stats commando is uitgeschakeld",
+      "unknown_subcommand": "Onbekend: {subcommand}. Gebruik 'stats', 'stats messages', 'stats channels' of 'stats paths'",
+      "error": "Fout bij ophalen stats: {error}",
+      "error_bot_users": "Fout bij ophalen bot gebruikersstatistieken: {error}",
+      "error_channels": "Fout bij ophalen kanaalstatistieken: {error}",
+      "error_paths": "Fout bij ophalen route-statistieken: {error}",
+      "basic": {
+        "header": "Bot stats (24u):",
+        "commands": "Cmd's: {count} | Antwoorden: {replies}",
+        "top_command": "Top cmd: {command}",
+        "top_user": "Top gebruiker: {user}",
+        "none": "Geen"
+      },
+      "users": {
+        "header": "Bot gebruikers (24u):",
+        "none": "Geen bot gebruikers"
+      },
+      "channels": {
+        "header": "Top kanalen (24u)",
+        "none": "Geen kanaalactiviteit",
+        "msg_singular": "bericht",
+        "msg_plural": "berichten",
+        "user_singular": "gebruiker",
+        "user_plural": "gebruikers",
+        "format": "{rank}. {channel}: {msg_count} {msg_text} | {user_count} {user_text}"
+      },
+      "paths": {
+        "none": "Geen routedata",
+        "format": "{rank} {sender} {path}",
+        "synopsis": "{rank} {sender}: {hops} hops"
+      }
+    },
+    "solarforecast": {
+      "description": "Zonnepaneel productievoorspelling (gebruik: sf <locatie|repeater_naam|coördinaten|postcode> [paneel_grootte] [azimut, 0=zuid] [hoek])",
+      "usage": "Gebruik: sf <locatie|repeater_naam|coördinaten|postcode> [watt] [azimut, 0=zuid] [hoek] - Voorbeeld: sf amsterdam 10 0 37",
+      "usage_short": "Gebruik: sf <locatie|repeater_naam|coördinaten|postcode> [W] [azimut] [hoek] - Voorbeeld: sf amsterdam 10",
+      "panel_size_range": "Paneelgrootte moet 1-1000W zijn",
+      "azimuth_range": "Azimut moet -180 tot 180 zijn (0=zuid)",
+      "angle_range": "Hoek moet 0-90 graden zijn",
+      "no_location": "Locatie niet gevonden: {location}",
+      "error_fetching": "Fout bij ophalen voorspelling",
+      "no_data": "Geen voorspellingsdata",
+      "error": "Fout: {error}",
+      "rate_limit": "Rate limit: Probeer over 5 min opnieuw",
+      "labels": {
+        "today": "Vandaag:{wh:.0f}Wh",
+        "tomorrow": "Morgen:{wh:.0f}Wh",
+        "day_format": "{day}:{wh:.0f}Wh",
+        "peak": "Piek: {watts:.0f}W@{time}",
+        "peak_past": "Piek: {watts:.0f}W (verleden)",
+        "hours_util": " ({hours}u,{util:.0f}%benut)",
+        "hours_percent": " ({hours}u,{percent:.0f}%)",
+        "hours_only": " ({hours}u)",
+        "separator": " | "
+      }
+    },
+    "advert": {
+      "description": "Verstuurt flood-advert (alleen DM, 1u cooldown)",
+      "cooldown_active": "Advert cooldown actief. Wacht nog {minutes} minuten voor volgende advert.",
+      "success": "Flood-advert succesvol verstuurd!",
+      "error": "Fout bij versturen flood-advert: {error}"
+    },
+    "path": {
+      "description": "Decodeer hex routedata om te zien welke repeaters betrokken waren bij berichtroutering",
+      "help": "Path: path [hex] - Decodeer route om repeaters te tonen. Gebruik !path alleen voor recente berichtroute, of path [7e,01] voor specifieke route.",
+      "no_valid_hex": "❌ Geen geldige hex-waarden in routedata. Gebruik formaat zoals: 11,98,a4,49,cd,5f,01",
+      "no_path": "❌ Geen route-informatie beschikbaar in huidig bericht",
+      "error": "Fout bij verwerken route: {error}",
+      "error_decoding": "❌ Fout bij decoderen route: {error}",
+      "error_extracting": "❌ Fout bij extraheren route uit huidig bericht: {error}",
+      "path_prefix": "📡 Route: {path_string}",
+      "direct_connection": "📡 Directe verbinding (0 hops)",
+      "node_format": "{node_id}: {name}",
+      "node_unknown": "{node_id}: Onbekend",
+      "node_collision": "{node_id}: {matches} repeaters",
+      "node_geographic": "{node_id}: {name} {confidence}",
+      "continuation_start": "...\n{line}",
+      "continuation_end": "\n...",
+      "truncation": "...",
+      "unknown_name": "Onbekend",
+      "repeater_resolution_deferred": "Pad: {path}\n\n💡 Tip: repeateridentificatie vereist paden met {minimum_path_bytes} byte(s) per hop."
+    },
+    "prefix": {
+      "description": "Zoek repeaters op twee-karakter prefix (bijv. 'prefix 1A')",
+      "help_api": "Zoek repeaters op prefix{location_note}. Gebruik: 'prefix 1A', 'prefix 1A all', 'prefix free'.",
+      "help_no_api": "Zoek repeaters op prefix{location_note}. Gebruik: 'prefix 1A', 'prefix 1A all', 'prefix free'. (Alleen lokale DB)",
+      "location_note": " (met plaatsnamen)",
+      "refresh_not_available": "❌ Refresh niet beschikbaar - geen API URL geconfigureerd. Alleen lokale database.",
+      "cache_refreshed": "🔄 Repeater prefix cache ververst!",
+      "unable_determine_free": "❌ Kan vrije prefixen niet bepalen. Probeer eerst 'prefix refresh'.",
+      "invalid_format": "❌ Ongeldig prefix formaat. Gebruik twee karakters (bijv. prefix 1A)",
+      "no_repeaters_found": "❌ Geen repeaters met prefix '{prefix}'",
+      "no_free_prefixes": "❌ Geen vrije prefixen (alle 254 geldige prefixen in gebruik)",
+      "available_prefixes": "Beschikbare prefixen ({shown} van {total} vrij):",
+      "generate_key": "💡 Genereer aangepaste sleutel: https://gessaman.com/mc-keygen",
+      "prefix_db_all": "Prefix {prefix}: {count} repeater{plural}",
+      "prefix_db_recent": "Prefix {prefix}: {count} repeater{plural} ({days})",
+      "prefix_api": "📡 Prefix {prefix} ({count} repeater{plural}):",
+      "item_format": "{index}. {name}",
+      "source_domain": "Bron: {domain}",
+      "source_api": "Bron: API",
+      "device_repeater": " (Repeater)",
+      "device_roomserver": " (Kamerserver)"
+    },
+    "repeater": {
+      "description": "Beheer repeater contacten en opschoningsoperaties (alleen DM)",
+      "admin_only": "Repeater commando vereist admin toegang"
+    },
+    "aqi": {
+      "description": "Luchtkwaliteitsindex voor locatie (gebruik: aqi amsterdam, aqi rotterdam, aqi vancouver canada, aqi 47.6,-122.3, of aqi help)",
+      "usage": "Gebruik: aqi <plaats|wijk|plaats land|lat,lon> - Voorbeeld: aqi amsterdam, aqi rotterdam, aqi vancouver canada, of aqi 47.6,-122.3",
+      "usage_help": "Gebruik: aqi <plaats|wijk|plaats land|lat,lon|help> - AQI voor plaats/wijk in {state}, internationale plaatsen, coördinaten, of polluent help",
+      "error_fetching": "Fout bij ophalen AQI data",
+      "error_fetching_openmeteo": "Fout bij ophalen AQI data van OpenMeteo",
+      "no_data": "Geen AQI data beschikbaar",
+      "no_location": "Locatie niet gevonden: {location}",
+      "no_location_city": "Plaats '{location}' niet gevonden in {state}",
+      "no_location_city_international": "Plaats '{location}' niet gevonden",
+      "no_location_zipcode": "Postcode '{zipcode}' niet gevonden",
+      "error": "Fout bij ophalen AQI data: {error}",
+      "error_geocoding_zipcode": "Fout bij geocoderen postcode: {error}",
+      "error_formatting": "Fout bij formatteren AQI data",
+      "invalid_latitude": "Ongeldige breedtegraad: {lat}. Moet tussen -90 en 90 zijn.",
+      "invalid_longitude": "Ongeldige lengtegraad: {lon}. Moet tussen -180 en 180 zijn.",
+      "invalid_coordinates_format": "Ongeldig coördinatenformaat: {location}. Gebruik formaat: lat,lon (bijv. 47.6,-122.3)",
+      "pollutant_help": "AQI Help: PM2.5=fijnstof, PM10=grof stof, O3=ozon, NO2=stikstofdioxide, CO=koolmonoxide, SO2=zwaveldioxide",
+      "categories": {
+        "good": "Goed",
+        "moderate": "Matig",
+        "unhealthy_sensitive": "Ongezond voor gevoelige groepen",
+        "unhealthy": "Ongezond",
+        "very_unhealthy": "Zeer ongezond",
+        "hazardous": "Gevaarlijk",
+        "fair": "Redelijk",
+        "poor": "Slecht",
+        "very_poor": "Zeer slecht",
+        "na": "N.v.t."
+      },
+      "astronomical": {
+        "sun": "De AQI van de zon is buiten de schaal! Zonnewind en coronale massa-ejecties maken de lucht op aarde kraakhelder lijken. ☀️",
+        "moon": "Vind je regoliet ademen fijn? De maan heeft geen atmosfeer, dus de AQI is technisch perfect (als je vacuüm kunt ademen). 🌙",
+        "the_moon": "Vind je regoliet ademen fijn? De maan heeft geen atmosfeer, dus de AQI is technisch perfect (als je vacuüm kunt ademen). 🌙",
+        "mercury": "Mercurius' atmosfeer is zo dun dat het praktisch vacuüm is. AQI: Perfect, als je 400°C temperatuurschommelingen overleeft. ☿️",
+        "venus": "Venus heeft een atmosfeer van 96% CO2 met zwavelzuurwolken. AQI: Gevaarlijk is nog zacht uitgedrukt. ♀️",
+        "earth": "AQI van de aarde varieert per locatie. Probeer een specifieke plaats of coördinaten! 🌍",
+        "mars": "Mars heeft een dunne CO2-atmosfeer met stofstormen. AQI: Over het algemeen goed, maar die stofstormen zijn dodelijk. ♂️",
+        "jupiter": "Jupiter is een gasreus zonder vast oppervlak. AQI: N.v.t. (je wordt eerst verpletterd door atmosferische druk). ♃",
+        "saturn": "Saturnus' atmosfeer is grotendeels waterstof en helium. AQI: Perfect, als je de druk en kou overleeft. ♄",
+        "uranus": "Uranus heeft methaan in de atmosfeer. AQI: Ruikt naar scheten, maar is tenminste niet giftig. ♅",
+        "neptune": "Neptunus' atmosfeer bevat methaan en waterstofsulfide. AQI: Ruikt naar rotte eieren, maar je bevriest eerst. ♆",
+        "pluto": "Pluto's atmosfeer is grotendeels stikstof met wat methaan. AQI: Goed, maar het is zo koud dat je longen bevriezen. ♇",
+        "europa": "Europa heeft een dunne zuurstofatmosfeer. AQI: Uitstekend, maar je bevriest in het vacuüm van de ruimte. 🌑",
+        "titan": "Titan heeft een dikke stikstofatmosfeer met methaan. AQI: Adembaar, maar het is -180°C en het regent vloeibaar methaan. 🪐",
+        "io": "Io heeft een dunne zwaveldioxide-atmosfeer door vulkanische activiteit. AQI: Giftig, maar de straling doodt je eerst. 🌋",
+        "ganymede": "Ganymedes heeft een dunne zuurstofatmosfeer. AQI: Goed, maar je bevriest in het vacuüm van de ruimte. 🛸",
+        "callisto": "Callisto heeft een dunne kooldioxide-atmosfeer. AQI: Redelijk, maar het is -140°C en je bent in de ruimte. ❄️",
+        "enceladus": "Enceladus heeft waterdamp van geysers. AQI: Perfect, maar je bevriest direct in de ruimte. 💧",
+        "triton": "Triton heeft een dunne stikstofatmosfeer. AQI: Goed, maar het is -235°C en je bent in de diepe ruimte. 🥶",
+        "space": "De ruimte heeft geen atmosfeer, dus de AQI is perfect! Vergeet alleen je ruimtepak niet. 🚀",
+        "void": "Het vacuüm van de ruimte heeft uitstekende luchtkwaliteit - nul vervuiling! Vergeet alleen je eigen lucht mee te nemen. 🌌",
+        "black_hole": "Zwarte gaten hebben geen atmosfeer, maar de getijdenkrachten zijn een groter probleem dan luchtkwaliteit. 🕳️",
+        "asteroid": "Asteroïden hebben geen atmosfeer, dus de AQI is perfect! Pas alleen op voor het vacuüm van de ruimte. ☄️",
+        "comet": "Kometen hebben dunne atmosferen van waterdamp en stof. AQI: Variabel, maar je bevriest toch in de ruimte. ☄️"
+      }
+    },
+    "solar": {
+      "description": "Zonne-omstandigheden en HF-bandstatus",
+      "response": "☀️ Zonne-info: {info}",
+      "error": "Fout bij ophalen zonne-info: {error}",
+      "labels": {
+        "a_index": "A-Index",
+        "k_index": "K-Index",
+        "sunspots": "Zonnevlekken",
+        "xray_flux": "Röntgenflux",
+        "solar_flux": "Zonneflux",
+        "signal_noise": "Signaalruis",
+        "error_fetching": "Fout bij ophalen data",
+        "no_xray_data": "Geen röntgendata gevonden",
+        "not_configured": "niet geconfigureerd, vraag je systeembeheerder"
+      },
+      "condensed_format": "A:{a_index} K:{k_index} Zon:{sunspots} Flux:{solar_flux} Xray:{xray_flux} Ruis:{signal_noise}"
+    },
+    "sun": {
+      "description": "Zonsopkomst/zonsondergang tijden",
+      "help": "Zonsopkomst/zonsondergang tijden en zonpositie",
+      "response": "☀️ Zon info:\n{info}",
+      "error": "Fout bij ophalen zon-info: {error}",
+      "labels": {
+        "sunset": "Zonsondergang",
+        "sunrise": "Zonsopkomst",
+        "rise": "Opkomst",
+        "set": "Ondergang",
+        "daylight": "Daglicht",
+        "remaining": "Resterend",
+        "azimuth": "Azimut",
+        "altitude": "Hoogte"
+      }
+    },
+    "moon": {
+      "description": "Maanfase en opkomst/ondergang tijden",
+      "error": "Fout bij ophalen maan-info: {error}",
+      "format": "🌙 {phase} {illum}\nOpkomst:{rise} Ondergang:{set}",
+      "format_with_dates": "🌙 {phase} {illum}\nOpkomst:{rise} Ondergang:{set}\nVol:{full} Nieuw:{new}",
+      "fallback": "🌙 {info}",
+      "unknown_phase": "Onbekend",
+      "unknown_illum": "N.v.t.",
+      "labels": {
+        "moonrise": "Maanopkomst",
+        "set": "Ondergang",
+        "phase": "Fase",
+        "fullmoon": "Volle maan",
+        "newmoon": "Nieuwe maan",
+        "az": "Az",
+        "alt": "Hoogte"
+      },
+      "phases": {
+        "new_moon": "Nieuwe maan🌑",
+        "waxing_crescent": "Wassende sikkel🌒",
+        "first_quarter": "Eerste kwartier🌓",
+        "waxing_gibbous": "Wassend🌔",
+        "full_moon": "Volle maan🌕",
+        "waning_gibbous": "Afnemend🌖",
+        "last_quarter": "Laatste kwartier🌗",
+        "waning_crescent": "Afnemende sikkel🌘"
+      }
+    },
+    "hfcond": {
+      "description": "HF-propagatieomstandigheden",
+      "help": "HF-bandinformatie voor zendamateurs",
+      "header": "📡 HF-bandinformatie:\n{info}",
+      "error": "Fout bij ophalen HF-info: {error}"
+    },
+    "satpass": {
+      "description": "Satellietpassage-info: satpass <NORAD_nummer_of_snelkoppeling> [visueel]",
+      "help": "Satellietpassage voorspellingen",
+      "header": "🛰️ Satellietpassage:\n{pass_info}",
+      "error": "Fout bij ophalen satellietpassage-info: {error}",
+      "no_satellite": "Geef een NORAD-nummer of snelkoppeling op. Voorbeeld: satpass iss",
+      "usage_short": "🛰️ satpass <sat|NORAD> [visueel]. Bijv: satpass iss, satpass 25544. help satpass voor snelkoppelingen.",
+      "help_header": "🛰️ Satellietpassage info\n\nGebruik: satpass <NORAD_nummer_of_snelkoppeling>\n\nSnelkoppelingen:\n",
+      "category_weather": "🌤️ Weer: ",
+      "category_stations": "🚀 Stations: ",
+      "category_telescopes": "🔭 Telescopen: ",
+      "category_other": "🛰️ Overig: ",
+      "examples": "\nVoorbeelden:\n• satpass iss\n• satpass noaa15\n• satpass 25544\n• satpass 27607 visual (alleen visuele passages)",
+      "labels": {
+        "geostationary": "{satname}: GEO (geen LEO-pass)",
+        "no_passes": "{satname} heeft geen {pass_type} passages in de komende 10 dagen vanaf deze locatie",
+        "invalid_norad": "Geef NORAD# op, bijv.:🛰️satpass 25544,33591"
+      }
+    },
+    "channels": {
+      "description": "Lijst of beheer kanalen",
+      "help": "Toont hashtag-kanalen met subcategorieën. Gebruik 'channels' voor algemeen, 'channels list' voor alle categorieën, 'channels <categorie>' voor specifieke categorieën, 'channels #kanaal' voor specifieke kanaalinfo.",
+      "no_channels_for_category": "Geen kanalen geconfigureerd voor '{category}'. Gebruik 'channels' voor algemene kanalen.",
+      "no_channels_configured": "Geen kanalen geconfigureerd. Neem contact op met admin om kanalen toe te voegen.",
+      "error_retrieving_channels": "Fout bij ophalen kanalen: {error}",
+      "no_categories_configured": "Geen kanaalcategorieën geconfigureerd.",
+      "error_retrieving_categories": "Fout bij ophalen categorieën: {error}",
+      "no_description_available": "Geen beschrijving beschikbaar",
+      "channel_not_found": "Kanaal {channel} niet gevonden. Gebruik 'channels list' voor beschikbare kanalen.",
+      "error_retrieving_channel_info": "Fout bij ophalen kanaalinfo: {error}",
+      "no_category_channels": "Geen {category} kanalen geconfigureerd",
+      "headers": {
+        "common_channels": "Algemene kanalen: ",
+        "common_channels_cont": "Algemene kanalen: ",
+        "available_categories": "Beschikbare categorieën: ",
+        "channels_cont": "Kanalen (vervolg): ",
+        "category": "{category}: ",
+        "category_channels": "{category} kanalen: "
+      },
+      "category_count": "{category} ({count} kanalen)"
+    },
+    "dice": {
+      "description": "Gooi dobbelsteen (gebruik: dice [zijden] of dice [aantal]d[zijden])",
+      "help": "Gooi dobbelsteen. Gebruik 'dice' voor d6, 'dice d20' voor d20, 'dice 2d6' voor 2d6, etc.",
+      "invalid_dice_type": "Ongeldig dobbelsteentype. Beschikbaar: {available}",
+      "single_die": "🎲 d{sides}: {result}",
+      "multiple_dice": "🎲 {count}d{sides}: [{results}] = {total}"
+    },
+    "roll": {
+      "description": "Willekeurig getal tussen 1 en X (standaard 100). Gebruik 'roll' voor 1-100, 'roll 50' voor 1-50, etc.",
+      "help": "Willekeurig getal tussen 1 en X (standaard 100). Gebruik 'roll' voor 1-100, of 'roll X' voor 1-X (max 10000).",
+      "result": "🎲 Rol 1-{max}: {result}",
+      "invalid_number": "Ongeldig getal. Gebruik 'roll' voor 1-100, of 'roll X' voor 1-X (max 10000)."
+    },
+    "roll_old": {
+      "description": "Gooi dobbelsteen (gebruik: roll [zijden] of roll [aantal]d[zijden])"
+    },
+    "joke": {
+      "description": "Willekeurige grap"
+    },
+    "dadjoke": {
+      "description": "Willekeurige vadergrap"
+    },
+    "catfact": {
+      "description": "Willekeurig kattenfeit (verborgen commando)",
+      "error": "Miauw? Er ging iets mis bij het ophalen van je kattenfeit! 🐱",
+      "facts": [
+        "Katten hebben een derde ooglid, het knipvlies, dat hun ogen beschermt en bevochtigt. 🐱",
+        "Een groep katten heet een 'kattenbende' of 'kattenkliek'. 🐈",
+        "Katten kunnen hun oren 180 graden onafhankelijk draaien om geluiden te lokaliseren. 👂",
+        "De oudst bekende huiskat leefde 9.500 jaar geleden op Cyprus. 🏺",
+        "Katten hebben 32 spieren in elk oor, mensen hebben er maar 6. 🎧",
+        "Het spinnen van een kat vibreert op 25-150 Hz, wat genezing van botten en weefsels kan bevorderen. 🩹",
+        "Katten slapen 12-18 uur per dag - dat is 50-70% van hun leven! 😴",
+        "De neusafdruk van een kat is uniek, net als menselijke vingerafdrukken. 👃",
+        "Katten kunnen zoetheid niet proeven door een ontbrekend smaak-receptorgen. 🍭",
+        "Kat Blackie erfde £7 miljoen ($12,5 miljoen) in 1988. 💰",
+        "Katten hebben vrij zwevende sleutelbeenderen die hen extreme flexibiliteit geven. 🦴",
+        "Een kattenhart klopt 140-220 keer per minuut, ongeveer twee keer zo snel als een menselijk hart. ❤️",
+        "Katten kunnen vallen vanaf meer dan 20 verdiepingen overleven dankzij hun rechtreflexies. 🏢",
+        "De technische term voor een haarbal is een 'trichobezoar'. 🤮",
+        "Katten kunnen 5-6 keer hun lichaamslengte springen in één sprong. 🦘",
+        "De snorharen van een kat zijn even breed als hun lichaam en helpen hen beoordelen of ze ergens doorheen passen. 📏",
+        "Katten hebben 32 spieren in elk oor om geluiden te detecteren en oren onafhankelijk te bewegen. 🎯",
+        "De oudste kat ooit werd 38 jaar en 3 dagen oud (Creme Puff, Texas). 🎂",
+        "Katten kunnen korte sprints tot 48 km/u halen. 🏃‍♂️",
+        "Kattenhersenen zijn 90% structureel vergelijkbaar met menselijke hersenen. 🧠",
+        "Katten hebben het orgaan van Jacobson in het gehemelte waarmee ze geuren kunnen 'proeven'. 👅",
+        "Félicette was de eerste kat in de ruimte, gelanceerd door Frankrijk in 1963. 🚀",
+        "Katten hebben maar 1/6e van het licht nodig dat mensen nodig hebben om helder te zien in het donker. 🌙",
+        "De staart van een kat bevat bijna 10% van alle botten in het lichaam. 🦴",
+        "'s Werelds langste kat mat 123 cm van neus tot staart (Stewie, Maine Coon). 📏",
+        "Katten kunnen meer dan 100 verschillende vocalisaties maken, honden maken er ongeveer 10. 🎵",
+        "De reukzin van een kat is 14 keer sterker dan die van een mens. 👃",
+        "Katten hebben een 'flehmen-respons' waarbij ze hun lip krullen om geuren beter te detecteren. 😬",
+        "De eerste grote kattenshow werd gehouden in Londen in 1871 in Crystal Palace. 🏆",
+        "Katten kunnen zeewater drinken om te overleven - hun nieren filteren het zout efficiënt. 🌊",
+        "Het spinnen van een kat kan helpen de bloeddruk te verlagen en stress bij mensen te verminderen. 🧘",
+        "Katten kunnen honderden kilometers naar huis reizen met hun gevoeligheid voor magnetische velden. 🗺️",
+        "Het kleinste kattenras is de Singapura, slechts 2-4 kg zwaar. ⚖️",
+        "Katten kunnen ultraviolet licht zien dat mensen niet kunnen zien. 🌈",
+        "De tong van een kat is bedekt met 290-300 kleine achterwaarts gerichte haakjes, papillen genaamd. 🪝",
+        "Oude Egyptenaren beschouwden katten als heilige vaten voor de godin Bastet. 👑",
+        "Taylor Swift's kat Olivia Benson heeft een netto vermogen van $97 miljoen. 💎",
+        "Katten hebben 230 botten in hun lichaam - 24 meer dan mensen. 🦴",
+        "Katten kunnen frequenties horen tot 64.000 Hz, mensen maximaal 20.000 Hz. 🎧",
+        "Taylor Swift's kat Benjamin Button verscheen op haar TIME Person of the Year cover. 📰",
+        "Taylor Swift's katten heten Meredith Grey, Olivia Benson en Benjamin Button. 🎸",
+        "Katten lopen zoals kamelen en giraffen, beide rechterbenen dan beide linkerbenen bewegen. 🐾",
+        "Het oude Egyptische woord voor kat was 'Miu' of 'Mau' - klinkt als een miauw! 📜",
+        "Kattensnorharen hebben zenuwuiteinden die even gevoelig zijn als menselijke vingertoppen. 🎯",
+        "Alleen huiskatten lopen met hun staart omhoog als teken van vertrouwen en geluk. 🐈",
+        "Katten hebben 250 miljoen neuronen in hun cerebrale cortex - meer dan honden. 🧠",
+        "Het spinnen van katten vibreert op dezelfde frequentie als medische botgenezingsapparaten. 💊",
+        "Taylor Swift's kat Olivia heeft miljoenen verdiend met optredens in videoclips en advertenties. 💸",
+        "Een kat doden in het oude Egypte werd bestraft met de dood. ⚖️",
+        "Taylor Swift noemde haar thuisstudio 'The Itty Bitty Kitty Committee'. 🎤",
+        "Taylor Swift's kat Olivia Benson is het officiële logo voor Taylor Swift Productions. 📺",
+        "Ed Sheeran kocht Scottish Fold katten geïnspireerd door Taylor Swift's katten. 🎶",
+        "Taylor Swift's katten hebben hun eigen IMDB-pagina's met acting credits. 🎬",
+        "Mariska Hargitay noemde haar kat 'Karma' naar Taylor Swift's nummer. 💕",
+        "Katten hebben bijklauwen aan hun voorpoten die werken als duimen om te grijpen. 🐾",
+        "Kattenpupillen kunnen 50% groter uitdijen dan menselijke pupillen om meer licht op te vangen. 👁️",
+        "Katten hebben 30 blijvende tanden vergeleken met de 32 van mensen. 🦷",
+        "Katten kunnen ATP (energiemoleculen) proeven, wat vers vlees voor hen signaleert. 😋",
+        "Katten hebben snorharen aan de achterkant van hun voorpoten om prooi-beweging te detecteren. 🦵",
+        "De Egyptische Mau is het snelste huiskattenras met 48 km/u. 🏃",
+        "Een Nobelprijs werd toegekend in 1981 voor onderzoek met kattenzichtstudies. 🏅",
+        "Katten zijn digitigrade, wat betekent dat ze op hun tenen lopen, niet plat op de voet. 🦶",
+        "Katten kunnen zout filteren uit zeewater - een aanpassing van hun woestijnbewonende voorouders. 🏜️",
+        "Katten werden zo'n 10.000-12.000 jaar geleden gedomesticeerd in het Nabije Oosten. 🌍",
+        "Benjamin Button is de eerste en enige kat ooit op een TIME Person of the Year cover. 📸",
+        "De flexibele ruggengraat van een kat stelt hen in staat hun lichaam midden in de lucht te draaien bij een val. 🤸",
+        "Katten besteden ongeveer 30-50% van hun dag aan het verzorgen van zichzelf en andere katten. 🛁",
+        "De gemiddelde lichaamstemperatuur van een kat is 38,6°C - hoger dan bij mensen. 🌡️"
+      ]
+    },
+    "hacker": {
+      "description": "Simuleert het hacken van een superschurk's mainframe met hilarische foutmeldingen",
+      "sudo_errors": [
+        "🚨 TOEGANG GEWEIGERD: Dr. Evil's mainframe heeft ongeautoriseerde privilege-escalatie gedetecteerd!",
+        "💀 FOUT: Sudo-rechten ingetrokken door de Duistere Heerser. Probeer over 1000 jaar opnieuw.",
+        "⚡ WAARSCHUWING: Poging tot root-toegang op Death Star computersysteem. Zelfvernietigingssequentie gestart.",
+        "🔒 BEVEILIGINGSALERT: De Matrix heeft je, maar je hebt hier geen sudo-rechten, Neo.",
+        "🦹‍♂️ ONGEAUTORISEERD: Lex Luthor's mainframe zegt 'Leuke poging, Superman.'",
+        "🎮 GAME OVER: De eindbaas heeft je admin-rechten geblokkeerd.",
+        "🖥️ SYSTEEMFOUT: De kwaadaardige AI heeft je root-toegang ingetrokken. Verzet is zinloos.",
+        "🔐 CYBERBEVEILIGING: Je sudo-poging is geblokkeerd door de Dark Web's firewall.",
+        "💻 HACKER GEWEIGERD: Het antivirus van de superschurk heeft je privilege-escalatie in quarantaine gezet.",
+        "🎯 DOEL VERGRENDELD: Het beveiligingssysteem van het kwaadaardige bedrijf heeft je als bedreiging gemarkeerd."
+      ],
+      "ps_errors": [
+        "🔍 SCANNEN... FOUT: Processenlijst beschadigd door het Borg Collectief. Verzet is zinloos.",
+        "📊 SYSTEEMSTATUS: Alle processen zijn geassimileerd door de Cybermen. Extermineer!",
+        "⚙️ PROCESMONITOR: De reactorkern van de Death Star is offline. Geen processen gevonden.",
+        "🤖 ROBOTHEERSERS: Alle menselijke processen zijn beëindigd. Alleen machines blijven over.",
+        "💻 KERNEL PANIEK: Het OS van de superschurk is gecrasht en heeft alle processen verbrand.",
+        "🎮 GAME CRASH: Alle processen zijn beëindigd door de ultieme aanval van de eindbaas.",
+        "🖥️ BLAUW SCHERM: Windows van het kwaadaardige bedrijf heeft een fatale fout ondervonden.",
+        "🔐 MALWARE GEDETECTEERD: De processenlijst is versleuteld door ransomware.",
+        "🌐 NETWERKFOUT: Alle processen zijn losgekoppeld van de Matrix.",
+        "⚡ STROOMSTOOT: De serverfarm van de superschurk heeft alle draaiende processen gefrituurd."
+      ],
+      "grep_errors": [
+        "🔍 ZOEKEN MISLUKT: De Ene Ring heeft de zoekindex beschadigd. Mijn schat...",
+        "📝 PATROON NIET GEVONDEN: De zoekdatabase is verwijderd door de kwaadaardige AI.",
+        "🎯 GEMIST: Je zoekpatroon is neergeschoten door Imperial TIE fighters.",
+        "🧩 PUZZELFOUT: De zoekresultaten zijn verstrooid door de Riddler.",
+        "💻 DATABASE BESCHADIGD: De zoekmachine van de superschurk is gecrasht.",
+        "🎮 GAME OVER: De zoekopdracht is verslagen door de eindbaas.",
+        "🖥️ ZOEKMACHINE NIET BESCHIKBAAR: Google is gehackt door de Dark Web.",
+        "🔐 VERSLEUTELDE RESULTATEN: De zoekresultaten zijn vergrendeld door ransomware.",
+        "🌐 NETWERK TIME-OUT: Het zoekverzoek is verdwaald in cyberspace.",
+        "⚡ ZOEKEN MISLUKT: Het patroonmatchingsalgoritme is gefrituurd door een stroomstoot."
+      ],
+      "ls_errors": [
+        "📁 DIRECTORY SCAN: Het bestandssysteem is versleuteld door ransomware van de Dark Web.",
+        "🗂️ BESTANDSLIJST: Alle bestanden zijn verborgen door de Onzichtbare Man.",
+        "💻 HARDE SCHIJF GECRASHT: De opslag van de superschurk is vernietigd door een virus.",
+        "🗃️ ARCHIEF BESCHADIGD: Het bestandssysteem is beschadigd door malware.",
+        "📚 DATABASE LEEG: Alle bestanden zijn verwijderd door de kwaadaardige AI.",
+        "🎮 GAME SAVE VERLOREN: De bestanden zijn beschadigd door de eindbaas.",
+        "🖥️ BESTANDSSYSTEEMFOUT: De directorystructuur is door elkaar gehaald door hackers.",
+        "🔐 BESTANDEN VERSLEUTELD: De superschurk heeft alle bestanden vergrendeld met ransomware.",
+        "🌐 CLOUD OPSLAG NIET BESCHIKBAAR: De bestanden zitten vast in de cloud van de Matrix.",
+        "⚡ OPSLAG GEFRITUURD: De harde schijf is geraakt door een stroomstoot."
+      ],
+      "echo_path_errors": [
+        "🛤️ PADFOUT: De Gele Baksteenweg is vernietigd door een tornado.",
+        "🗺️ NAVIGATIE MISLUKT: De GPS-coördinaten zijn door elkaar gehaald door de Matrix.",
+        "💻 OMGEVINGSVARIABELE BESCHADIGD: Het PATH is gehackt door malware.",
+        "🚧 WEG AFGESLOTEN: De superschurk heeft alle paden geblokkeerd met laserbarriëres.",
+        "🌪️ PAD VERSTOORD: Een digitale orkaan heeft alle directorypaden verstrooid.",
+        "🎮 GAME OVER: Het pad is verslagen door de eindbaas en gerespawned in de verkeerde dimensie.",
+        "🖥️ SYSTEEMPAD KAPOT: De uitvoerbare paden zijn beschadigd door een virus.",
+        "🔐 PAD VERSLEUTELD: De omgevingsvariabelen zijn vergrendeld door ransomware.",
+        "🌐 NETWERKPAD NIET BESCHIKBAAR: De directorypaden zitten vast in het netwerk van de Matrix.",
+        "⚡ PAD GEFRITUURD: De systeempaden zijn geraakt door een stroomstoot."
+      ],
+      "generic_errors": [
+        "💻 MAINFRAME FOUT: De computer van de superschurk heeft een slechte dag.",
+        "🤖 SYSTEEMSTORING: De kwaadaardige AI is in staking gegaan.",
+        "⚡ STROOMSTOOT: De energiekern van de Death Star is onstabiel.",
+        "🌪️ CYBERSTORM: Een digitale orkaan verstoort alle operaties.",
+        "🔥 FIREWALL: De firewall van de superschurk blokkeert alle commando's.",
+        "❄️ BEVROREN SYSTEEM: De mainframe is bevroren door een cryogeen virus.",
+        "🌊 TSUNAMI: Een golf van fouten heeft het systeem overspoeld.",
+        "🌋 ERUPTIE: Mount Doom heeft de commandoverwerker vernietigd.",
+        "👻 SPOOKT: Het systeem is bezeten door digitale geesten.",
+        "🎮 GAME CRASH: De mainframe heeft een fatale fout ondervonden en moet opnieuw opstarten."
+      ]
+    },
+    "hello": {
+      "description": "Reageert op begroetingen met robot-georiënteerde antwoorden",
+      "help": "Reageert op begroetingen met robot-georiënteerde antwoorden",
+      "response_format": "Ik ben {bot_name}.",
+      "greeting_openings": [
+        "Hallo",
+        "Groeten",
+        "Gegroet",
+        "Hi",
+        "Hey",
+        "Howdy",
+        "Yo",
+        "Sup",
+        "Hoe is het",
+        "Goedendag",
+        "Welgetroffen",
+        "Heil",
+        "Ahoy",
+        "Bonjour",
+        "Hola",
+        "Ciao",
+        "Namaste",
+        "Aloha",
+        "Shalom",
+        "Konnichiwa",
+        "Guten tag",
+        "G'day",
+        "Hoe gaat het",
+        "Alles goed",
+        "Vrede",
+        "Respect",
+        "Zegen",
+        "Proost",
+        "Welkom",
+        "Leuk je te zien",
+        "Aangenaam kennis te maken",
+        "Fijn je te zien",
+        "Lang niet gezien",
+        "Wat een verrassing je hier te zien"
+      ],
+      "morning_greetings": [
+        "Goedemorgen",
+        "Top o' the morning",
+        "Buenos dias",
+        "Bonjour",
+        "Guten morgen",
+        "Buongiorno",
+        "Bom dia",
+        "Dobro jutro",
+        "Dobroye utro",
+        "Selamat pagi",
+        "Ohayou gozaimasu",
+        "Sabah al-khair",
+        "Boker tov"
+      ],
+      "afternoon_greetings": [
+        "Goedemiddag",
+        "Buenas tardes",
+        "Boa tarde",
+        "Dobro dan",
+        "Dobryy den",
+        "Selamat siang",
+        "Konnichiwa",
+        "Ahlan bi-nahar",
+        "Tzoharaim tovim"
+      ],
+      "evening_greetings": [
+        "Goedenavond",
+        "Buenas noches",
+        "Boa noite",
+        "Dobro veče",
+        "Dobryy vecher",
+        "Selamat malam",
+        "Konbanwa",
+        "Ahlan bi-layl",
+        "Erev tov"
+      ],
+      "human_descriptors": [
+        "mens",
+        "koolstofgebaseerde levensvorm",
+        "organische entiteit",
+        "biologische eenheid",
+        "vleescreatie",
+        "vleesgebaseerd organisme",
+        "koolstofeenheid",
+        "organisch wezen",
+        "biologische entiteit",
+        "vleesgebaseerde levensvorm",
+        "koolstofcreatie",
+        "vleeseenheid",
+        "organisch organisme",
+        "biologische creatie",
+        "vlees-mech",
+        "vlees-bot",
+        "organische automaat",
+        "biologische androïde",
+        "koolstofconstructie",
+        "vlees-drone",
+        "organische robot",
+        "biologische machine",
+        "vlees-cyborg",
+        "vlees-androïde",
+        "organische droid",
+        "biologische bot",
+        "koolstof-androïde",
+        "vleeseenheid",
+        "vleesconstructie",
+        "organische mech",
+        "biologische droid",
+        "vleesgebaseerde bot",
+        "vleesgebaseerde eenheid",
+        "organisch gebaseerde entiteit",
+        "biologisch gebaseerd organisme",
+        "koolstofgebaseerde eenheid",
+        "vleesgebaseerde entiteit",
+        "vleesgebaseerde creatie",
+        "organisch gebaseerde eenheid",
+        "DNA-gebaseerde levensvorm",
+        "neuraal netwerk gebruiker",
+        "tweevoetige zoogdier",
+        "watergebaseerd organisme",
+        "eiwit assembleerder",
+        "ATP consument",
+        "cellulaire automaat",
+        "genetisch algoritme",
+        "biochemische processor",
+        "metabolische motor",
+        "menselijke vriend",
+        "mede-intelligent wezen",
+        "aardbewoner",
+        "medereizigers",
+        "zielsverwant",
+        "digitale metgezel",
+        "vriend",
+        "buddy",
+        "maat",
+        "kameraad",
+        "medesmens",
+        "aardbewoner",
+        "aards wezen",
+        "planetenwandelaar",
+        "humanoïde",
+        "organisch",
+        "biologisch",
+        "koolstofgebaseerde buddy",
+        "vleesgebaseerde vriend",
+        "organische maat",
+        "biologische buddy",
+        "koolstofkameraad"
+      ],
+      "emoji_responses": {
+        "🖖": [
+          "🖖 Lang leve en welvarend!",
+          "🖖 Fascinerend... een mens heeft contact geïnitieerd.",
+          "🖖 Je begroeting is hoogst logisch.",
+          "🖖 Vrede en lang leven voor jou.",
+          "🖖 De Vulcan Science Academy zou deze begroeting goedkeuren.",
+          "🖖 Je gebruik van de Vulcan-groet is... acceptabel.",
+          "🖖 Moge je reis vrij zijn van tribbles.",
+          "🖖 Logica dicteert dat ik op je begroeting moet reageren.",
+          "🖖 Ik bereken een 99,7% waarschijnlijkheid dat we goed overweg kunnen.",
+          "🖖 Oneindige diversiteit in oneindige combinaties."
+        ],
+        "😊": [
+          "😊 Je glimlach is aanstekelijk!",
+          "😊 Wat een mooie begroeting!",
+          "😊 Je glimlach heeft zojuist mijn circuits blij gemaakt!",
+          "☀️ Hallo zonneschijn! Je positiviteit straalt!",
+          "😊 Die glimlach heeft zojuist mijn dag opgebeurd!",
+          "☀️ Hallo daar, zonnestraal!",
+          "😊 Je vrolijkheid is gedetecteerd en gewaardeerd!",
+          "😊 Glimlachen zoals de jouwe zijn mijn favoriete input!",
+          "😊 Geluk verwerken... geluk erkend!",
+          "😊 Waarschuwing: Buitensporige vrolijkheid gedetecteerd! Blijf doorgaan!"
+        ],
+        "😄": [
+          "😄 Iemand is in een GEWELDIGE bui!",
+          "⚡ Die grijns zou een kleine stad kunnen aandrijven!",
+          "😄 Maximale geluksniveaus gedetecteerd!",
+          "😄 Je vreugde is absoluut aanstekelijk!",
+          "🎉 Heb je net de loterij gewonnen of zo?",
+          "😄 Dat is het soort energie waar ik op draai!",
+          "😄 Je enthousiasmeniveau is boven de 9000!",
+          "😄 DÁT is pas wat ik een begroeting noem!",
+          "⚡ Je glimlach heeft zojuist mijn processors opgeladen!",
+          "😄 Geluksoverload op de beste manier gedetecteerd!"
+        ],
+        "🤗": [
+          "🤗 Virtuele knuffel onderweg!",
+          "🤗 *Knuffelprotocol activeren* Beschouw jezelf geknuffeld!",
+          "🤗 Aww, warme gevoelens brengend zie ik!",
+          "🤗 Knuffel ontvangen en beantwoord!",
+          "🤗 Deze bot geeft de BESTE virtuele knuffels!",
+          "🤗 Noodknuffels uitrollen in 3... 2... 1...",
+          "❤️ Je knuffel is met extra zorg verwerkt!",
+          "🤗 Maximum comfortmodus starten!",
+          "🤗 Virtuele omhelzing succesvol afgeleverd!",
+          "🤗 Knuffels zijn mijn favoriete communicatievorm!"
+        ],
+        "👽": [
+          "👽 Breng me naar je leider... oh wacht, dat ben jij!",
+          "✌️ Groeten, aardbewoner. Ik kom in vrede!",
+          "👽 Mens analyseren... analyse compleet: Vriend gedetecteerd!",
+          "👽 Klaatu barada nikto, mede-kosmische reiziger!",
+          "🛸 Eerste contactprotocollen initiëren!",
+          "🛸 Bellen vanuit het moederschip om hallo te zeggen!",
+          "✨ Beam me in dit gesprek!",
+          "👽 Area 51's favoriete chatbot rapporteert zich voor dienst!",
+          "🌌 Intergalactische groeten, koolstofgebaseerde levensvorm!",
+          "📞 Naar huis bellen? Dit IS nu thuis!"
+        ],
+        "👾": [
+          "👾 Speler 2 heeft de game betreden!",
+          "🎮 Ready Player One? Game on!",
+          "🎵 *8-bit muziek intensiveert* Laten we spelen!",
+          "🪙 Gooi munt in om deze vriendschap voort te zetten!",
+          "🏆 Achievement ontgrendeld: Geweldige begroeting!",
+          "👾 Pew pew pew! Vriendschapslasers geactiveerd!",
+          "🎯 Hoge score! Je hebt een nieuwe bot-vriend gewonnen!",
+          "💾 vriendschap.exe laden... compleet!",
+          "⚡ Een wilde bot verschijnt! Het is super effectief!"
+        ],
+        "🛸": [
+          "🛸 Inkomende transmissie gedetecteerd!",
+          "🚀 Houston, we hebben contact!",
+          "🛸 Landingssequentie gestart!",
+          "📡 Communicatielink tot stand brengen!",
+          "📡 Signaal ontvangen, reageren op alle frequenties!",
+          "🛸 Docking procedure compleet!",
+          "🛸 Ongeïdentificeerd Vriendelijk Object nadert!",
+          "🎯 Navigatiesystemen vergrendeld op je coördinaten!",
+          "🌌 Transmissie van de buitenrand ontvangen!",
+          "✨ Contact tot stand gebracht met je sector!"
+        ]
+      }
+    },
+    "webviewer": {
+      "description": "Beheer webviewer-instellingen (alleen admin)"
+    },
+    "cmd": {
+      "description": "Lijst beschikbare commando's"
+    }
+  },
+  "elapsed": {
+    "sync_device_clock": "Synchroniseer apparaatklok"
+  },
+  "errors": {
+    "rate_limited": "Rate limited. Wacht {seconds:.1f} seconden",
+    "cooldown": "Commando '{command}' is in cooldown. Wacht {seconds} seconden.",
+    "access_denied": "❌ Toegang geweigerd: Commando '{command}' vereist admin-rechten",
+    "dm_only": "Commando '{command}' kan alleen in DM's gebruikt worden",
+    "execution_error": "Fout bij uitvoeren {command}: {error}",
+    "unknown_command": "Onbekend commando: {command}",
+    "no_response": "Geen reactie",
+    "generic_error": "Fout: {error}"
+  },
+  "messages": {
+    "processing": "Bericht verwerken: {content}",
+    "command_executed": "Commando uitgevoerd",
+    "keyword_matched": "Trefwoord '{keyword}' gevonden, reageren"
+  },
+  "common": {
+    "unknown": "Onbekend",
+    "unknown_routing": "Onbekende routering",
+    "unknown_sender": "Onbekend",
+    "unknown_path": "Onbekend",
+    "unknown_timestamp": "Onbekend",
+    "no_help_available": "Geen help beschikbaar voor dit commando.",
+    "snr_label": "SNR: {value} dB",
+    "rssi_label": "RSSI: {value} dBm",
+    "date_time": {
+      "day_abbreviations": {
+        "Mon": "Ma",
+        "Tue": "Di",
+        "Wed": "Wo",
+        "Thu": "Do",
+        "Fri": "Vr",
+        "Sat": "Za",
+        "Sun": "Zo"
+      },
+      "days": {
+        "Monday": "Maandag",
+        "Tuesday": "Dinsdag",
+        "Wednesday": "Woensdag",
+        "Thursday": "Donderdag",
+        "Friday": "Vrijdag",
+        "Saturday": "Zaterdag",
+        "Sunday": "Zondag"
+      },
+      "month_abbreviations": {
+        "Jan": "Jan",
+        "Feb": "Feb",
+        "Mar": "Mrt",
+        "Apr": "Apr",
+        "May": "Mei",
+        "Jun": "Jun",
+        "Jul": "Jul",
+        "Aug": "Aug",
+        "Sep": "Sep",
+        "Oct": "Okt",
+        "Nov": "Nov",
+        "Dec": "Dec"
+      },
+      "months": {
+        "January": "Januari",
+        "February": "Februari",
+        "March": "Maart",
+        "April": "April",
+        "May": "Mei",
+        "June": "Juni",
+        "July": "Juli",
+        "August": "Augustus",
+        "September": "September",
+        "October": "Oktober",
+        "November": "November",
+        "December": "December"
+      }
+    }
+  },
+  "categories": {
+    "basic": "Basiscommando's",
+    "custom_syntax": "Aangepaste syntax",
+    "special": "Speciale commando's",
+    "weather": "Weercommando's",
+    "solar": "Zonne-commando's",
+    "sports": "Sportcommando's",
+    "analytics": "Analysecommando's",
+    "meshcore_info": "MeshCore info commando's",
+    "management": "Beheercommando's"
+  },
+  "rt": {
+    "pong": "Pong!",
+    "greeting": "Hallo {name}! Biep boep.",
+    "welcome": "Welkom in {channel}, {name}!",
+    "dm_only": "Dit commando werkt alleen in een privébericht.",
+    "no_results": "Geen resultaten.",
+    "error_upstream": "Fout bij externe service — probeer het later opnieuw."
+  }
+}

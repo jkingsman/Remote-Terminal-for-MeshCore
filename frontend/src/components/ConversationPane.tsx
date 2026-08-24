@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState, type Ref } from 'react';
+import { lazy, Suspense, useMemo, useRef, useState, type Ref } from 'react';
 
 import { ChatHeader } from './ChatHeader';
 import { MessageInput, type MessageInputHandle } from './MessageInput';
@@ -28,8 +28,12 @@ const RepeaterDashboard = lazy(() =>
   import('./RepeaterDashboard').then((m) => ({ default: m.RepeaterDashboard }))
 );
 const MapView = lazy(() => import('./MapView').then((m) => ({ default: m.MapView })));
+const BotsView = lazy(() => import('./bots/BotsView').then((m) => ({ default: m.BotsView })));
 const VisualizerView = lazy(() =>
   import('./VisualizerView').then((m) => ({ default: m.VisualizerView }))
+);
+const StatisticsView = lazy(() =>
+  import('./StatisticsView').then((m) => ({ default: m.StatisticsView }))
 );
 
 interface ConversationPaneProps {
@@ -60,6 +64,12 @@ interface ConversationPaneProps {
   onPathDiscovery: (publicKey: string) => Promise<PathDiscoveryResponse>;
   onToggleFavorite: (type: 'channel' | 'contact', id: string) => Promise<void>;
   onToggleMute: (key: string) => Promise<void>;
+  onSetMcmpEnabled?: (
+    type: 'channel' | 'contact',
+    id: string,
+    enabled: boolean,
+    version: number
+  ) => Promise<void>;
   onDeleteContact: (publicKey: string) => Promise<void>;
   onDeleteChannel: (key: string) => Promise<void>;
   onSetChannelFloodScopeOverride: (channelKey: string, floodScopeOverride: string) => Promise<void>;
@@ -143,6 +153,7 @@ export function ConversationPane({
   onPathDiscovery,
   onToggleFavorite,
   onToggleMute,
+  onSetMcmpEnabled,
   onDeleteContact,
   onDeleteChannel,
   onSetChannelFloodScopeOverride,
@@ -183,9 +194,32 @@ export function ConversationPane({
     return contacts.find((candidate) => candidate.public_key === activeConversation.id) ?? null;
   }, [activeConversation, contacts]);
   const activeContactIsRoom = activeContact?.type === CONTACT_TYPE_ROOM;
-  useEffect(() => {
-    setRoomAuthenticated(false);
-  }, [activeConversation?.id]);
+  const activeChannel = useMemo(() => {
+    if (!activeConversation || activeConversation.type !== 'channel') return null;
+    return channels.find((candidate) => candidate.key === activeConversation.id) ?? null;
+  }, [activeConversation, channels]);
+  // Whether the active conversation compresses outbound messages, so the compose
+  // counter can show the compressed wire size instead of the raw length. Room
+  // servers are excluded to match the header toggle (which hides for rooms).
+  const activeMcmpEnabled =
+    (!activeContactIsRoom && (activeContact?.mcmp_enabled ?? false)) ||
+    (activeChannel?.mcmp_enabled ?? false);
+  // MCMP transport version (2 or 3) so the counter estimates the right size.
+  const activeMcmpVersion =
+    activeConversation?.type === 'contact'
+      ? (activeContact?.mcmp_version ?? 2)
+      : (activeChannel?.mcmp_version ?? 2);
+  // Reset the room-auth gate when the conversation changes, but do it during
+  // render (guarded by the previous id) rather than in an effect. An effect here
+  // races the keyed RoomServerPanel's own onAuthenticatedChange mount report:
+  // React runs the child's effect before the parent's, so an effect reset would
+  // clobber the child's "authenticated" with false and hide the chat until a
+  // full reload. Resetting during render lets the child's post-commit report win.
+  const prevConversationIdRef = useRef(activeConversation?.id);
+  if (prevConversationIdRef.current !== activeConversation?.id) {
+    prevConversationIdRef.current = activeConversation?.id;
+    if (roomAuthenticated) setRoomAuthenticated(false);
+  }
   const isPrefixOnlyActiveContact = activeContact
     ? isPrefixOnlyContact(activeContact.public_key)
     : false;
@@ -246,6 +280,30 @@ export function ConversationPane({
     return <RawPacketFeedView contacts={contacts} channels={channels} />;
   }
 
+  if (activeConversation.type === 'bots') {
+    return (
+      <Suspense fallback={<LoadingPane label="Loading bots..." />}>
+        <BotsView
+          botId={activeConversation.botId ?? null}
+          channels={channels}
+          contacts={contacts}
+          onOpenBot={(botId) =>
+            onSelectConversation({ type: 'bots', id: 'bots', name: 'Bots', botId })
+          }
+          onCloseBot={() => onSelectConversation({ type: 'bots', id: 'bots', name: 'Bots' })}
+        />
+      </Suspense>
+    );
+  }
+
+  if (activeConversation.type === 'statistics') {
+    return (
+      <Suspense fallback={<LoadingPane label="Loading statistics..." />}>
+        <StatisticsView />
+      </Suspense>
+    );
+  }
+
   if (activeConversation.type === 'search') {
     return null;
   }
@@ -304,6 +362,7 @@ export function ConversationPane({
         onToggleNotifications={onToggleNotifications}
         onToggleFavorite={onToggleFavorite}
         onToggleMute={onToggleMute}
+        onSetMcmpEnabled={onSetMcmpEnabled}
         onSetChannelFloodScopeOverride={onSetChannelFloodScopeOverride}
         onSetChannelPathHashModeOverride={onSetChannelPathHashModeOverride}
         onDeleteChannel={onDeleteChannel}
@@ -318,7 +377,17 @@ export function ConversationPane({
         <ContactResolutionBanner variant="unknown-full-key" />
       )}
       {activeContactIsRoom && activeContact && (
-        <RoomServerPanel contact={activeContact} onAuthenticatedChange={setRoomAuthenticated} />
+        // Key by conversation so switching rooms remounts the panel and restores
+        // that room's own state (via its cache) instead of leaking the previous
+        // room's login/failed-login view. The key is namespaced (`room-`) so it
+        // does NOT collide with the sibling MessageList's key={activeConversation.id}
+        // — an authenticated room renders both, and duplicate sibling keys break
+        // React reconciliation.
+        <RoomServerPanel
+          key={`room-${activeConversation.id}`}
+          contact={activeContact}
+          onAuthenticatedChange={setRoomAuthenticated}
+        />
       )}
       {showRoomChat && <div data-toast-anchor="conversation" aria-hidden="true" />}
       {showRoomChat && (
@@ -364,6 +433,16 @@ export function ConversationPane({
           disabled={!health?.radio_connected}
           conversationType={activeConversation.type}
           senderName={config?.name}
+          voiceConversation={
+            activeConversation.id
+              ? {
+                  type: activeConversation.type === 'contact' ? 'PRIV' : 'CHAN',
+                  key: activeConversation.id,
+                }
+              : undefined
+          }
+          mcmpEnabled={activeMcmpEnabled}
+          mcmpVersion={activeMcmpVersion}
           placeholder={
             !health?.radio_connected
               ? 'Radio not connected'

@@ -4,22 +4,33 @@ import { getContactDisplayName } from './pubkey';
 import type { SettingsSection } from '../components/settings/settingsConstants';
 
 interface ParsedHashConversation {
-  type: 'channel' | 'contact' | 'raw' | 'map' | 'visualizer' | 'search' | 'trace';
+  type:
+    | 'channel'
+    | 'contact'
+    | 'raw'
+    | 'map'
+    | 'visualizer'
+    | 'search'
+    | 'trace'
+    | 'bots'
+    | 'statistics';
   /** Conversation identity token (channel key or contact public key, or legacy name token) */
   name: string;
   /** Optional human-readable label segment (ignored for identity resolution) */
   label?: string;
   /** For map view: public key prefix to focus on */
   mapFocusKey?: string;
+  /** For bots view: bot id to open in the editor */
+  botId?: string;
 }
 
 const SETTINGS_SECTIONS: SettingsSection[] = [
   'radio',
   'local',
+  'https',
   'radio-app',
   'fanout',
   'database',
-  'statistics',
   'about',
 ];
 
@@ -47,6 +58,22 @@ export function parseHashConversation(): ParsedHashConversation | null {
 
   if (hash === 'trace') {
     return { type: 'trace', name: 'trace' };
+  }
+
+  if (hash === 'bots') {
+    return { type: 'bots', name: 'bots' };
+  }
+
+  // Statistics lived under Settings before becoming a sidebar tool; keep the
+  // old settings hash working as a redirect.
+  if (hash === 'statistics' || hash === 'settings/statistics') {
+    return { type: 'statistics', name: 'statistics' };
+  }
+
+  // Bots editor deep link: #bots/{botId}
+  if (hash.startsWith('bots/')) {
+    const botId = decodeURIComponent(hash.slice('bots/'.length));
+    return { type: 'bots', name: 'bots', ...(botId ? { botId } : {}) };
   }
 
   // Check for map with focus: #map/focus/{pubkey_prefix}
@@ -155,6 +182,10 @@ export function getConversationHash(conv: Conversation | null): string {
   if (conv.type === 'visualizer') return '#visualizer';
   if (conv.type === 'search') return '#search';
   if (conv.type === 'trace') return '#trace';
+  if (conv.type === 'statistics') return '#statistics';
+  if (conv.type === 'bots') {
+    return conv.botId ? `#bots/${encodeURIComponent(conv.botId)}` : '#bots';
+  }
 
   // Use immutable IDs for identity, append readable label for UX.
   if (conv.type === 'channel') {

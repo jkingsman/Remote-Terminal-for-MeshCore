@@ -75,7 +75,9 @@ RemoteTerm works behind a reverse proxy that serves it under a sub-path (e.g. `/
 
 ## HTTPS
 
-WebGPU channel-finding requires a secure context when you are not on `localhost`.
+WebGPU channel-finding and voice recording require a secure context when you are not on `localhost`.
+
+For an Internet-facing DNS hostname, terminate TLS in a standard reverse proxy such as Caddy, nginx, or Apache and use that proxy's ACME/Let's Encrypt integration. RemoteTerm deliberately does not give its unprivileged web process permission to install system packages, write system certificate paths, or reconfigure services. Keep Uvicorn bound to the trusted host/network on port 8000 behind the proxy. Certificate renewal is then owned by the proxy's normal renewal service.
 
 Generate a local cert and start the backend with TLS:
 
@@ -97,6 +99,8 @@ services:
 ```
 
 Accept the browser warning, or use [mkcert](https://github.com/FiloSottile/mkcert) for locally-trusted certs.
+
+Voice encoding also requires the system Codec2 library (`libcodec2-1.2` on current Debian/Ubuntu releases, `codec2` on Arch Linux). The official container and AUR package include it. When it is absent, RemoteTerm reports voice as unavailable without affecting text messaging.
 
 ## Systemd Service
 

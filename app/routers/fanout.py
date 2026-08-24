@@ -16,15 +16,18 @@ from app.repository.fanout import FanoutConfigRepository
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/fanout", tags=["fanout"])
 
+# "bot" is intentionally absent: Python bots moved to the Bots workspace
+# (/api/bots, migration 064). Legacy rows were migrated out of fanout_configs.
 _VALID_TYPES = {
     "mqtt_private",
     "mqtt_community",
     "mqtt_ha",
-    "bot",
     "webhook",
     "apprise",
     "sqs",
     "map_upload",
+    "discord_bridge",
+    "telegram_bridge",
 }
 
 _IATA_RE = re.compile(r"^[A-Z]{3}$")
@@ -107,8 +110,53 @@ def _validate_and_normalize_config(config_type: str, config: dict) -> dict:
         _validate_map_upload_config(normalized)
     elif config_type == "mqtt_ha":
         _validate_mqtt_ha_config(normalized)
+    elif config_type == "discord_bridge":
+        _validate_discord_bridge_config(normalized)
+    elif config_type == "telegram_bridge":
+        _validate_telegram_bridge_config(normalized)
 
     return normalized
+
+
+def _validate_bridge_mappings(config: dict, target_field: str, bridge_name: str) -> None:
+    """Shared mapping validation for Discord/Telegram bridges."""
+    mappings = config.get("mappings", [])
+    if not isinstance(mappings, list) or not mappings:
+        raise HTTPException(
+            status_code=400, detail=f"at least one channel mapping is required for {bridge_name}"
+        )
+    for mapping in mappings:
+        if not isinstance(mapping, dict) or not mapping.get("channel_key"):
+            raise HTTPException(status_code=400, detail="each mapping needs a channel_key")
+        if not mapping.get(target_field):
+            raise HTTPException(status_code=400, detail=f"each mapping needs a {target_field}")
+
+
+def _validate_discord_bridge_config(config: dict) -> None:
+    """Validate discord_bridge config blob."""
+    _validate_bridge_mappings(config, "webhook_urls", "the Discord bridge")
+    for mapping in config.get("mappings", []):
+        urls = mapping.get("webhook_urls")
+        if not isinstance(urls, list) or not urls:
+            raise HTTPException(status_code=400, detail="webhook_urls must be a non-empty list")
+        for url in urls:
+            if not isinstance(url, str) or not url.startswith("https://"):
+                raise HTTPException(
+                    status_code=400, detail="Discord webhook URLs must start with https://"
+                )
+    mode = config.get("filter_profanity", "off")
+    if mode not in ("off", "censor", "drop"):
+        raise HTTPException(status_code=400, detail="filter_profanity must be off|censor|drop")
+
+
+def _validate_telegram_bridge_config(config: dict) -> None:
+    """Validate telegram_bridge config blob."""
+    if not config.get("api_token"):
+        raise HTTPException(status_code=400, detail="api_token is required for telegram_bridge")
+    _validate_bridge_mappings(config, "chat_id", "the Telegram bridge")
+    mode = config.get("filter_profanity", "off")
+    if mode not in ("off", "censor", "drop"):
+        raise HTTPException(status_code=400, detail="filter_profanity must be off|censor|drop")
 
 
 def _validate_mqtt_private_config(config: dict) -> None:
@@ -368,6 +416,8 @@ def _enforce_scope(config_type: str, scope: dict) -> dict:
         return {"messages": "none", "raw_packets": "all"}
     if config_type == "bot":
         return {"messages": "all", "raw_packets": "none"}
+    if config_type in ("discord_bridge", "telegram_bridge"):
+        return {"messages": "all", "raw_packets": "none"}
     if config_type in ("webhook", "apprise", "mqtt_ha"):
         messages = scope.get("messages", "all")
         if messages not in ("all", "none") and not isinstance(messages, dict):
@@ -491,8 +541,18 @@ async def delete_fanout_config(config_id: str) -> dict:
 
 @router.post("/bots/disable-until-restart")
 async def disable_bots_until_restart() -> dict:
-    """Stop active bot modules and prevent them from running again until restart."""
+    """Stop active bot modules and prevent them from running again until restart.
+
+    Covers BOTH bot systems: any legacy fanout bot modules and the Bots
+    workspace engine — this endpoint backs the security warning modal's
+    kill switch, which must silence everything that executes bot code.
+    """
     source = await fanout_manager.disable_bots_until_restart()
+
+    from app.bots.engine import bot_engine
+
+    bot_engine.disabled_until_restart = True
+    bot_engine.log("WARN", "engine", "All bots disabled until restart (security kill switch)")
 
     from app.services.radio_runtime import radio_runtime as radio_manager
     from app.websocket import broadcast_health
