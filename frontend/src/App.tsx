@@ -437,11 +437,14 @@ export function App() {
     },
     [handleToggleBlockedName, handleVisibilityPolicyChanged]
   );
+
   const {
     handleSendMessage,
     handleResendChannelMessage,
     handleSetChannelFloodScopeOverride,
     handleSetChannelPathHashModeOverride,
+    handleSetChannelMcmp,
+    handleSetContactMcmp,
     handleSenderClick,
     handleTrace,
     handlePathDiscovery,
@@ -453,6 +456,7 @@ export function App() {
     observeMessage,
     messageInputRef,
   });
+
   const handleCreateCrackedChannel = useCallback(
     async (name: string, key: string) => {
       const created = await api.createChannel(name, key);
@@ -725,12 +729,15 @@ export function App() {
     blockedNames: appSettings?.blocked_names ?? [],
     trackedTelemetryContacts: appSettings?.tracked_telemetry_contacts ?? [],
     onToggleTrackedTelemetryContact: handleToggleTrackedTelemetryContact,
+    onSetContactMcmp: handleSetContactMcmp,
   };
   const channelInfoPaneProps = {
     channelKey: infoPaneChannelKey,
     onClose: handleCloseChannelInfo,
     channels,
     onToggleFavorite: handleToggleFavorite,
+    onSetChannelMcmp: handleSetChannelMcmp,
+    onSetChannelPathHashModeOverride: handleSetChannelPathHashModeOverride,
   };
 
   // Connect to WebSocket
@@ -762,6 +769,7 @@ export function App() {
     setContacts,
     setContactsLoaded,
   ]);
+
   return (
     <DistanceUnitProvider distanceUnit={distanceUnit} setDistanceUnit={setDistanceUnit}>
       <RichPayloadProvider
