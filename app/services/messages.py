@@ -16,7 +16,6 @@ LOG_MESSAGE_PREVIEW_LEN = 32
 
 
 def truncate_for_log(text: str, max_chars: int = LOG_MESSAGE_PREVIEW_LEN) -> str:
-    """Return a compact single-line message preview for log output."""
     normalized = " ".join(text.split())
     if len(normalized) <= max_chars:
         return normalized
@@ -24,12 +23,10 @@ def truncate_for_log(text: str, max_chars: int = LOG_MESSAGE_PREVIEW_LEN) -> str
 
 
 def _format_channel_log_target(channel_name: str | None, channel_key: str) -> str:
-    """Return a human-friendly channel label for logs."""
     return channel_name or channel_key
 
 
 def format_contact_log_target(contact_name: str | None, public_key: str) -> str:
-    """Return a human-friendly DM target label for logs."""
     return contact_name or public_key[:12]
 
 
@@ -40,7 +37,6 @@ def build_message_paths(
     rssi: int | None = None,
     snr: float | None = None,
 ) -> list[MessagePath] | None:
-    """Build the single-path list used by message payloads."""
     return (
         [
             MessagePath(
@@ -71,8 +67,8 @@ def build_message_model(
     packet_id: int | None = None,
     transport_code: int | None = None,
     region: str | None = None,
+    mcmp_signature_status: str | None = None,
 ) -> Message:
-    """Build a Message model with the canonical backend payload shape."""
     return Message(
         id=message_id,
         type=msg_type,
@@ -91,6 +87,7 @@ def build_message_model(
         packet_id=packet_id,
         transport_code=transport_code,
         region=region,
+        mcmp_signature_status=mcmp_signature_status,
     )
 
 
@@ -101,7 +98,6 @@ def broadcast_message(
     realtime: bool | None = None,
     packet_hash: str | None = None,
 ) -> None:
-    """Broadcast a message payload, preserving the caller's broadcast signature."""
     payload = message.model_dump()
     if packet_hash is not None:
         payload["packet_hash"] = packet_hash
@@ -123,7 +119,6 @@ async def build_stored_outgoing_channel_message(
     channel_name: str | None,
     message_repository=MessageRepository,
 ) -> Message:
-    """Build the current payload for a stored outgoing channel message."""
     acked_count, paths = await message_repository.get_ack_and_paths(message_id)
     return build_message_model(
         message_id=message_id,
@@ -149,7 +144,6 @@ def broadcast_message_acked(
     packet_id: int | None,
     broadcast_fn: BroadcastFn,
 ) -> None:
-    """Broadcast a message_acked payload."""
     broadcast_fn(
         "message_acked",
         {
@@ -166,7 +160,6 @@ async def increment_ack_and_broadcast(
     message_id: int,
     broadcast_fn: BroadcastFn,
 ) -> int:
-    """Increment a message's ACK count and broadcast the update."""
     ack_count = await MessageRepository.increment_ack_count(message_id)
     broadcast_fn("message_acked", {"message_id": message_id, "ack_count": ack_count})
     return ack_count
@@ -235,7 +228,6 @@ async def handle_duplicate_message(
     snr: float | None = None,
     broadcast_fn: BroadcastFn,
 ) -> None:
-    """Handle a duplicate message by updating paths/acks on the existing record."""
     existing_msg = await MessageRepository.get_by_content(
         msg_type=msg_type,
         conversation_key=conversation_key,
@@ -282,8 +274,8 @@ async def create_message_from_decrypted(
     packet_hash: str | None = None,
     transport_code: int | None = None,
     region: str | None = None,
+    mcmp_signature_status: str | None = None,
 ) -> int | None:
-    """Store and broadcast a decrypted channel message."""
     received = received_at or int(time.time())
     text = f"{sender}: {message_text}" if sender else message_text
     channel_key_normalized = channel_key.upper()
@@ -308,6 +300,7 @@ async def create_message_from_decrypted(
         sender_key=resolved_sender_key,
         transport_code=transport_code,
         region=region,
+        mcmp_signature_status=mcmp_signature_status,
     )
 
     if msg_id is None:
@@ -351,6 +344,7 @@ async def create_message_from_decrypted(
             packet_id=packet_id,
             transport_code=transport_code,
             region=region,
+            mcmp_signature_status=mcmp_signature_status,
         ),
         broadcast_fn=broadcast_fn,
         realtime=realtime,
@@ -361,18 +355,6 @@ async def create_message_from_decrypted(
 
 
 async def backfill_message_regions(known_regions: list[str]) -> dict[str, int]:
-    """Re-resolve region scope for stored channel messages that still have a raw packet.
-
-    Region is normally resolved at ingest, so messages stored before the feature
-    existed (or before a region was added to the list) carry no region. This walks
-    every CHAN message that still has a retained raw packet, recomputes its
-    transport code, and persists the resolved region.
-
-    Messages whose raw packet has been purged cannot be re-evaluated.
-
-    Returns counts: ``scanned`` (messages examined), ``scoped`` (transport-routed),
-    and ``named`` (matched a known region).
-    """
     from app.path_utils import parse_packet_envelope
     from app.region_resolver import resolve_region
 
@@ -411,7 +393,6 @@ async def create_dm_message_from_decrypted(
     transport_code: int | None = None,
     region: str | None = None,
 ) -> int | None:
-    """Store and broadcast a decrypted direct message."""
     from app.services.dm_ingest import ingest_decrypted_direct_message
 
     message = await ingest_decrypted_direct_message(
@@ -447,7 +428,6 @@ async def create_fallback_channel_message(
     broadcast_fn: BroadcastFn,
     message_repository=MessageRepository,
 ) -> Message | None:
-    """Store and broadcast a CHANNEL_MSG_RECV fallback channel message."""
     conversation_key_normalized = conversation_key.upper()
     text = f"{sender_name}: {message_text}" if sender_name else message_text
 
@@ -510,7 +490,6 @@ async def create_outgoing_direct_message(
     broadcast_fn: BroadcastFn,
     message_repository=MessageRepository,
 ) -> Message | None:
-    """Store and broadcast an outgoing direct message."""
     msg_id = await message_repository.create(
         msg_type="PRIV",
         text=text,
@@ -549,7 +528,6 @@ async def create_outgoing_channel_message(
     broadcast: bool = True,
     message_repository=MessageRepository,
 ) -> Message | None:
-    """Store and broadcast an outgoing channel message."""
     msg_id = await message_repository.create(
         msg_type="CHAN",
         text=text,
