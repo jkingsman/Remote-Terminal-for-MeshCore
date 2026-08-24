@@ -79,6 +79,7 @@ async def create_message_from_decrypted(
     packet_hash: str | None = None,
     transport_code: int | None = None,
     region: str | None = None,
+    mcmp_signature_status: str | None = None,
 ) -> int | None:
     """Store a decrypted channel message via the shared message service."""
     return await _create_message_from_decrypted(
@@ -98,6 +99,7 @@ async def create_message_from_decrypted(
         packet_hash=packet_hash,
         transport_code=transport_code,
         region=region,
+        mcmp_signature_status=mcmp_signature_status,
     )
 
 
@@ -151,7 +153,6 @@ async def run_historical_dm_decryption(
 
     logger.info("Starting historical DM decryption scan for undecrypted TEXT_MESSAGE packets")
 
-    # Derive our public key from the private key
     our_public_key_bytes = derive_public_key(private_key_bytes)
 
     async for (
@@ -443,6 +444,7 @@ async def _process_group_text(
 
         # Decode MCMP v3 payload if present
         message_text = decrypted.message
+        mcmp_signature_status: str | None = None
         if message_text.lstrip().startswith("mcmp3:"):
             decoded_msg = McmpAppCodec.try_decode_text_payload_message(message_text)
             if decoded_msg is not None:
@@ -452,19 +454,20 @@ async def _process_group_text(
                     decoded_msg.signature_status,
                 )
 
-                # Verify signature if present
                 if decoded_msg.signature:
                     verification = await verify_channel_message(
                         decoded_msg=decoded_msg,
                         sender_name=decrypted.sender,
                         channel_key_bytes=channel_key_bytes,
                     )
+                    mcmp_signature_status = verification.status
                     logger.info(
                         "MCMP signature verification for channel %s: %s",
                         channel.name,
                         verification.status,
                     )
                 else:
+                    mcmp_signature_status = "unsigned"
                     logger.debug("MCMP message is unsigned")
             else:
                 logger.warning("Failed to decode MCMP v3 payload, keeping raw text")
@@ -484,6 +487,7 @@ async def _process_group_text(
             packet_hash=packet_hash,
             transport_code=transport_code,
             region=region,
+            mcmp_signature_status=mcmp_signature_status,
         )
 
         return {
