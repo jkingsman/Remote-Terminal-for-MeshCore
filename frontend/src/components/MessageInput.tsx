@@ -12,6 +12,7 @@ import {
 } from 'react';
 import { Button } from './ui/button';
 import { toast } from './ui/sonner';
+import { api } from '../api';
 import { cn } from '@/lib/utils';
 import {
   getTextReplaceEnabled,
@@ -23,15 +24,15 @@ import {
 // Direct delivery allows ~156 bytes; multi-hop requires buffer for path growth.
 // Channels include "sender: " prefix in the encrypted payload.
 // All limits are in bytes (UTF-8), not characters, since LoRa packets are byte-constrained.
-const DM_HARD_LIMIT = 156; // Max bytes for direct delivery
-const DM_WARNING_THRESHOLD = 140; // Conservative for multi-hop
-const CHANNEL_HARD_LIMIT = 156; // Base byte limit before sender overhead
-const CHANNEL_WARNING_THRESHOLD = 120; // Conservative for multi-hop
-const CHANNEL_DANGER_BUFFER = 8; // Red zone starts this many bytes before hard limit
+const DM_HARD_LIMIT = 156;
+const DM_WARNING_THRESHOLD = 140;
+const CHANNEL_HARD_LIMIT = 156;
+const CHANNEL_WARNING_THRESHOLD = 120;
+const CHANNEL_DANGER_BUFFER = 8;
 
 const textEncoder = new TextEncoder();
 const RADIO_NO_RESPONSE_SNIPPET = 'no response was heard back';
-/** Get UTF-8 byte length of a string (LoRa packets are byte-constrained, not character-constrained). */
+
 function byteLen(s: string): number {
   return textEncoder.encode(s).length;
 }
@@ -40,10 +41,14 @@ interface MessageInputProps {
   onSend: (text: string) => Promise<void>;
   disabled: boolean;
   placeholder?: string;
-  /** Conversation type for character limit calculation */
   conversationType?: 'contact' | 'channel' | 'raw';
-  /** Sender name (radio name) for channel message limit calculation */
   senderName?: string;
+  /** Channel key for MCMP size estimation (channels only) */
+  channelKey?: string;
+  /** Whether MCMP compression is enabled for this conversation */
+  mcmpEnabled?: boolean;
+  /** Whether MCMP signing is enabled (channels only) */
+  mcmpSignEnabled?: boolean;
 }
 
 type LimitState = 'normal' | 'warning' | 'danger' | 'error';
@@ -54,19 +59,27 @@ export interface MessageInputHandle {
 }
 
 export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(function MessageInput(
-  { onSend, disabled, placeholder, conversationType, senderName },
+  {
+    onSend,
+    disabled,
+    placeholder,
+    conversationType,
+    senderName,
+    channelKey,
+    mcmpEnabled = false,
+    mcmpSignEnabled = false,
+  },
   ref
 ) {
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
+  const [estimatedSize, setEstimatedSize] = useState<number | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  /** Resize textarea to fit content, clamped between 1 row and ~6 rows. */
   const autoResize = useCallback(() => {
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = 'auto';
-    // Clamp: min 40px (≈1 row), max 160px (≈6 rows)
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
   }, []);
 
@@ -80,21 +93,52 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
     },
   }));
 
-  // Re-measure height whenever text changes (covers programmatic updates like appendText)
   useEffect(() => {
     autoResize();
   }, [text, autoResize]);
+
+  // Debounced MCMP size estimation
+  useEffect(() => {
+    if (!mcmpEnabled) {
+      setEstimatedSize(null);
+      return;
+    }
+
+    const trimmed = text.trim();
+    if (!trimmed) {
+      setEstimatedSize(0);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const result = await api.estimateMessageSize({
+          text: trimmed,
+          channel_key: conversationType === 'channel' ? channelKey : undefined,
+          include_signature: conversationType === 'channel' && mcmpSignEnabled,
+        });
+        if (!cancelled) setEstimatedSize(result.size);
+      } catch {
+        if (!cancelled) setEstimatedSize(null);
+      }
+    }, 300);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [text, mcmpEnabled, mcmpSignEnabled, conversationType, channelKey]);
 
   // Calculate character limits based on conversation type
   const limits = useMemo(() => {
     if (conversationType === 'contact') {
       return {
         warningAt: DM_WARNING_THRESHOLD,
-        dangerAt: DM_HARD_LIMIT, // Same as hard limit for DMs (no intermediate red zone)
+        dangerAt: DM_HARD_LIMIT,
         hardLimit: DM_HARD_LIMIT,
       };
     } else if (conversationType === 'channel') {
-      // Channel hard limit = 156 bytes - senderName bytes - 2 (for ": " separator)
       const nameByteLen = senderName ? byteLen(senderName) : 10;
       const hardLimit = Math.max(1, CHANNEL_HARD_LIMIT - nameByteLen - 2);
       return {
@@ -103,11 +147,14 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
         hardLimit,
       };
     }
-    return null; // Raw/other - no limits
+    return null;
   }, [conversationType, senderName]);
 
-  // UTF-8 byte length of the current text (LoRa packets are byte-constrained)
+  // UTF-8 byte length of the current text (raw, uncompressed)
   const textByteLen = useMemo(() => byteLen(text), [text]);
+
+  // Effective payload size: compressed if MCMP enabled and estimate available, else raw
+  const effectiveTextSize = mcmpEnabled && estimatedSize !== null ? estimatedSize : textByteLen;
 
   // Determine current limit state
   const { limitState, warningMessage } = useMemo((): {
@@ -116,19 +163,20 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
   } => {
     if (!limits) return { limitState: 'normal', warningMessage: null };
 
-    if (textByteLen >= limits.hardLimit) {
+    const size = effectiveTextSize;
+    if (size >= limits.hardLimit) {
       return { limitState: 'error', warningMessage: 'likely truncated by radio' };
     }
-    if (textByteLen >= limits.dangerAt) {
+    if (size >= limits.dangerAt) {
       return { limitState: 'danger', warningMessage: 'may impact multi-repeater hop delivery' };
     }
-    if (textByteLen >= limits.warningAt) {
+    if (size >= limits.warningAt) {
       return { limitState: 'warning', warningMessage: 'may impact multi-repeater hop delivery' };
     }
     return { limitState: 'normal', warningMessage: null };
-  }, [textByteLen, limits]);
+  }, [effectiveTextSize, limits]);
 
-  const remaining = limits ? limits.hardLimit - textByteLen : 0;
+  const remaining = limits ? limits.hardLimit - effectiveTextSize : 0;
 
   const handleSubmit = useCallback(
     async (e: FormEvent) => {
@@ -152,7 +200,6 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
       } finally {
         setSending(false);
       }
-      // Refocus after React re-enables the textarea
       setTimeout(() => textareaRef.current?.focus(), 0);
     },
     [text, sending, disabled, onSend]
@@ -161,7 +208,6 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
   const handleChange = useCallback((e: ChangeEvent<HTMLTextAreaElement>) => {
     const input = e.target;
     const raw = input.value;
-    // Skip replacement during IME / dead-key composition to avoid garbling interim input
     if (!e.nativeEvent || (e.nativeEvent as InputEvent).isComposing) {
       setText(raw);
       return;
@@ -174,7 +220,6 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
       );
       if (result) {
         setText(result.text);
-        // Schedule cursor restore after React flushes the new value
         const pos = result.cursor;
         requestAnimationFrame(() => input.setSelectionRange(pos, pos));
         return;
@@ -189,15 +234,11 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
         e.preventDefault();
         handleSubmit(e as unknown as FormEvent);
       }
-      // Shift+Enter falls through naturally and inserts a newline
     },
     [handleSubmit]
   );
 
   const canSubmit = text.trim().length > 0;
-
-  // Show counter for messages (not raw).
-  // Desktop: always visible. Mobile: only show count after 100 characters.
   const showCharCounter = limits !== null;
   const showMobileCounterValue = text.length > 100;
 
@@ -250,7 +291,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
                     : 'text-muted-foreground'
               )}
             >
-              {textByteLen}/{limits!.hardLimit}
+              {effectiveTextSize}/{limits!.hardLimit}
               {remaining < 0 && ` (${remaining})`}
             </span>
             {warningMessage && (
@@ -273,7 +314,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
                         : 'text-muted-foreground'
                   )}
                 >
-                  {textByteLen}/{limits!.hardLimit}
+                  {effectiveTextSize}/{limits!.hardLimit}
                   {remaining < 0 && ` (${remaining})`}
                 </span>
               )}
