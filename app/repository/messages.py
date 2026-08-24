@@ -67,6 +67,7 @@ class MessageRepository:
         sender_key: str | None = None,
         transport_code: int | None = None,
         region: str | None = None,
+        mcmp_signature_status: str | None = None,
     ) -> int | None:
         """Create a message, returning the ID or None if duplicate.
 
@@ -97,8 +98,9 @@ class MessageRepository:
                 """
                 INSERT OR IGNORE INTO messages (type, conversation_key, text, sender_timestamp,
                                                 received_at, paths, txt_type, signature, outgoing,
-                                                sender_name, sender_key, transport_code, region)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                                sender_name, sender_key, transport_code, region,
+                                                mcmp_signature_status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     msg_type,
@@ -114,6 +116,7 @@ class MessageRepository:
                     normalized_sender_key,
                     transport_code,
                     region,
+                    mcmp_signature_status,
                 ),
             ) as cursor:
                 rowcount = cursor.rowcount
@@ -364,6 +367,7 @@ class MessageRepository:
         packet_id = None
         transport_code = None
         region = None
+        mcmp_signature_status = None
         if hasattr(row, "keys"):
             row_keys = row.keys()
             if "packet_id" in row_keys:
@@ -372,6 +376,8 @@ class MessageRepository:
                 transport_code = row["transport_code"]
             if "region" in row_keys:
                 region = row["region"]
+            if "mcmp_signature_status" in row_keys:
+                mcmp_signature_status = row["mcmp_signature_status"]
 
         return Message(
             id=row["id"],
@@ -390,6 +396,7 @@ class MessageRepository:
             packet_id=packet_id,
             transport_code=transport_code,
             region=region,
+            mcmp_signature_status=mcmp_signature_status,
         )
 
     @staticmethod
@@ -500,8 +507,6 @@ class MessageRepository:
 
         Returns (messages, has_older, has_newer).
         """
-        # Build common WHERE clause for optional conversation/type filtering.
-        # If the target message doesn't match filters, return an empty result.
         where_parts: list[str] = []
         base_params: list[Any] = []
         if msg_type:
@@ -521,7 +526,6 @@ class MessageRepository:
 
         where_sql = " AND ".join(["1=1", *where_parts])
 
-        # 1. Get the target message (must satisfy filters if provided)
         async with db.readonly() as conn:
             async with conn.execute(
                 f"SELECT {MessageRepository._message_select('messages')} "
@@ -534,7 +538,6 @@ class MessageRepository:
 
             target = MessageRepository._row_to_message(target_row)
 
-            # 2. Get context_size+1 messages before target (DESC)
             before_query = f"""
                 SELECT {MessageRepository._message_select("messages")} FROM messages WHERE {where_sql}
                 AND (received_at < ? OR (received_at = ? AND id < ?))
@@ -555,7 +558,6 @@ class MessageRepository:
                 MessageRepository._row_to_message(r) for r in before_rows[:context_size]
             ]
 
-            # 3. Get context_size+1 messages after target (ASC)
             after_query = f"""
                 SELECT {MessageRepository._message_select("messages")} FROM messages WHERE {where_sql}
                 AND (received_at > ? OR (received_at = ? AND id > ?))
@@ -574,19 +576,12 @@ class MessageRepository:
         has_newer = len(after_rows) > context_size
         after_messages = [MessageRepository._row_to_message(r) for r in after_rows[:context_size]]
 
-        # Combine: before (reversed to ASC) + target + after
         all_messages = list(reversed(before_messages)) + [target] + after_messages
         return all_messages, has_older, has_newer
 
     @staticmethod
     async def increment_ack_count(message_id: int) -> int:
-        """Increment ack count and return the new value.
-
-        NOTE: ``RETURNING`` leaves the prepared statement active until the
-        row is fetched, so we MUST consume it inside the ``async with``
-        block. Without that, the commit at the end of ``db.tx()`` fails
-        with ``cannot commit transaction - SQL statements in progress``.
-        """
+        """Increment ack count and return the new value."""
         async with db.tx() as conn:
             async with conn.execute(
                 "UPDATE messages SET acked = acked + 1 WHERE id = ? RETURNING acked",
@@ -639,9 +634,6 @@ class MessageRepository:
     ) -> "AsyncIterator[tuple[int, bytes]]":
         """Yield (message_id, raw_packet_bytes) for CHAN messages that still have a
         retained raw packet, in ascending id batches.
-
-        Used by the region backfill: region is a property of the on-air payload, so
-        any retained raw packet for the message yields the same transport code.
         """
         last_id = 0
         while True:
@@ -712,22 +704,11 @@ class MessageRepository:
         blocked_keys: list[str] | None = None,
         blocked_names: list[str] | None = None,
     ) -> dict:
-        """Get unread message counts, mention flags, and last message times for all conversations.
-
-        Args:
-            name: User's display name for @[name] mention detection. If None, mentions are skipped.
-            blocked_keys: Public keys whose messages should be excluded from counts.
-            blocked_names: Display names whose messages should be excluded from counts.
-
-        Returns:
-            Dict with 'counts', 'mentions', 'last_message_times', 'last_read_ats',
-            and 'first_unread_ids' keys.
-        """
+        """Get unread message counts, mention flags, and last message times for all conversations."""
         counts: dict[str, int] = {}
         mention_flags: dict[str, bool] = {}
         last_message_times: dict[str, int] = {}
         last_read_ats: dict[str, int | None] = {}
-        # id of the oldest unread message per conversation.
         first_unread_ids: dict[str, int | None] = {}
 
         mention_token = f"@[{name}]" if name else None
@@ -737,18 +718,12 @@ class MessageRepository:
         )
         blocked_sql = f" AND {blocked_clause}" if blocked_clause else ""
 
-        # Last message times for all conversations (including read ones),
-        # excluding blocked incoming traffic so refresh matches live WS behavior.
         last_time_clause, last_time_params = MessageRepository._build_blocked_incoming_clause(
             blocked_keys=blocked_keys, blocked_names=blocked_names
         )
         last_time_where_sql = f"WHERE {last_time_clause}" if last_time_clause else ""
 
-        # Single readonly acquisition for all 5 queries — they form one logical
-        # snapshot, and holding the lock for the batch is cheaper than acquiring
-        # it 5 times.
         async with db.readonly() as conn:
-            # Channel unreads
             async with conn.execute(
                 f"""
                 SELECT m.conversation_key,
@@ -774,7 +749,6 @@ class MessageRepository:
                 if mention_token and row["has_mention"]:
                     mention_flags[state_key] = True
 
-            # Contact unreads
             async with conn.execute(
                 f"""
                 SELECT m.conversation_key,
@@ -799,32 +773,16 @@ class MessageRepository:
                 if mention_token and row["has_mention"]:
                     mention_flags[state_key] = True
 
-            async with conn.execute(
-                """
-                SELECT key, last_read_at
-                FROM channels
-                """
-            ) as cursor:
+            async with conn.execute("SELECT key, last_read_at FROM channels") as cursor:
                 rows = await cursor.fetchall()
             for row in rows:
                 last_read_ats[f"channel-{row['key']}"] = row["last_read_at"]
 
-            async with conn.execute(
-                """
-                SELECT public_key, last_read_at
-                FROM contacts
-                """
-            ) as cursor:
+            async with conn.execute("SELECT public_key, last_read_at FROM contacts") as cursor:
                 rows = await cursor.fetchall()
             for row in rows:
                 last_read_ats[f"contact-{row['public_key']}"] = row["last_read_at"]
 
-            # Oldest unread message per conversation. ROW_NUMBER rather than
-            # MIN(received_at) with a bare id: sender timestamps are whole seconds
-            # (a protocol constraint, see AGENTS.md), so several unread messages
-            # routinely share the oldest second and SQLite's bare-column rule only
-            # promises *a* row holding the minimum. Ordering by (received_at, id)
-            # picks the same message the client's own ordering does.
             async with conn.execute(
                 f"""
                 WITH ranked AS (
@@ -868,9 +826,6 @@ class MessageRepository:
                 state_key = f"{prefix}-{row['conversation_key']}"
                 last_message_times[state_key] = row["last_message_time"]
 
-        # Only include last_read_ats for conversations that actually have messages.
-        # Without this filter, every contact heard via advertisement (even without
-        # any DMs) bloats the payload — 391KB down to ~46KB on a typical database.
         last_read_ats = {k: v for k, v in last_read_ats.items() if k in last_message_times}
 
         return {
@@ -883,7 +838,6 @@ class MessageRepository:
 
     @staticmethod
     async def count_dm_messages(contact_key: str) -> int:
-        """Count total DM messages for a contact."""
         async with db.readonly() as conn:
             async with conn.execute(
                 "SELECT COUNT(*) as cnt FROM messages WHERE type = 'PRIV' AND conversation_key = ?",
@@ -894,7 +848,6 @@ class MessageRepository:
 
     @staticmethod
     async def count_channel_messages_by_sender(sender_key: str) -> int:
-        """Count channel messages sent by a specific contact."""
         async with db.readonly() as conn:
             async with conn.execute(
                 "SELECT COUNT(*) as cnt FROM messages WHERE type = 'CHAN' AND sender_key = ?",
@@ -905,7 +858,6 @@ class MessageRepository:
 
     @staticmethod
     async def count_channel_messages_by_sender_name(sender_name: str) -> int:
-        """Count channel messages attributed to a display name."""
         async with db.readonly() as conn:
             async with conn.execute(
                 "SELECT COUNT(*) as cnt FROM messages WHERE type = 'CHAN' AND sender_name = ?",
@@ -916,7 +868,6 @@ class MessageRepository:
 
     @staticmethod
     async def get_first_channel_message_by_sender_name(sender_name: str) -> int | None:
-        """Get the earliest stored channel message timestamp for a display name."""
         async with db.readonly() as conn:
             async with conn.execute(
                 "SELECT MIN(received_at) AS first_seen FROM messages WHERE type = 'CHAN' AND sender_name = ?",
@@ -927,10 +878,6 @@ class MessageRepository:
 
     @staticmethod
     async def get_channel_stats(conversation_key: str) -> dict:
-        """Get channel message statistics: time-windowed counts, first message, unique senders, top senders, path hash widths.
-
-        Returns a dict with message_counts, first_message_at, unique_sender_count, top_senders_24h, path_hash_width_24h.
-        """
         import time as _time
 
         from app.path_utils import bucket_path_hash_widths
@@ -956,7 +903,7 @@ class MessageRepository:
                 (t_1h, t_24h, t_48h, t_7d, conversation_key),
             ) as cursor:
                 row = await cursor.fetchone()
-            assert row is not None  # Aggregate query always returns a row
+            assert row is not None
 
             message_counts = {
                 "last_1h": row["last_1h"] or 0,
@@ -987,11 +934,6 @@ class MessageRepository:
                 for r in top_rows
             ]
 
-            # Path hash width distribution for last 24h: fetch raw rows under
-            # the lock, then release BEFORE the CPU-bound in-Python envelope
-            # parse. Parsing can iterate thousands of rows and previously held
-            # the DB lock for the whole traversal — blocking every other repo
-            # caller on a Pi. Keep the lock only for the fetch.
             async with conn.execute(
                 """
                 SELECT rp.data FROM raw_packets rp
@@ -1017,7 +959,6 @@ class MessageRepository:
 
     @staticmethod
     async def count_channels_with_incoming_messages() -> int:
-        """Count distinct channel conversations with at least one incoming message."""
         async with db.readonly() as conn:
             async with conn.execute(
                 """
@@ -1031,10 +972,6 @@ class MessageRepository:
 
     @staticmethod
     async def get_most_active_rooms(sender_key: str, limit: int = 5) -> list[tuple[str, str, int]]:
-        """Get channels where a contact has sent the most messages.
-
-        Returns list of (channel_key, channel_name, message_count) tuples.
-        """
         async with db.readonly() as conn:
             async with conn.execute(
                 """
@@ -1056,7 +993,6 @@ class MessageRepository:
     async def get_most_active_rooms_by_sender_name(
         sender_name: str, limit: int = 5
     ) -> list[tuple[str, str, int]]:
-        """Get channels where a display name has sent the most messages."""
         async with db.readonly() as conn:
             async with conn.execute(
                 """
@@ -1094,10 +1030,7 @@ class MessageRepository:
         hour_counts: dict[int, int], now: int
     ) -> list[ContactAnalyticsHourlyBucket]:
         current_hour = now // 3600
-        if hour_counts:
-            min_hour = min(hour_counts)
-        else:
-            min_hour = current_hour
+        min_hour = min(hour_counts) if hour_counts else current_hour
 
         buckets: list[ContactAnalyticsHourlyBucket] = []
         for hour_bucket in range(current_hour - 23, current_hour + 1):
@@ -1166,7 +1099,6 @@ class MessageRepository:
         public_key: str,
         now: int | None = None,
     ) -> tuple[list[ContactAnalyticsHourlyBucket], list[ContactAnalyticsWeeklyBucket]]:
-        """Get combined DM + channel activity series for a keyed contact."""
         ts = now if now is not None else int(time.time())
         where_sql, params = MessageRepository._contact_activity_filter(public_key)
         hour_counts = await MessageRepository._get_activity_hour_buckets(where_sql, params)
@@ -1179,7 +1111,6 @@ class MessageRepository:
         sender_name: str,
         now: int | None = None,
     ) -> tuple[list[ContactAnalyticsHourlyBucket], list[ContactAnalyticsWeeklyBucket]]:
-        """Get channel-only activity series for a sender name."""
         ts = now if now is not None else int(time.time())
         where_sql, params = MessageRepository._name_activity_filter(sender_name)
         hour_counts = await MessageRepository._get_activity_hour_buckets(where_sql, params)
