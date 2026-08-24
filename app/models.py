@@ -42,6 +42,7 @@ class ContactUpsert(BaseModel):
     on_radio: bool | None = None
     last_contacted: int | None = None
     first_seen: int | None = None
+    mcmp_enabled: bool = False  # <-- added
 
     @classmethod
     def from_contact(cls, contact: Contact, **changes) -> ContactUpsert:
@@ -115,6 +116,7 @@ class Contact(BaseModel):
     last_contacted: int | None = None  # Last time we sent/received a message
     last_read_at: int | None = None  # Server-side read state tracking
     first_seen: int | None = None
+    mcmp_enabled: bool = False  # <-- added
     effective_route: ContactRoute | None = None
     effective_route_source: Literal["override", "direct", "flood"] = "flood"
     direct_route: ContactRoute | None = None
@@ -357,6 +359,8 @@ class Channel(BaseModel):
     last_read_at: int | None = None  # Server-side read state tracking
     favorite: bool = False
     muted: bool = False
+    mcmp_enabled: bool = False             # <-- added
+    mcmp_sign_enabled: bool = False        # <-- added
 
 
 class ChannelMessageCounts(BaseModel):
