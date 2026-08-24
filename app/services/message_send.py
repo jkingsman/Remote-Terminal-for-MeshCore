@@ -49,7 +49,7 @@ NowFn = Callable[[], float]
 OutgoingReservationKey = tuple[str, str, str]
 RetryTaskScheduler = Callable[[Any], Any]
 
-ECHO_WATCHDOG_DELAY_SECONDS = 8.0
+ECHO_WATCHDOG_DELAY_SECONDS = 2.0
 RESEND_WINDOW_SECONDS = 30
 WATCHDOG_TEMP_RADIO_SLOT = 0
 
