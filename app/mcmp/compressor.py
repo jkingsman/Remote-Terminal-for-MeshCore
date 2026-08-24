@@ -1,12 +1,14 @@
+# app/mcmp/compressor.py
 from __future__ import annotations
 
 import json
-import math
-import struct
+import logging
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple, Set
+from typing import List, Optional, Tuple
 
-from .model import MeshCompressionModel, CdfEntry, UnicodeBlock
+from .model import CdfEntry, MeshCompressionModel
+
+logger = logging.getLogger(__name__)
 
 
 class _ArithmeticEncoder:
@@ -127,7 +129,7 @@ class MeshCompressor:
         self._ready: bool = False
 
     @classmethod
-    def instance(cls) -> 'MeshCompressor':
+    def get_instance(cls) -> 'MeshCompressor':
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
@@ -137,17 +139,33 @@ class MeshCompressor:
         return self._ready
 
     async def initialize(self, model_path: Optional[Path] = None) -> None:
-        """Load model from JSON file. If model is missing, compressor stays not ready."""
+        """Load model from JSON file. Logs detailed error if loading fails."""
         if self._ready:
             return
         if model_path is None:
-            # Default path relative to this file
             model_path = Path(__file__).parent / 'models' / 'model-en-ru.json'
+
+        logger.info("Loading MCMP model from %s", model_path)
         try:
-            data = json.loads(model_path.read_text(encoding='utf-8'))
+            text = model_path.read_text(encoding='utf-8')
+            if not text.strip():
+                raise ValueError("Model file is empty")
+            data = json.loads(text)
+            if not isinstance(data, dict) or 'o' not in data or 'v' not in data or 'c' not in data:
+                raise ValueError("Model JSON missing required keys: o, v, c")
             self._model = MeshCompressionModel.from_json(data)
             self._ready = True
+            logger.info(
+                "MCMP model loaded successfully: order=%d, vocab=%d symbols",
+                self._model.order,
+                len(self._model.vocab),
+            )
+        except FileNotFoundError:
+            logger.error("MCMP model file not found at %s", model_path)
+            self._ready = False
+            self._model = None
         except Exception:
+            logger.exception("Failed to load MCMP model from %s", model_path)
             self._ready = False
             self._model = None
 
@@ -203,7 +221,6 @@ class MeshCompressor:
         return (flags & 0x01), encoder.finish_bits()
 
     def _decompress(self, data: bytes, model: MeshCompressionModel) -> str:
-        # The data may be plain utf-8 if first byte > 0x01 (from compress_to_bytes).
         if not data:
             return ''
         first = data[0]
@@ -256,7 +273,6 @@ class MeshCompressor:
             offset = decoder.decode_symbol_index(offset_cdf, block.size)
             return block.start + offset
 
-        # fallback
         cp_cdf = [CdfEntry('', i, i + 1) for i in range(128)]
         b0 = decoder.decode_symbol_index(cp_cdf, 128)
         b1 = decoder.decode_symbol_index(cp_cdf, 128)
@@ -272,3 +288,7 @@ class MeshCompressor:
             if bit:
                 out[i >> 3] |= 1 << (7 - (i & 7))
         return bytes(out)
+
+
+# Singleton instance accessible as MeshCompressor.instance
+MeshCompressor.instance = MeshCompressor.get_instance()
