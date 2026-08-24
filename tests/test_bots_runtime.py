@@ -246,6 +246,39 @@ class TestSplitReplies:
         await ctx.reply_split("short answer")
         assert [s["text"] for s in ctx.captured_sends] == ["short answer"]
 
+    def test_split_text_compressed_packs_more_than_raw(self):
+        from app.bots.api import split_text_compressed
+        from app.compression import encode_outbound
+
+        text = " ".join(["compression"] * 80)  # long and very compressible
+        max_bytes = 60
+        parts = split_text_compressed(text, max_bytes, version=2)
+        assert len(parts) >= 1
+        # Every emitted part fits the budget once compressed...
+        for p in parts:
+            assert len(encode_outbound(p, version=2).encode("utf-8")) <= max_bytes
+        # ...yet packs more raw text than a raw split would allow per part.
+        assert any(len(p.encode("utf-8")) > max_bytes for p in parts)
+        # No content lost (strip the (i/n) prefixes).
+        rebuilt = " ".join(p.split(") ", 1)[1] if p.startswith("(") else p for p in parts)
+        assert rebuilt.split() == text.split()
+
+    async def test_reply_split_uses_compression_when_conversation_enabled(self, test_db):
+        from app.repository import ContactRepository
+
+        key = "cd" * 32
+        await ContactRepository.upsert({"public_key": key, "name": "Bob"})
+        assert await ContactRepository.set_mcmp_enabled(key, True)  # version defaults to 2
+
+        ctx = make_ctx(origin_is_dm=True, origin_sender_key=key)
+        text = " ".join(["compression"] * 80)
+        await ctx.reply_split(text, max_bytes=60)
+
+        compressed_parts = [s["text"] for s in ctx.captured_sends]
+        raw_parts = ctx.split_text(text, max_bytes=60)
+        # Compression packs more per message -> strictly fewer parts than raw.
+        assert 1 <= len(compressed_parts) < len(raw_parts)
+
 
 class TestLibraryIntegrity:
     def test_every_library_bot_loads(self):
