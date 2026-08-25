@@ -42,6 +42,7 @@ class ContactUpsert(BaseModel):
     on_radio: bool | None = None
     last_contacted: int | None = None
     first_seen: int | None = None
+    mcmp_enabled: bool = False
 
     @classmethod
     def from_contact(cls, contact: Contact, **changes) -> ContactUpsert:
@@ -65,13 +66,9 @@ class ContactUpsert(BaseModel):
                 -1 if radio_data.get("out_path_len", -1) == -1 else 0,
             ),
         )
-        # Clamp invalid contact types to 0 (unknown) — corrupted radio data
-        # can produce values like 111 or 240 that break downstream branching.
         raw_type = radio_data.get("type", 0)
         contact_type = raw_type if raw_type in _VALID_CONTACT_TYPES else 0
 
-        # Null out impossible coordinates — the contact is still ingested,
-        # but garbage lat/lon (e.g. 1953.7) is discarded rather than stored.
         lat = radio_data.get("adv_lat")
         lon = radio_data.get("adv_lon")
         if lat is not None and not (-90 <= lat <= 90):
@@ -97,7 +94,7 @@ class ContactUpsert(BaseModel):
 class Contact(BaseModel):
     public_key: str = Field(description="Public key (64-char hex)")
     name: str | None = None
-    type: int = 0  # 0=unknown, 1=client, 2=repeater, 3=room, 4=sensor
+    type: int = 0
     flags: int = 0
     direct_path: str | None = None
     direct_path_len: int = -1
@@ -112,9 +109,10 @@ class Contact(BaseModel):
     last_seen: int | None = None
     on_radio: bool = False
     favorite: bool = False
-    last_contacted: int | None = None  # Last time we sent/received a message
-    last_read_at: int | None = None  # Server-side read state tracking
+    last_contacted: int | None = None
+    last_read_at: int | None = None
     first_seen: int | None = None
+    mcmp_enabled: bool = False
     effective_route: ContactRoute | None = None
     effective_route_source: Literal["override", "direct", "flood"] = "flood"
     direct_route: ContactRoute | None = None
@@ -194,11 +192,6 @@ class Contact(BaseModel):
         return "", -1, -1
 
     def to_radio_dict(self) -> dict:
-        """Convert to the dict format expected by meshcore radio commands.
-
-        The radio API uses different field names (adv_name, out_path, etc.)
-        than our database schema (name, direct_path, etc.).
-        """
         effective_path, effective_path_len, effective_path_hash_mode = self.effective_route_tuple()
         return {
             "public_key": self.public_key,
@@ -214,13 +207,10 @@ class Contact(BaseModel):
         }
 
     def to_upsert(self, **changes) -> ContactUpsert:
-        """Convert the stored contact to the repository's write contract."""
         return ContactUpsert.from_contact(self, **changes)
 
 
 class CreateContactRequest(BaseModel):
-    """Request to create a new contact."""
-
     public_key: str = Field(min_length=64, max_length=64, description="Public key (64-char hex)")
     name: str | None = Field(default=None, description="Display name for the contact")
     type: int = Field(
@@ -233,8 +223,6 @@ class CreateContactRequest(BaseModel):
 
 
 class ContactRoutingOverrideRequest(BaseModel):
-    """Request to set, force, or clear a contact routing override."""
-
     route: str = Field(
         description=(
             "Blank clears the override, "
@@ -244,14 +232,11 @@ class ContactRoutingOverrideRequest(BaseModel):
     )
 
 
-# Contact type constants
 CONTACT_TYPE_REPEATER = 2
 CONTACT_TYPE_ROOM = 3
 
 
 class ContactAdvertPath(BaseModel):
-    """A unique advert path observed for a contact."""
-
     path: str = Field(description="Hex-encoded routing path (empty string for direct)")
     path_len: int = Field(description="Number of hops in the path")
     next_hop: str | None = Field(
@@ -264,8 +249,6 @@ class ContactAdvertPath(BaseModel):
 
 
 class ContactAdvertPathSummary(BaseModel):
-    """Recent unique advertisement paths for a single contact."""
-
     public_key: str = Field(description="Contact public key (64-char hex)")
     paths: list[ContactAdvertPath] = Field(
         default_factory=list, description="Most recent unique advert paths"
@@ -273,24 +256,18 @@ class ContactAdvertPathSummary(BaseModel):
 
 
 class ContactNameHistory(BaseModel):
-    """A historical name used by a contact."""
-
     name: str
     first_seen: int
     last_seen: int
 
 
 class ContactActiveRoom(BaseModel):
-    """A channel where a contact has been active."""
-
     channel_key: str
     channel_name: str
     message_count: int
 
 
 class NearestRepeater(BaseModel):
-    """A repeater that has relayed a contact's advertisements."""
-
     public_key: str
     name: str | None = None
     path_len: int
@@ -299,8 +276,6 @@ class NearestRepeater(BaseModel):
 
 
 class ContactAnalyticsHourlyBucket(BaseModel):
-    """A single hourly activity bucket for contact analytics."""
-
     bucket_start: int = Field(description="Unix timestamp for the start of the hour bucket")
     last_24h_count: int = 0
     last_week_average: float = 0
@@ -308,15 +283,11 @@ class ContactAnalyticsHourlyBucket(BaseModel):
 
 
 class ContactAnalyticsWeeklyBucket(BaseModel):
-    """A single weekly activity bucket for contact analytics."""
-
     bucket_start: int = Field(description="Unix timestamp for the start of the 7-day bucket")
     message_count: int = 0
 
 
 class ContactAnalytics(BaseModel):
-    """Unified contact analytics payload for keyed and name-only lookups."""
-
     lookup_type: Literal["contact", "name"]
     name: str
     contact: Contact | None = None
@@ -354,14 +325,14 @@ class Channel(BaseModel):
         default=None,
         description="Per-channel path hash mode override (0=1-byte, 1=2-byte, 2=3-byte, null = use radio default)",
     )
-    last_read_at: int | None = None  # Server-side read state tracking
+    last_read_at: int | None = None
     favorite: bool = False
     muted: bool = False
+    mcmp_enabled: bool = False
+    mcmp_sign_enabled: bool = False
 
 
 class ChannelMessageCounts(BaseModel):
-    """Time-windowed message counts for a channel."""
-
     last_1h: int = 0
     last_24h: int = 0
     last_48h: int = 0
@@ -370,16 +341,12 @@ class ChannelMessageCounts(BaseModel):
 
 
 class ChannelTopSender(BaseModel):
-    """A top sender in a channel over the last 24 hours."""
-
     sender_name: str
     sender_key: str | None = None
     message_count: int
 
 
 class PathHashWidthStats(BaseModel):
-    """Hop byte width distribution for parsed raw packets."""
-
     total_packets: int = 0
     single_byte: int = 0
     double_byte: int = 0
@@ -390,8 +357,6 @@ class PathHashWidthStats(BaseModel):
 
 
 class ChannelDetail(BaseModel):
-    """Comprehensive channel profile data."""
-
     channel: Channel
     message_counts: ChannelMessageCounts = Field(default_factory=ChannelMessageCounts)
     first_message_at: int | None = None
@@ -401,8 +366,6 @@ class ChannelDetail(BaseModel):
 
 
 class MessagePath(BaseModel):
-    """A single path that a message took to reach us."""
-
     path: str = Field(description="Hex-encoded routing path")
     received_at: int = Field(description="Unix timestamp when this path was received")
     path_len: int | None = Field(
@@ -445,6 +408,13 @@ class Message(BaseModel):
         default=None,
         description="Resolved region name for the transport code, if it matched a known region",
     )
+    mcmp_signature_status: Literal["none", "unsigned", "valid", "invalid", "unverifiable"] | None = Field(
+        default=None,
+        description=(
+            "MCMP v3 signature verification status. Present only for messages that "
+            "carried an MCMP payload. `none`/None for non-MCMP messages."
+        ),
+    )
 
 
 class MessagesAroundResponse(BaseModel):
@@ -460,8 +430,6 @@ class ResendChannelMessageResponse(BaseModel):
 
 
 class RawPacketDecryptedInfo(BaseModel):
-    """Decryption info for a raw packet (when successfully decrypted)."""
-
     channel_name: str | None = None
     sender: str | None = None
     channel_key: str | None = None
@@ -471,12 +439,6 @@ class RawPacketDecryptedInfo(BaseModel):
 
 
 class RawPacketBroadcast(BaseModel):
-    """Raw packet payload broadcast via WebSocket.
-
-    This extends the database model with runtime-computed fields
-    like payload_type, snr, rssi, and decryption info.
-    """
-
     id: int
     observation_id: int = Field(
         description=(
@@ -501,8 +463,6 @@ class RawPacketBroadcast(BaseModel):
 
 
 class RawPacketDetail(BaseModel):
-    """Stored raw-packet detail returned by the packet API."""
-
     id: int
     timestamp: int
     data: str = Field(description="Hex-encoded packet data")
@@ -547,16 +507,12 @@ class SendChannelMessageRequest(SendMessageRequest):
 
 
 class RepeaterLoginRequest(BaseModel):
-    """Request to log in to a repeater."""
-
     password: str = Field(
         default="", description="Repeater password (empty string for guest login)"
     )
 
 
 class RepeaterLoginResponse(BaseModel):
-    """Response from repeater login."""
-
     status: str = Field(description="Login result status")
     authenticated: bool = Field(description="Whether repeater authentication was confirmed")
     message: str | None = Field(
@@ -566,8 +522,6 @@ class RepeaterLoginResponse(BaseModel):
 
 
 class RepeaterStatusResponse(BaseModel):
-    """Status telemetry from a repeater (single attempt, no retries)."""
-
     battery_volts: float = Field(description="Battery voltage in volts")
     tx_queue_len: int = Field(description="Transmit queue length")
     noise_floor_dbm: int = Field(description="Noise floor in dBm")
@@ -592,8 +546,6 @@ class RepeaterStatusResponse(BaseModel):
 
 
 class RepeaterNodeInfoResponse(BaseModel):
-    """Identity/location info from a repeater (small CLI batch)."""
-
     name: str | None = Field(default=None, description="Repeater name")
     lat: str | None = Field(default=None, description="Latitude")
     lon: str | None = Field(default=None, description="Longitude")
@@ -601,8 +553,6 @@ class RepeaterNodeInfoResponse(BaseModel):
 
 
 class RepeaterRadioSettingsResponse(BaseModel):
-    """Radio settings from a repeater (radio/config CLI batch)."""
-
     firmware_version: str | None = Field(default=None, description="Firmware version string")
     radio: str | None = Field(default=None, description="Radio settings (freq,bw,sf,cr)")
     tx_power: str | None = Field(default=None, description="TX power in dBm")
@@ -621,21 +571,11 @@ class RepeaterRadioSettingsResponse(BaseModel):
 
 
 class RepeaterAdvertIntervalsResponse(BaseModel):
-    """Advertisement intervals from a repeater."""
-
     advert_interval: str | None = Field(default=None, description="Local advert interval")
     flood_advert_interval: str | None = Field(default=None, description="Flood advert interval")
 
 
 class RepeaterOwnerInfoResponse(BaseModel):
-    """Owner info, firmware, and guest password from a repeater.
-
-    ``owner_info``, ``firmware_version``, and ``name`` come from the
-    guest-accessible binary owner-info request (REQ_TYPE_GET_OWNER_INFO / 0x07).
-    ``guest_password`` is admin-only and still comes from the CLI, so guests see
-    ``None`` for it.
-    """
-
     owner_info: str | None = Field(default=None, description="Owner info string")
     firmware_version: str | None = Field(
         default=None, description="Firmware version string (from binary owner-info request)"
@@ -647,8 +587,6 @@ class RepeaterOwnerInfoResponse(BaseModel):
 
 
 class RepeaterRegionEntry(BaseModel):
-    """One region from a repeater's region hierarchy dump."""
-
     name: str = Field(description="Region name ('*' is the wildcard/global root)")
     depth: int = Field(description="Indentation depth in the hierarchy (0 = root)")
     flood_allowed: bool = Field(description="True if flood is allowed for this region")
@@ -656,16 +594,6 @@ class RepeaterRegionEntry(BaseModel):
 
 
 class RepeaterRegionsResponse(BaseModel):
-    """Region hierarchy and flood permissions from a repeater.
-
-    Primary source is the admin `region` CLI dump — an indented tree capped at
-    ~160 chars, so large region sets can be truncated (``truncated`` flags this).
-    When the CLI is unavailable (e.g. guest access), ``source`` is ``"anon"`` and
-    ``regions`` is the guest-accessible anon request's flat list of flood-allowed
-    region names only — no hierarchy, no blocked regions, no home marker. See
-    issue #309.
-    """
-
     regions: list[RepeaterRegionEntry] = Field(default_factory=list)
     raw: str | None = Field(default=None, description="Raw CLI dump text as received")
     truncated: bool = Field(default=False, description="True if the dump was likely truncated")
@@ -676,8 +604,6 @@ class RepeaterRegionsResponse(BaseModel):
 
 
 class LppSensor(BaseModel):
-    """A single CayenneLPP sensor reading from req_telemetry_sync."""
-
     channel: int = Field(description="LPP channel number")
     type_name: str = Field(description="Sensor type name (e.g. temperature, humidity)")
     value: float | dict = Field(
@@ -686,14 +612,10 @@ class LppSensor(BaseModel):
 
 
 class RepeaterLppTelemetryResponse(BaseModel):
-    """CayenneLPP sensor telemetry from a repeater."""
-
     sensors: list[LppSensor] = Field(default_factory=list, description="List of sensor readings")
 
 
 class ContactTelemetryResponse(BaseModel):
-    """On-demand CayenneLPP telemetry snapshot from any contact."""
-
     sensors: list[LppSensor] = Field(default_factory=list, description="List of sensor readings")
     fetched_at: int = Field(description="Unix timestamp when this telemetry was fetched")
     telemetry_history: list[TelemetryHistoryEntry] = Field(
@@ -702,8 +624,6 @@ class ContactTelemetryResponse(BaseModel):
 
 
 class NeighborInfo(BaseModel):
-    """Information about a neighbor seen by a repeater."""
-
     pubkey_prefix: str = Field(description="Public key prefix (4-12 chars)")
     name: str | None = Field(default=None, description="Resolved contact name if known")
     snr: float = Field(description="Signal-to-noise ratio in dB")
@@ -711,8 +631,6 @@ class NeighborInfo(BaseModel):
 
 
 class AclEntry(BaseModel):
-    """Access control list entry for a repeater."""
-
     pubkey_prefix: str = Field(description="Public key prefix (12 chars)")
     name: str | None = Field(default=None, description="Resolved contact name if known")
     permission: int = Field(
@@ -722,8 +640,6 @@ class AclEntry(BaseModel):
 
 
 class RepeaterNeighborsResponse(BaseModel):
-    """Neighbors list from a repeater."""
-
     neighbors: list[NeighborInfo] = Field(
         default_factory=list, description="List of neighbors seen by repeater"
     )
@@ -738,14 +654,10 @@ class RepeaterNeighborsResponse(BaseModel):
 
 
 class RepeaterAclResponse(BaseModel):
-    """ACL list from a repeater."""
-
     acl: list[AclEntry] = Field(default_factory=list, description="Access control list")
 
 
 class TraceResponse(BaseModel):
-    """Result of a direct (zero-hop) trace to a contact."""
-
     remote_snr: float | None = Field(
         default=None, description="SNR at which the target heard us (dB)"
     )
@@ -756,8 +668,6 @@ class TraceResponse(BaseModel):
 
 
 class RadioTraceHopRequest(BaseModel):
-    """One requested hop in a radio trace path."""
-
     public_key: str | None = Field(
         default=None,
         description="Full repeater public key when this hop maps to a known repeater",
@@ -769,8 +679,6 @@ class RadioTraceHopRequest(BaseModel):
 
 
 class RadioTraceRequest(BaseModel):
-    """Ordered trace path for a radio trace loop."""
-
     hop_hash_bytes: Literal[1, 2, 4] = Field(
         default=4,
         description="Hash width in bytes for every hop in this trace path",
@@ -782,8 +690,6 @@ class RadioTraceRequest(BaseModel):
 
 
 class RadioTraceNode(BaseModel):
-    """One resolved node in a radio trace result."""
-
     role: Literal["repeater", "custom", "local"] = Field(description="Node role in the trace")
     public_key: str | None = Field(
         default=None,
@@ -798,8 +704,6 @@ class RadioTraceNode(BaseModel):
 
 
 class RadioTraceResponse(BaseModel):
-    """Resolved multi-hop radio trace result."""
-
     path_len: int = Field(description="Number of hashed nodes returned by the trace response")
     timeout_seconds: float = Field(description="Timeout window used while waiting for the trace")
     nodes: list[RadioTraceNode] = Field(
@@ -809,8 +713,6 @@ class RadioTraceResponse(BaseModel):
 
 
 class PathDiscoveryRoute(BaseModel):
-    """One resolved route returned by contact path discovery."""
-
     path: str = Field(description="Hex-encoded path bytes")
     path_len: int = Field(description="Hop count for this route")
     path_hash_mode: int = Field(
@@ -819,8 +721,6 @@ class PathDiscoveryRoute(BaseModel):
 
 
 class PathDiscoveryResponse(BaseModel):
-    """Round-trip routing data for a contact path discovery request."""
-
     contact: Contact = Field(
         description="Updated contact row after saving the learned forward path"
     )
@@ -833,14 +733,10 @@ class PathDiscoveryResponse(BaseModel):
 
 
 class CommandRequest(BaseModel):
-    """Request to send a CLI command to a repeater."""
-
     command: str = Field(min_length=1, description="CLI command to send")
 
 
 class CommandResponse(BaseModel):
-    """Response from a repeater CLI command."""
-
     command: str = Field(description="The command that was sent")
     response: str = Field(description="Response from the repeater")
     sender_timestamp: int | None = Field(
@@ -849,8 +745,6 @@ class CommandResponse(BaseModel):
 
 
 class RadioDiscoveryRequest(BaseModel):
-    """Request to discover nearby mesh nodes from the local radio."""
-
     target: Literal["repeaters", "sensors", "all"] = Field(
         default="all",
         description="Which node classes to discover over the mesh",
@@ -858,8 +752,6 @@ class RadioDiscoveryRequest(BaseModel):
 
 
 class RadioDiscoveryResult(BaseModel):
-    """One mesh node heard during a discovery sweep."""
-
     public_key: str = Field(description="Discovered node public key as hex")
     name: str | None = Field(
         default=None,
@@ -882,8 +774,6 @@ class RadioDiscoveryResult(BaseModel):
 
 
 class RadioDiscoveryResponse(BaseModel):
-    """Response payload for a mesh discovery sweep."""
-
     target: Literal["repeaters", "sensors", "all"] = Field(
         description="Which node classes were requested"
     )
@@ -895,13 +785,6 @@ class RadioDiscoveryResponse(BaseModel):
 
 
 class RadioRegionDiscoveryRequest(BaseModel):
-    """Request to sweep nearby repeaters for their flood-allowed region names.
-
-    Uses the guest-accessible anon regions request (direct-routed, so only
-    repeaters in range answer). When ``public_keys`` is omitted, the sweep
-    targets the most recently seen repeater contacts.
-    """
-
     public_keys: list[str] | None = Field(
         default=None,
         description="Specific repeater public keys to query; None = most recent repeater contacts",
@@ -915,8 +798,6 @@ class RadioRegionDiscoveryRequest(BaseModel):
 
 
 class RadioRegionDiscoveryRepeater(BaseModel):
-    """One repeater's result from a region discovery sweep."""
-
     public_key: str = Field(description="Repeater public key")
     name: str | None = Field(default=None, description="Known contact name, if any")
     answered: bool = Field(description="True if the repeater answered the anon regions request")
@@ -927,15 +808,6 @@ class RadioRegionDiscoveryRepeater(BaseModel):
 
 
 class RadioRegionDiscoveryResponse(BaseModel):
-    """Aggregated result of a region discovery sweep across nearby repeaters.
-
-    ``regions`` is the deduplicated union of every repeater's flood-allowed
-    region names — the list an operator can merge into ``known_regions``. The
-    anon request only reports flood-allowed names, so blocked regions and the
-    hierarchy are not visible here (use the per-repeater admin regions pane for
-    the full picture). See issue #309.
-    """
-
     repeaters_queried: int = Field(description="How many repeaters were contacted")
     repeaters_answered: int = Field(description="How many repeaters answered the request")
     regions: list[str] = Field(
@@ -949,8 +821,6 @@ class RadioRegionDiscoveryResponse(BaseModel):
 
 
 class UnreadCounts(BaseModel):
-    """Aggregated unread counts, mention flags, and last message times for all conversations."""
-
     counts: dict[str, int] = Field(
         default_factory=dict, description="Map of stateKey -> unread count"
     )
@@ -973,8 +843,6 @@ class UnreadCounts(BaseModel):
 
 
 class AppSettings(BaseModel):
-    """Application settings stored in the database."""
-
     max_radio_contacts: int = Field(
         default=200,
         description=(
@@ -1091,21 +959,6 @@ class PacketsPerHourBucket(BaseModel):
 
 
 class RegionScopeStats(BaseModel):
-    """Regional flood-scope adoption over the last 24 hours.
-
-    Two independent views, deliberately not merged — they have different
-    denominators and will not agree:
-
-    - Traffic (``total_messages``/``scoped_messages``) counts flood-routed
-      channel-message packets across all channels, including ones we cannot
-      decrypt. Broad coverage, but corrupt RF captures contribute false
-      positives, hence ``false_positive_floor``.
-    - Senders (``total_senders``/``scoped_senders``) counts distinct message
-      senders, which requires decryption and so only covers channels we hold
-      keys for. Narrower, but noise-free and immune to one chatty node skewing
-      the result.
-    """
-
     total_messages: int = Field(
         description="Flood-routed channel-message packets heard in the last 24h (unique payloads)"
     )

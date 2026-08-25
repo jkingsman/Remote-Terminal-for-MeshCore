@@ -58,7 +58,6 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const errorText = await res.text();
-    // FastAPI returns errors as {"detail": "message"}, extract the message
     let errorMessage = errorText || res.statusText;
     try {
       const errorJson = JSON.parse(errorText);
@@ -73,13 +72,10 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   return res.json();
 }
 
-/** Check if an error is an AbortError (request was cancelled) */
 export function isAbortError(err: unknown): boolean {
-  // DOMException is thrown by fetch when aborted, and it's not an Error subclass
   if (err instanceof DOMException && err.name === 'AbortError') {
     return true;
   }
-  // Also check for Error with AbortError name (for compatibility)
   return err instanceof Error && err.name === 'AbortError';
 }
 
@@ -194,6 +190,12 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ route }),
     }),
+  /** MCMP compression toggle for direct messages */
+  setContactMcmpSettings: (publicKey: string, mcmpEnabled: boolean) =>
+    fetchJson<Contact>(`/contacts/${publicKey}/mcmp`, {
+      method: 'POST',
+      body: JSON.stringify({ mcmp_enabled: mcmpEnabled }),
+    }),
 
   // Channels
   getChannels: () => fetchJson<Channel[]>('/channels'),
@@ -219,14 +221,29 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ flood_scope_override: floodScopeOverride }),
     }),
-
   setChannelPathHashModeOverride: (key: string, pathHashModeOverride: number | null) =>
     fetchJson<Channel>(`/channels/${key}/path-hash-mode-override`, {
       method: 'POST',
       body: JSON.stringify({ path_hash_mode_override: pathHashModeOverride }),
     }),
+  /** MCMP v3 compression/signing settings for a channel */
+  setChannelMcmpSettings: (
+    key: string,
+    mcmpEnabled: boolean,
+    mcmpSignEnabled: boolean
+  ) =>
+    fetchJson<Channel>(`/channels/${key}/mcmp`, {
+      method: 'POST',
+      body: JSON.stringify({ mcmp_enabled: mcmpEnabled, mcmp_sign_enabled: mcmpSignEnabled }),
+    }),
 
   // Messages
+  /** Estimate wire size after MCMP v3 encoding */
+  estimateMessageSize: (payload: { text: string; channel_key?: string; include_signature?: boolean }) =>
+    fetchJson<{ size: number }>('/messages/estimate-size', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   getMessages: (
     params?: {
       limit?: number;

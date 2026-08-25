@@ -61,6 +61,11 @@ class ContactRepository:
             )
         )
 
+        # Default MCMP flag to False for new rows. On conflict we deliberately
+        # do NOT update mcmp_enabled because radio-driven upserts must not
+        # clobber a user's per-contact compression toggle.
+        mcmp_enabled_value = bool(contact_row.mcmp_enabled)
+
         async with db.tx() as conn:
             async with conn.execute(
                 """
@@ -69,8 +74,8 @@ class ContactRepository:
                                       route_override_path, route_override_len,
                                       route_override_hash_mode,
                                       last_advert, lat, lon, last_seen,
-                                      on_radio, last_contacted, first_seen)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                      on_radio, last_contacted, first_seen, mcmp_enabled)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(public_key) DO UPDATE SET
                     name = COALESCE(excluded.name, contacts.name),
                     type = CASE WHEN excluded.type = 0 THEN contacts.type ELSE excluded.type END,
@@ -124,6 +129,7 @@ class ContactRepository:
                     contact_row.on_radio,
                     contact_row.last_contacted,
                     contact_row.first_seen,
+                    mcmp_enabled_value,
                 ),
             ):
                 pass
@@ -155,6 +161,9 @@ class ContactRepository:
                 route_override_hash_mode,
             )
         )
+        mcmp_enabled = (
+            bool(row["mcmp_enabled"]) if "mcmp_enabled" in available_columns else False
+        )
         return Contact(
             public_key=row["public_key"],
             name=row["name"],
@@ -180,6 +189,7 @@ class ContactRepository:
             last_contacted=row["last_contacted"],
             last_read_at=row["last_read_at"],
             first_seen=row["first_seen"],
+            mcmp_enabled=mcmp_enabled,
         )
 
     @staticmethod
@@ -557,6 +567,17 @@ class ContactRepository:
             async with conn.execute(
                 "UPDATE contacts SET last_read_at = ? WHERE public_key = ?",
                 (ts, public_key.lower()),
+            ) as cursor:
+                rowcount = cursor.rowcount
+        return rowcount > 0
+
+    @staticmethod
+    async def set_mcmp_enabled(public_key: str, enabled: bool) -> bool:
+        """Enable or disable MCMP compression for a direct-contact conversation."""
+        async with db.tx() as conn:
+            async with conn.execute(
+                "UPDATE contacts SET mcmp_enabled = ? WHERE public_key = ?",
+                (1 if enabled else 0, public_key.lower()),
             ) as cursor:
                 rowcount = cursor.rowcount
         return rowcount > 0

@@ -2,8 +2,10 @@ import logging
 import time
 
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from app.event_handlers import track_pending_ack
+from app.mcmp import McmpAppCodec, MeshCompressor
 from app.models import (
     Message,
     MessagesAroundResponse,
@@ -23,6 +25,52 @@ from app.websocket import broadcast_error, broadcast_event
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/messages", tags=["messages"])
+
+
+class MessageSizeEstimateRequest(BaseModel):
+    text: str = Field(min_length=1)
+    channel_key: str | None = Field(default=None)
+    include_signature: bool = Field(default=False)
+
+
+@router.post("/estimate-size")
+async def estimate_message_size(request: MessageSizeEstimateRequest) -> dict:
+    """Return estimated wire size of the message after MCMP v3 encoding.
+
+    For channel messages, if the channel has MCMP enabled, the size is the
+    length of the `mcmp3:` wire text. If signing is requested, a dummy 64-byte
+    signature is used so the overhead is accurate. For messages that would be
+    sent as plain text (MCMP disabled/model unavailable), returns UTF-8 length.
+    """
+    if not MeshCompressor.instance.is_ready:
+        return {"size": len(request.text.encode('utf-8'))}
+    try:
+        if request.channel_key:
+            # Channel path: may be signed
+            if request.include_signature:
+                dummy_signature = b'\x00' * 64
+                encoded_body = McmpAppCodec.encode_body(
+                    text=request.text,
+                    timestamp=0,
+                    signature=dummy_signature,
+                )
+            else:
+                encoded_body = McmpAppCodec.encode_body(
+                    text=request.text,
+                    timestamp=0,
+                )
+            wire_text = McmpAppCodec.text_from_body(encoded_body.body)
+            return {"size": len(wire_text)}
+        else:
+            # DM path: unsigned
+            encoded_body = McmpAppCodec.encode_body(
+                text=request.text,
+                timestamp=0,
+            )
+            wire_text = McmpAppCodec.text_from_body(encoded_body.body)
+            return {"size": len(wire_text)}
+    except Exception:
+        return {"size": len(request.text.encode('utf-8'))}
 
 
 @router.get("/around/{message_id}", response_model=MessagesAroundResponse)
@@ -91,7 +139,6 @@ async def send_direct_message(request: SendDirectMessageRequest) -> Message:
     """Send a direct message to a contact."""
     radio_manager.require_connected()
 
-    # First check our database for the contact
     from app.repository import ContactRepository
 
     try:
@@ -127,9 +174,6 @@ async def send_direct_message(request: SendDirectMessageRequest) -> Message:
     )
 
 
-# Preferred first radio slot used for sending channel messages.
-# The send service may reuse/load other app-managed slots depending on transport
-# and session cache state.
 TEMP_RADIO_SLOT = 0
 
 
@@ -138,7 +182,6 @@ async def send_channel_message(request: SendChannelMessageRequest) -> Message:
     """Send a message to a channel."""
     radio_manager.require_connected()
 
-    # Get channel info from our database
     from app.repository import ChannelRepository
 
     db_channel = await ChannelRepository.get_by_key(request.channel_key)
@@ -147,7 +190,6 @@ async def send_channel_message(request: SendChannelMessageRequest) -> Message:
             status_code=404, detail=f"Channel {request.channel_key} not found in database"
         )
 
-    # Convert channel key hex to bytes
     try:
         key_bytes = bytes.fromhex(request.channel_key)
     except ValueError:
@@ -155,8 +197,6 @@ async def send_channel_message(request: SendChannelMessageRequest) -> Message:
             status_code=400, detail=f"Invalid channel key format: {request.channel_key}"
         ) from None
 
-    # None field = no per-send override (fall back to the channel's persisted
-    # override). An explicit string (including "" for unscoped) overrides it.
     flood_scope_override = (
         SCOPE_UNSET if request.flood_scope_override is None else request.flood_scope_override
     )
@@ -188,14 +228,7 @@ async def resend_channel_message(
     message_id: int,
     new_timestamp: bool = Query(default=False),
 ) -> ResendChannelMessageResponse:
-    """Resend a channel message.
-
-    When new_timestamp=False (default): byte-perfect resend using the original timestamp.
-    Only allowed within 30 seconds of the original send.
-
-    When new_timestamp=True: resend with a fresh timestamp so repeaters treat it as a
-    new packet. Creates a new message row in the database. No time window restriction.
-    """
+    """Resend a channel message."""
     radio_manager.require_connected()
 
     from app.repository import ChannelRepository
@@ -213,7 +246,6 @@ async def resend_channel_message(
     if msg.sender_timestamp is None:
         raise HTTPException(status_code=400, detail="Message has no timestamp")
 
-    # Byte-perfect resend enforces the 30s window; new-timestamp resend does not
     if not new_timestamp:
         elapsed = int(time.time()) - msg.sender_timestamp
         if elapsed > RESEND_WINDOW_SECONDS:

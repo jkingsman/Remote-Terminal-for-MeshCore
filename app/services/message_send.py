@@ -9,6 +9,8 @@ from typing import Any
 from fastapi import HTTPException
 from meshcore import EventType
 
+from app import keystore
+from app.mcmp import McmpAppCodec, MeshCompressor
 from app.models import ResendChannelMessageResponse
 from app.radio import RadioOperationBusyError
 from app.region_scope import is_unscoped, normalize_region_scope
@@ -33,13 +35,6 @@ logger = logging.getLogger(__name__)
 
 
 class _ScopeUnset:
-    """Sentinel for "no per-send flood-scope override supplied".
-
-    Distinguishes "caller did not request a per-send scope, so use the channel's
-    persisted ``flood_scope_override``" from "caller explicitly requested unscoped
-    flood (empty string)". A bare ``None``/``""`` cannot express both states.
-    """
-
     __slots__ = ()
 
 
@@ -54,13 +49,8 @@ NowFn = Callable[[], float]
 OutgoingReservationKey = tuple[str, str, str]
 RetryTaskScheduler = Callable[[Any], Any]
 
-# Channel echo watchdog: delay before checking for echoes
 ECHO_WATCHDOG_DELAY_SECONDS = 2.0
-
-# Byte-perfect resend window (must match router's RESEND_WINDOW_SECONDS)
 RESEND_WINDOW_SECONDS = 30
-
-# Temp radio slot used by the router for channel sends
 WATCHDOG_TEMP_RADIO_SLOT = 0
 
 _pending_outgoing_timestamp_reservations: dict[OutgoingReservationKey, set[int]] = {}
@@ -69,6 +59,69 @@ _outgoing_timestamp_reservations_lock = asyncio.Lock()
 DM_SEND_MAX_ATTEMPTS = 3
 DEFAULT_DM_ACK_TIMEOUT_MS = 10000
 DM_RETRY_WAIT_MARGIN = 1.2
+
+
+def _encode_channel_wire_text(
+    *,
+    text: str,
+    timestamp: int,
+    channel,
+    key_bytes: bytes,
+    radio_name: str,
+) -> str:
+    """Return wire text for a channel send, applying MCMP v3 when enabled.
+
+    Always returns plain text when MCMP is disabled, model is unavailable, or
+    encoding fails. The stored DB text remains human-readable.
+    """
+    if not channel.mcmp_enabled or not MeshCompressor.instance.is_ready:
+        return text
+    try:
+        if channel.mcmp_sign_enabled and keystore.has_private_key():
+            private_key = keystore.get_private_key()
+            public_key = keystore.get_public_key()
+            if private_key and public_key:
+                binding = McmpAppCodec.channel_signing_binding(key_bytes)
+                flags = McmpAppCodec.pack_flags(
+                    has_reply=False,
+                    is_signed=True,
+                    has_sender_name=False,
+                )
+                canonical = McmpAppCodec.canonical_signing_bytes(
+                    context_id=0x01,  # channel context
+                    binding=binding,
+                    sender_name=radio_name or "",
+                    timestamp=timestamp,
+                    flags=flags,
+                    text=text,
+                )
+                signature = keystore.ed25519_sign_expanded(
+                    canonical,
+                    private_key[:32],  # scalar
+                    private_key[32:],  # prefix
+                    public_key,
+                )
+                encoded_body = McmpAppCodec.encode_body(
+                    text=text,
+                    timestamp=timestamp,
+                    signature=signature,
+                )
+                return McmpAppCodec.text_from_body(encoded_body.body)
+        return McmpAppCodec.encode_text_transport(text=text, timestamp=timestamp)
+    except Exception:
+        logger.exception("MCMP encoding failed for channel; falling back to plain text")
+        return text
+
+
+def _encode_dm_wire_text(*, text: str, timestamp: int, contact) -> str:
+    """Return wire text for a DM, applying MCMP v3 when enabled."""
+    if not contact.mcmp_enabled or not MeshCompressor.instance.is_ready:
+        return text
+    try:
+        return McmpAppCodec.encode_text_transport(text=text, timestamp=timestamp)
+    except Exception:
+        logger.exception("MCMP encoding failed for DM; falling back to plain text")
+        return text
 
 
 async def allocate_outgoing_sender_timestamp(
@@ -153,18 +206,8 @@ async def send_channel_message_with_effective_scope(
     flood_scope_override: str | _ScopeUnset = SCOPE_UNSET,
     app_settings_repository=AppSettingsRepository,
 ) -> Any:
-    """Send a channel message, temporarily overriding flood scope and/or path hash mode.
-
-    ``flood_scope_override`` lets a single send override the channel's persisted
-    ``flood_scope_override``: pass a region name to scope this send, an empty
-    string to force unscoped/plain flood, or leave it ``SCOPE_UNSET`` to fall
-    back to the channel's persisted override.
-    """
+    """Send a channel message, temporarily overriding flood scope and/or path hash mode."""
     if isinstance(flood_scope_override, _ScopeUnset):
-        # Fall back to the channel's persisted override, which is tri-state:
-        #   None -> inherit the global scope (leave radio untouched)
-        #   unscoped marker ("*") -> force unscoped even over a scoped global
-        #   region name -> scope this channel
         channel_override = channel.flood_scope_override
         if channel_override is None:
             desired_scope = ""
@@ -179,19 +222,13 @@ async def send_channel_message_with_effective_scope(
         desired_scope = normalize_region_scope(flood_scope_override)
         scope_explicit = True
 
-    # Fetch the radio's standing scope as the restore target whenever we might
-    # change it: a non-empty desired scope, or an explicit request to go unscoped.
     baseline_scope = ""
     if desired_scope or scope_explicit:
         settings = await app_settings_repository.get()
         baseline_scope = normalize_region_scope(settings.flood_scope)
 
-    # Apply only when the desired scope differs from the radio's baseline. A blank
-    # desired scope forces unscoped only when explicitly requested; the implicit
-    # (channel-default) path leaves the radio untouched when no override is set.
     apply_scope = desired_scope != baseline_scope and (bool(desired_scope) or scope_explicit)
 
-    # Path hash mode per-channel override
     override_phm = channel.path_hash_mode_override
     baseline_phm = radio_manager.path_hash_mode
     apply_phm = (
@@ -200,13 +237,6 @@ async def send_channel_message_with_effective_scope(
         and override_phm != baseline_phm
     )
 
-    # Apply the temporary overrides and send inside the try so the finally below
-    # always restores the radio's baseline scope/hash-mode -- even when applying an
-    # override raises (e.g. the radio rejects the scope, or the path-hash-mode apply
-    # fails) or the send itself throws. ``apply_scope``/``apply_phm`` are computed
-    # above so the finally can reference them regardless of where we fail, and
-    # restoring to baseline is idempotent, so forcing baseline back after an apply
-    # whose effect on the radio is unknown is safe.
     try:
         if apply_scope:
             logger.info(
@@ -437,18 +467,6 @@ def _get_ack_tracking_timeout_ms(result: Any) -> int:
 
 
 def _get_direct_message_retry_timeout_ms(result: Any) -> int:
-    """Return the ACK window to wait before retrying a DM.
-
-    The MeshCore firmware already computes and returns `suggested_timeout` in
-    `PACKET_MSG_SENT`, derived from estimated packet airtime and route mode.
-    We use that firmware-supplied window directly so retries do not fire before
-    the radio's own ACK timeout expires.
-
-    Sources:
-    - https://github.com/meshcore-dev/MeshCore/blob/main/src/helpers/BaseChatMesh.cpp
-    - https://github.com/meshcore-dev/MeshCore/blob/main/examples/companion_radio/MyMesh.cpp
-    - https://github.com/meshcore-dev/MeshCore/blob/main/docs/companion_protocol.md
-    """
     return _get_ack_tracking_timeout_ms(result)
 
 
@@ -531,9 +549,14 @@ async def _retry_direct_message_until_acked(
                     if refreshed_contact:
                         cached_contact = refreshed_contact
 
+                wire_text = _encode_dm_wire_text(
+                    text=text,
+                    timestamp=sender_timestamp,
+                    contact=contact,
+                )
                 result = await mc.commands.send_msg(
                     dst=cached_contact,
-                    msg=text,
+                    msg=wire_text,
                     timestamp=sender_timestamp,
                     attempt=attempt,
                 )
@@ -649,9 +672,15 @@ async def send_direct_message_to_contact(
                 text=text,
                 requested_timestamp=sent_at,
             )
+
+            wire_text = _encode_dm_wire_text(
+                text=text,
+                timestamp=sender_timestamp,
+                contact=contact,
+            )
             result = await mc.commands.send_msg(
                 dst=cached_contact,
-                msg=text,
+                msg=wire_text,
                 timestamp=sender_timestamp,
             )
 
@@ -735,11 +764,7 @@ async def _channel_echo_watchdog(
     broadcast_fn: BroadcastFn,
     error_broadcast_fn: BroadcastFn,
 ) -> None:
-    """One-shot watchdog: if no echo heard after delay, attempt one byte-perfect resend.
-
-    Spawned as a fire-and-forget task after a channel send when auto_resend_channel is enabled.
-    Uses non-blocking radio lock so it never stalls user actions.
-    """
+    """One-shot watchdog: if no echo heard after delay, attempt one byte-perfect resend."""
     try:
         await asyncio.sleep(ECHO_WATCHDOG_DELAY_SECONDS)
 
@@ -783,7 +808,16 @@ async def _channel_echo_watchdog(
             radio_name = mc.self_info.get("name", "") if mc.self_info else ""
             text_to_send = msg.text
             if radio_name and text_to_send.startswith(f"{radio_name}: "):
-                text_to_send = text_to_send[len(f"{radio_name}: ") :]
+                text_to_send = text_to_send[len(f"{radio_name}: "):]
+
+            # Re-encode MCMP if the channel has it enabled (same timestamp)
+            text_to_send = _encode_channel_wire_text(
+                text=text_to_send,
+                timestamp=msg.sender_timestamp,
+                channel=channel,
+                key_bytes=key_bytes,
+                radio_name=radio_name,
+            )
 
             result = await send_channel_message_with_effective_scope(
                 mc=mc,
@@ -822,12 +856,7 @@ async def send_channel_message_to_channel(
     flood_scope_override: str | _ScopeUnset = SCOPE_UNSET,
     message_repository=MessageRepository,
 ) -> Any:
-    """Send a channel message and persist/broadcast the outgoing row.
-
-    ``flood_scope_override`` is forwarded to the scoped send: a region name
-    scopes this send, an empty string forces unscoped flood, and ``SCOPE_UNSET``
-    falls back to the channel's persisted override.
-    """
+    """Send a channel message and persist/broadcast the outgoing row."""
     sent_at: int | None = None
     sender_timestamp: int | None = None
     radio_name = ""
@@ -869,12 +898,21 @@ async def send_channel_message_to_channel(
                     detail="Failed to store outgoing message - unexpected duplicate",
                 )
 
+            # Encode MCMP wire text; DB already stores human-readable text
+            wire_text = _encode_channel_wire_text(
+                text=text,
+                timestamp=sender_timestamp,
+                channel=channel,
+                key_bytes=key_bytes,
+                radio_name=radio_name,
+            )
+
             result = await send_channel_message_with_effective_scope(
                 mc=mc,
                 channel=channel,
                 channel_key=channel_key_upper,
                 key_bytes=key_bytes,
-                text=text,
+                text=wire_text,
                 timestamp_bytes=timestamp_bytes,
                 action_label="sending message",
                 radio_manager=radio_manager,
@@ -978,7 +1016,7 @@ async def resend_channel_message_record(
             resend_public_key = (mc.self_info.get("public_key") or None) if mc.self_info else None
             text_to_send = message.text
             if radio_name and text_to_send.startswith(f"{radio_name}: "):
-                text_to_send = text_to_send[len(f"{radio_name}: ") :]
+                text_to_send = text_to_send[len(f"{radio_name}: "):]
             if new_timestamp:
                 sent_at = int(now_fn())
                 sender_timestamp = await allocate_outgoing_sender_timestamp(
@@ -1006,6 +1044,15 @@ async def resend_channel_message_record(
                         status_code=422,
                         detail="Failed to store resent message - unexpected duplicate",
                     )
+
+            # Re-encode MCMP if enabled (timestamp already finalized)
+            text_to_send = _encode_channel_wire_text(
+                text=text_to_send,
+                timestamp=sender_timestamp,
+                channel=channel,
+                key_bytes=key_bytes,
+                radio_name=radio_name,
+            )
 
             result = await send_channel_message_with_effective_scope(
                 mc=mc,
