@@ -77,6 +77,10 @@ export function App() {
 
   const messageInputRef = useRef<MessageInputHandle>(null);
   const [channelUnreadMarker, setChannelUnreadMarker] = useState<ChannelUnreadMarker | null>(null);
+  const [channelUnreadSummaryRequest, setChannelUnreadSummaryRequest] = useState<{
+    channelId: string;
+    after: number;
+  } | null>(null);
   const [newMessagePrefillRequest, setNewMessagePrefillRequest] =
     useState<NewMessagePrefillRequest | null>(null);
   const [showBulkAddChannelTab, setShowBulkAddChannelTab] = useState(false);
@@ -390,6 +394,36 @@ export function App() {
     });
   }, [activeConversation, unreadCounts, firstUnreadIds]);
 
+  useEffect(() => {
+    if (activeConversation?.type !== 'channel') {
+      setChannelUnreadSummaryRequest(null);
+      return;
+    }
+    if (!appSettings?.ollama_enabled || !appSettings.ollama_model?.trim()) {
+      setChannelUnreadSummaryRequest(null);
+      return;
+    }
+
+    const activeChannelId = activeConversation.id;
+    const stateKey = getStateKey('channel', activeChannelId);
+    const unreadCount = unreadCounts[stateKey] ?? 0;
+
+    setChannelUnreadSummaryRequest((prev) => {
+      if (prev?.channelId === activeChannelId) return prev;
+      if (unreadCount <= 0) return null;
+      return {
+        channelId: activeChannelId,
+        after: unreadLastReadAts[stateKey] ?? 0,
+      };
+    });
+  }, [
+    activeConversation,
+    unreadCounts,
+    unreadLastReadAts,
+    appSettings?.ollama_enabled,
+    appSettings?.ollama_model,
+  ]);
+
   const wsHandlers = useRealtimeAppState({
     prevHealthRef,
     setHealth,
@@ -573,6 +607,11 @@ export function App() {
             messages
           )
         : undefined,
+    unreadSummaryRequest:
+      activeConversation?.type === 'channel' &&
+      channelUnreadSummaryRequest?.channelId === activeConversation.id
+        ? channelUnreadSummaryRequest
+        : null,
     onNavigateToUnread: (messageId: number) => setTargetMessageId(messageId),
     targetMessageId,
     hasNewerMessages,

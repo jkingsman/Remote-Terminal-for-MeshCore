@@ -622,6 +622,40 @@ class MessageRepository:
         return MessageRepository._row_to_message(row)
 
     @staticmethod
+    async def get_channel_messages_after(
+        channel_key: str,
+        *,
+        after: int = 0,
+        limit: int = 100,
+        blocked_keys: list[str] | None = None,
+        blocked_names: list[str] | None = None,
+    ) -> list[Message]:
+        """Return channel messages with received_at > after, oldest first."""
+        clause, norm_key = MessageRepository._normalize_conversation_key(channel_key)
+        query = (
+            f"SELECT {MessageRepository._message_select('messages')} FROM messages "
+            "WHERE messages.type = 'CHAN' "
+            f"{clause.replace('conversation_key', 'messages.conversation_key')} "
+            "AND messages.received_at > ?"
+        )
+        params: list[Any] = [norm_key, after]
+
+        blocked_clause, blocked_params = MessageRepository._build_blocked_incoming_clause(
+            "messages", blocked_keys, blocked_names
+        )
+        if blocked_clause:
+            query += f" AND {blocked_clause}"
+            params.extend(blocked_params)
+
+        query += " ORDER BY messages.received_at ASC, messages.id ASC LIMIT ?"
+        params.append(limit)
+
+        async with db.readonly() as conn:
+            async with conn.execute(query, params) as cursor:
+                rows = await cursor.fetchall()
+        return [MessageRepository._row_to_message(row) for row in rows]
+
+    @staticmethod
     async def delete_by_id(message_id: int) -> None:
         """Delete a message row by ID."""
         async with db.tx() as conn:

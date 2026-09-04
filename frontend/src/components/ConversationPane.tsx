@@ -1,6 +1,10 @@
 import { lazy, Suspense, useEffect, useMemo, useState, type Ref } from 'react';
 
 import { ChatHeader } from './ChatHeader';
+import {
+  ChannelUnreadSummaryBanner,
+  type ChannelUnreadSummaryRequest,
+} from './ChannelUnreadSummaryBanner';
 import { MessageInput, type MessageInputHandle } from './MessageInput';
 import { MessageList } from './MessageList';
 import { RawPacketFeedView } from './RawPacketFeedView';
@@ -47,6 +51,7 @@ interface ConversationPaneProps {
   loadingOlder: boolean;
   hasOlderMessages: boolean;
   unreadMarkerMessageId?: number | null;
+  unreadSummaryRequest?: ChannelUnreadSummaryRequest | null;
   onNavigateToUnread?: (messageId: number) => void;
   targetMessageId: number | null;
   hasNewerMessages: boolean;
@@ -133,6 +138,7 @@ export function ConversationPane({
   loadingOlder,
   hasOlderMessages,
   unreadMarkerMessageId,
+  unreadSummaryRequest = null,
   onNavigateToUnread,
   targetMessageId,
   hasNewerMessages,
@@ -316,6 +322,9 @@ export function ConversationPane({
       )}
       {activeConversation.type === 'contact' && isUnknownFullKeyActiveContact && (
         <ContactResolutionBanner variant="unknown-full-key" />
+      )}
+      {activeConversation.type === 'channel' && (
+        <ChannelUnreadSummaryBanner request={unreadSummaryRequest} />
       )}
       {activeContactIsRoom && activeContact && (
         <RoomServerPanel contact={activeContact} onAuthenticatedChange={setRoomAuthenticated} />

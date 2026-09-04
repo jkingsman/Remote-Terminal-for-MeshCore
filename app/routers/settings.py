@@ -88,6 +88,18 @@ class AppSettingsUpdate(BaseModel):
             "path are polled every hour instead of on the normal scheduled interval."
         ),
     )
+    ollama_base_url: str | None = Field(
+        default=None,
+        description="Base URL for a local Ollama server (e.g. http://localhost:11434)",
+    )
+    ollama_model: str | None = Field(
+        default=None,
+        description="Ollama model for unread channel summaries (default phi3:mini)",
+    )
+    ollama_enabled: bool | None = Field(
+        default=None,
+        description="Enable or disable unread channel summary banners",
+    )
 
 
 class BlockKeyRequest(BaseModel):
@@ -270,6 +282,20 @@ async def update_settings(update: AppSettingsUpdate) -> AppSettings:
     if update.telemetry_routed_hourly is not None:
         logger.info("Updating telemetry_routed_hourly to %s", update.telemetry_routed_hourly)
         kwargs["telemetry_routed_hourly"] = update.telemetry_routed_hourly
+
+    if update.ollama_base_url is not None:
+        from app.services.ollama_summary import normalize_ollama_base_url
+
+        kwargs["ollama_base_url"] = normalize_ollama_base_url(update.ollama_base_url)
+        logger.info("Updating ollama_base_url to %s", kwargs["ollama_base_url"])
+
+    if update.ollama_model is not None:
+        kwargs["ollama_model"] = update.ollama_model.strip()
+        logger.info("Updating ollama_model to %r", kwargs["ollama_model"] or "(empty)")
+
+    if update.ollama_enabled is not None:
+        kwargs["ollama_enabled"] = update.ollama_enabled
+        logger.info("Updating ollama_enabled to %s", update.ollama_enabled)
 
     # Flood scope
     flood_scope_changed = False

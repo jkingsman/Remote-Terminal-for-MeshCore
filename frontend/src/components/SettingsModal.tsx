@@ -249,6 +249,8 @@ export function SettingsModal(props: SettingsModalProps) {
               onLocalLabelChange={onLocalLabelChange}
               contacts={contacts}
               channels={channels}
+              appSettings={appSettings}
+              onSaveAppSettings={onSaveAppSettings}
               className={sectionContentClass}
             />
           )}
