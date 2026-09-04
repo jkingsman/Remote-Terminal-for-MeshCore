@@ -1063,7 +1063,7 @@ class AppSettings(BaseModel):
         description="Ollama model name for unread channel summaries",
     )
     ollama_enabled: bool = Field(
-        default=True,
+        default=False,
         description="When enabled, opening a channel with unreads shows an Ollama summary banner",
     )
 

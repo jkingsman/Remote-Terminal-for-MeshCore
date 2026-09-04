@@ -79,7 +79,7 @@ const baseSettings: AppSettings = {
   telemetry_routed_hourly: false,
   ollama_base_url: 'http://localhost:11434',
   ollama_model: 'phi3:mini',
-  ollama_enabled: true,
+  ollama_enabled: false,
 };
 
 function renderModal(overrides?: {

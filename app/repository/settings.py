@@ -152,7 +152,7 @@ class AppSettingsRepository:
         try:
             ollama_enabled = bool(row["ollama_enabled"])
         except (KeyError, TypeError):
-            ollama_enabled = True
+            ollama_enabled = False
 
         return AppSettings(
             max_radio_contacts=row["max_radio_contacts"],

@@ -686,9 +686,9 @@ export function SettingsLocalSection({
           <div className="space-y-2">
             <h3 className="text-base font-semibold tracking-tight">Ollama Unread Summaries</h3>
             <p className="text-[0.8125rem] text-muted-foreground">
-              When enabled, opening a channel with unread messages asks your local Ollama server for
-              a short catch-up summary shown as a banner above the chat. Stored on the RemoteTerm
-              server (not browser-local).
+              Off by default. When enabled, opening a channel with unread messages asks your local
+              Ollama server for a short catch-up summary shown as a banner above the chat. Stored on
+              the RemoteTerm server (not browser-local).
             </p>
           </div>
 
@@ -704,8 +704,8 @@ export function SettingsLocalSection({
             <div className="space-y-1">
               <Label htmlFor="ollama-enabled">Enable unread summaries</Label>
               <p className="text-[0.8125rem] text-muted-foreground">
-                Turn off to hide the summary banner when opening channels. URL and model settings
-                are kept.
+                Turn on to show the summary banner when opening channels with unreads. URL and model
+                settings are kept when this is off.
               </p>
             </div>
           </div>
