@@ -5,6 +5,11 @@ interface RadioSettings {
   cr: number;
 }
 
+export interface FreqRange {
+  min_mhz: number;
+  max_mhz: number;
+}
+
 export interface RadioConfig {
   public_key: string;
   name: string;
@@ -15,6 +20,9 @@ export interface RadioConfig {
   radio: RadioSettings;
   path_hash_mode: number;
   path_hash_mode_supported: boolean;
+  repeat_enabled?: boolean;
+  repeat_supported?: boolean;
+  allowed_repeat_freqs?: FreqRange[];
   advert_location_source?: 'off' | 'current';
   multi_acks_enabled?: boolean;
   telemetry_mode_base?: number;
@@ -29,6 +37,7 @@ export interface RadioConfigUpdate {
   tx_power?: number;
   radio?: RadioSettings;
   path_hash_mode?: number;
+  repeat_enabled?: boolean;
   advert_location_source?: 'off' | 'current';
   multi_acks_enabled?: boolean;
   telemetry_mode_base?: number;

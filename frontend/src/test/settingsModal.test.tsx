@@ -432,6 +432,95 @@ describe('SettingsModal', () => {
     });
   });
 
+  it('hides repeater mode when firmware does not report it', () => {
+    renderModal();
+    openRadioSection();
+
+    expect(screen.queryByLabelText('Repeater Mode')).not.toBeInTheDocument();
+  });
+
+  it('saves repeater mode through radio config save when supported', async () => {
+    const { onSave } = renderModal({
+      config: { ...baseConfig, repeat_supported: true, repeat_enabled: false },
+    });
+    openRadioSection();
+
+    fireEvent.click(screen.getByLabelText('Repeater Mode'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save Radio Config' }));
+
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ repeat_enabled: true }));
+    });
+  });
+
+  it('omits repeater mode from the save when unchanged', async () => {
+    const { onSave } = renderModal({
+      config: { ...baseConfig, repeat_supported: true, repeat_enabled: true },
+    });
+    openRadioSection();
+
+    expect(screen.getByLabelText('Repeater Mode')).toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: 'Save Radio Config' }));
+
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalledWith(
+        expect.not.objectContaining({ repeat_enabled: expect.anything() })
+      );
+    });
+  });
+
+  it('lists allowed repeat frequencies and gates repeater mode on the entered frequency', () => {
+    renderModal({
+      config: {
+        ...baseConfig,
+        repeat_supported: true,
+        allowed_repeat_freqs: [
+          { min_mhz: 910.525, max_mhz: 910.525 },
+          { min_mhz: 433.0, max_mhz: 434.5 },
+        ],
+      },
+    });
+    openRadioSection();
+
+    expect(screen.getByText(/built to allow: 910\.525, 433\.000–434\.500 MHz/)).toBeInTheDocument();
+    expect(screen.getByLabelText('Repeater Mode')).toBeEnabled();
+
+    fireEvent.change(screen.getByLabelText('Frequency (MHz)'), { target: { value: '915' } });
+    expect(screen.getByLabelText('Repeater Mode')).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText('Frequency (MHz)'), { target: { value: '433.75' } });
+    expect(screen.getByLabelText('Repeater Mode')).toBeEnabled();
+  });
+
+  it('always lets repeater mode be turned off, even on a disallowed frequency', () => {
+    renderModal({
+      config: {
+        ...baseConfig,
+        repeat_supported: true,
+        repeat_enabled: true,
+        allowed_repeat_freqs: [{ min_mhz: 910.525, max_mhz: 910.525 }],
+      },
+    });
+    openRadioSection();
+
+    fireEvent.change(screen.getByLabelText('Frequency (MHz)'), { target: { value: '915' } });
+    const checkbox = screen.getByLabelText('Repeater Mode');
+    expect(checkbox).toBeEnabled();
+
+    fireEvent.click(checkbox);
+    expect(checkbox).not.toBeChecked();
+    expect(checkbox).toBeDisabled();
+  });
+
+  it('hides the allowed frequency list when firmware reports none', () => {
+    renderModal({ config: { ...baseConfig, repeat_supported: true, allowed_repeat_freqs: [] } });
+    openRadioSection();
+
+    expect(screen.queryByText(/built to allow/)).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Frequency (MHz)'), { target: { value: '915' } });
+    expect(screen.getByLabelText('Repeater Mode')).toBeEnabled();
+  });
+
   it('saves changed max contacts value through onSaveAppSettings', async () => {
     const { onSaveAppSettings } = renderModal();
     openRadioSection();

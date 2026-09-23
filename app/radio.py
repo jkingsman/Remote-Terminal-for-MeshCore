@@ -177,6 +177,9 @@ class RadioManager:
         self.max_channels: int = 40
         self.path_hash_mode: int = 0
         self.path_hash_mode_supported: bool = False
+        self.repeat_enabled: bool = False
+        self.repeat_supported: bool = False
+        self.allowed_repeat_freqs: list[tuple[float, float]] = []
         self._channel_slot_by_key: OrderedDict[str, int] = OrderedDict()
         self._channel_key_by_slot: dict[int, str] = {}
         self._pending_message_channel_key_by_slot: dict[int, str] = {}
@@ -224,6 +227,9 @@ class RadioManager:
         self.max_channels = 40
         self.path_hash_mode = 0
         self.path_hash_mode_supported = False
+        self.repeat_enabled = False
+        self.repeat_supported = False
+        self.allowed_repeat_freqs = []
         self.reset_channel_send_cache()
         self.clear_pending_message_channel_slots()
 

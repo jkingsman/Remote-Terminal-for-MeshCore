@@ -15,6 +15,10 @@ class PathHashModeUnsupportedError(RadioCommandServiceError):
     """Raised when firmware does not support path hash mode updates."""
 
 
+class RepeatModeUnsupportedError(RadioCommandServiceError):
+    """Raised when firmware does not support repeat mode updates."""
+
+
 class RadioCommandRejectedError(RadioCommandServiceError):
     """Raised when the radio reports an error for a command."""
 
@@ -23,12 +27,26 @@ class KeystoreRefreshError(RadioCommandServiceError):
     """Raised when server-side keystore refresh fails after import."""
 
 
+def _format_freq_ranges(ranges: list[tuple[float, float]]) -> str:
+    return (
+        ", ".join(
+            f"{lo:.3f}" if round(lo * 1000) == round(hi * 1000) else f"{lo:.3f}–{hi:.3f}"
+            for lo, hi in ranges
+        )
+        + " MHz"
+    )
+
+
 async def apply_radio_config_update(
     mc,
     update,
     *,
     path_hash_mode_supported: bool,
     set_path_hash_mode: Callable[[int], None],
+    repeat_supported: bool,
+    repeat_enabled: bool,
+    allowed_repeat_freqs: list[tuple[float, float]],
+    set_repeat_enabled: Callable[[bool], None],
     sync_radio_time_fn: Callable[[Any], Awaitable[Any]],
 ) -> None:
     """Apply a validated radio-config update to the connected radio."""
@@ -90,20 +108,40 @@ async def apply_radio_config_update(
         logger.info("Setting TX power to %d dBm", update.tx_power)
         await mc.commands.set_tx_power(val=update.tx_power)
 
-    if update.radio is not None:
-        logger.info(
-            "Setting radio params: freq=%f MHz, bw=%f kHz, sf=%d, cr=%d",
-            update.radio.freq,
-            update.radio.bw,
-            update.radio.sf,
-            update.radio.cr,
-        )
-        await mc.commands.set_radio(
-            freq=update.radio.freq,
-            bw=update.radio.bw,
-            sf=update.radio.sf,
-            cr=update.radio.cr,
-        )
+    if update.radio is not None or update.repeat_enabled is not None:
+        if update.repeat_enabled is not None and not repeat_supported:
+            raise RepeatModeUnsupportedError("Firmware does not support repeat mode setting")
+
+        if update.radio is not None:
+            params = update.radio.model_dump()
+        else:
+            params = {k: mc.self_info[f"radio_{k}"] for k in ("freq", "bw", "sf", "cr")}
+        # Firmware persists repeat=0 when the byte is omitted, so always resend the current value.
+        repeat = None
+        if repeat_supported:
+            repeat = update.repeat_enabled if update.repeat_enabled is not None else repeat_enabled
+
+        logger.info("Setting radio params: %s, repeat=%s", params, repeat)
+        result = await mc.commands.set_radio(**params, repeat=repeat)
+        if result is not None and result.type == EventType.ERROR:
+            reason = (
+                result.payload.get("code_string") or result.payload.get("error")
+                if isinstance(result.payload, dict)
+                else None
+            ) or str(result.payload)
+            detail = f"Firmware rejected the radio settings ({reason})"
+            if repeat and allowed_repeat_freqs:
+                detail += (
+                    f". Repeat mode is only allowed on: {_format_freq_ranges(allowed_repeat_freqs)}"
+                )
+            elif repeat:
+                detail += (
+                    ". Repeat mode is only allowed on the firmware's permitted frequencies "
+                    "(stock builds: 433.000, 869.495, 918.000 MHz)"
+                )
+            raise RadioCommandRejectedError(detail)
+        if repeat is not None:
+            set_repeat_enabled(repeat)
 
     if update.path_hash_mode is not None:
         if not path_hash_mode_supported:

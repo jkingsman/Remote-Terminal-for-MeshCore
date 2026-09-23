@@ -37,6 +37,7 @@ from app.services.radio_commands import (
     KeystoreRefreshError,
     PathHashModeUnsupportedError,
     RadioCommandRejectedError,
+    RepeatModeUnsupportedError,
     apply_radio_config_update,
     import_private_key_and_refresh_keystore,
 )
@@ -84,6 +85,11 @@ class RadioSettings(BaseModel):
     cr: int = Field(description="Coding rate (1-4)")
 
 
+class FreqRange(BaseModel):
+    min_mhz: float
+    max_mhz: float
+
+
 class RadioConfigResponse(BaseModel):
     public_key: str = Field(description="Public key (64-char hex)")
     name: str
@@ -97,6 +103,17 @@ class RadioConfigResponse(BaseModel):
     )
     path_hash_mode_supported: bool = Field(
         default=False, description="Whether firmware supports path hash mode setting"
+    )
+    repeat_enabled: bool = Field(
+        default=False,
+        description="Whether the companion rebroadcasts other nodes' packets (repeat mode)",
+    )
+    repeat_supported: bool = Field(
+        default=False, description="Whether firmware supports the repeat mode setting"
+    )
+    allowed_repeat_freqs: list[FreqRange] = Field(
+        default_factory=list,
+        description="Frequency ranges (MHz) where firmware allows repeat mode; compiled into firmware",
     )
     advert_location_source: AdvertLocationSource = Field(
         default="current",
@@ -131,6 +148,10 @@ class RadioConfigUpdate(BaseModel):
         ge=0,
         le=2,
         description="Path hash mode (0=1-byte, 1=2-byte, 2=3-byte)",
+    )
+    repeat_enabled: bool | None = Field(
+        default=None,
+        description="Whether the companion rebroadcasts other nodes' packets (repeat mode)",
     )
     advert_location_source: AdvertLocationSource | None = Field(
         default=None,
@@ -384,6 +405,11 @@ async def get_radio_config() -> RadioConfigResponse:
         ),
         path_hash_mode=radio_manager.path_hash_mode,
         path_hash_mode_supported=radio_manager.path_hash_mode_supported,
+        repeat_enabled=radio_manager.repeat_enabled,
+        repeat_supported=radio_manager.repeat_supported,
+        allowed_repeat_freqs=[
+            FreqRange(min_mhz=lo, max_mhz=hi) for lo, hi in radio_manager.allowed_repeat_freqs
+        ],
         advert_location_source=advert_location_source,
         multi_acks_enabled=bool(info.get("multi_acks", 0)),
         telemetry_mode_base=info.get("telemetry_mode_base", 0),
@@ -404,9 +430,15 @@ async def update_radio_config(update: RadioConfigUpdate) -> RadioConfigResponse:
                 update,
                 path_hash_mode_supported=radio_manager.path_hash_mode_supported,
                 set_path_hash_mode=lambda mode: setattr(radio_manager, "path_hash_mode", mode),
+                repeat_supported=radio_manager.repeat_supported,
+                repeat_enabled=radio_manager.repeat_enabled,
+                allowed_repeat_freqs=radio_manager.allowed_repeat_freqs,
+                set_repeat_enabled=lambda enabled: setattr(
+                    radio_manager, "repeat_enabled", enabled
+                ),
                 sync_radio_time_fn=sync_radio_time,
             )
-        except PathHashModeUnsupportedError as exc:
+        except (PathHashModeUnsupportedError, RepeatModeUnsupportedError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except RadioCommandRejectedError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc

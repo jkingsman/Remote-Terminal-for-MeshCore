@@ -1,6 +1,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from meshcore import EventType
 
 from app.services.radio_lifecycle import (
     prepare_connected_radio,
@@ -154,7 +155,14 @@ class TestRunPostConnectSetup:
         assert radio_manager.max_channels == 8
 
     @pytest.mark.asyncio
-    async def test_caches_device_info_metadata_from_device_query(self):
+    @pytest.mark.parametrize(
+        ("freq_event", "expected_freqs"),
+        [
+            (EventType.ALLOWED_REPEAT_FREQ, [(910.525, 910.525)]),
+            (EventType.ERROR, []),
+        ],
+    )
+    async def test_caches_device_info_metadata_from_device_query(self, freq_event, expected_freqs):
         mc = MagicMock()
         mc.commands.send_device_query = AsyncMock(
             return_value=MagicMock(
@@ -166,7 +174,13 @@ class TestRunPostConnectSetup:
                     "fw_build": "2025-02-01",
                     "ver": "1.2.3",
                     "path_hash_mode": 2,
+                    "repeat": True,
                 }
+            )
+        )
+        mc.commands.get_allowed_repeat_freq = AsyncMock(
+            return_value=MagicMock(
+                type=freq_event, payload={"freqs": [{"min": 910525, "max": 910525}]}
             )
         )
         mc.commands.set_flood_scope = AsyncMock(return_value=None)
@@ -216,3 +230,6 @@ class TestRunPostConnectSetup:
         assert radio_manager.firmware_version == "1.2.3"
         assert radio_manager.path_hash_mode == 2
         assert radio_manager.path_hash_mode_supported is True
+        assert radio_manager.repeat_enabled is True
+        assert radio_manager.repeat_supported is True
+        assert radio_manager.allowed_repeat_freqs == expected_freqs

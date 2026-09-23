@@ -20,6 +20,7 @@ import { stripRegionScopePrefix } from '../../utils/regionScope';
 import type {
   AppSettings,
   AppSettingsUpdate,
+  FreqRange,
   HealthStatus,
   RadioAdvertMode,
   RadioConfig,
@@ -45,6 +46,12 @@ function formatAirtime(secs: number): string {
   const minutes = Math.floor((secs % 3600) / 60);
   if (hours > 0) return `${hours}h ${minutes}m`;
   return `${minutes}m`;
+}
+
+function formatFreqRange({ min_mhz, max_mhz }: FreqRange): string {
+  return Math.round(min_mhz * 1000) === Math.round(max_mhz * 1000)
+    ? min_mhz.toFixed(3)
+    : `${min_mhz.toFixed(3)}–${max_mhz.toFixed(3)}`;
 }
 
 function StatRow({ label, value, warn }: { label: string; value: string; warn?: boolean }) {
@@ -190,6 +197,7 @@ export function SettingsRadioSection({
   const [pathHashMode, setPathHashMode] = useState('0');
   const [advertLocationSource, setAdvertLocationSource] = useState<'off' | 'current'>('current');
   const [multiAcksEnabled, setMultiAcksEnabled] = useState(false);
+  const [repeatEnabled, setRepeatEnabled] = useState(false);
   const [telemetryModeBase, setTelemetryModeBase] = useState(0);
   const [telemetryModeLoc, setTelemetryModeLoc] = useState(0);
   const [telemetryModeEnv, setTelemetryModeEnv] = useState(0);
@@ -229,6 +237,7 @@ export function SettingsRadioSection({
     setPathHashMode(String(config.path_hash_mode));
     setAdvertLocationSource(config.advert_location_source ?? 'current');
     setMultiAcksEnabled(config.multi_acks_enabled ?? false);
+    setRepeatEnabled(config.repeat_enabled ?? false);
     setTelemetryModeBase(config.telemetry_mode_base ?? 0);
     setTelemetryModeLoc(config.telemetry_mode_loc ?? 0);
     setTelemetryModeEnv(config.telemetry_mode_env ?? 0);
@@ -297,6 +306,16 @@ export function SettingsRadioSection({
     );
   };
 
+  const allowedRepeatFreqs = config.allowed_repeat_freqs ?? [];
+  const enteredFreqKhz = Math.round(parseFloat(freq) * 1000);
+  const repeatFreqAllowed =
+    allowedRepeatFreqs.length === 0 ||
+    allowedRepeatFreqs.some(
+      (r) =>
+        enteredFreqKhz >= Math.round(r.min_mhz * 1000) &&
+        enteredFreqKhz <= Math.round(r.max_mhz * 1000)
+    );
+
   const buildUpdate = (): RadioConfigUpdate | null => {
     const parsedLat = parseFloat(lat);
     const parsedLon = parseFloat(lon);
@@ -327,6 +346,9 @@ export function SettingsRadioSection({
         : {}),
       ...(multiAcksEnabled !== (config.multi_acks_enabled ?? false)
         ? { multi_acks_enabled: multiAcksEnabled }
+        : {}),
+      ...(config.repeat_supported && repeatEnabled !== (config.repeat_enabled ?? false)
+        ? { repeat_enabled: repeatEnabled }
         : {}),
       ...(telemetryModeBase !== (config.telemetry_mode_base ?? 0)
         ? { telemetry_mode_base: telemetryModeBase }
@@ -528,6 +550,7 @@ export function SettingsRadioSection({
     path_hash_mode: config.path_hash_mode,
     advert_location_source: config.advert_location_source ?? 'current',
     multi_acks_enabled: config.multi_acks_enabled ?? false,
+    repeat_enabled: config.repeat_enabled ?? false,
     telemetry_mode_base: config.telemetry_mode_base ?? 0,
     telemetry_mode_loc: config.telemetry_mode_loc ?? 0,
     telemetry_mode_env: config.telemetry_mode_env ?? 0,
@@ -602,6 +625,7 @@ export function SettingsRadioSection({
     if (data.advert_location_source === 'off' || data.advert_location_source === 'current')
       setAdvertLocationSource(data.advert_location_source);
     if (typeof data.multi_acks_enabled === 'boolean') setMultiAcksEnabled(data.multi_acks_enabled);
+    if (typeof data.repeat_enabled === 'boolean') setRepeatEnabled(data.repeat_enabled);
     if (typeof data.telemetry_mode_base === 'number')
       setTelemetryModeBase(data.telemetry_mode_base);
     if (typeof data.telemetry_mode_loc === 'number') setTelemetryModeLoc(data.telemetry_mode_loc);
@@ -629,6 +653,8 @@ export function SettingsRadioSection({
       update.telemetry_mode_env = data.telemetry_mode_env as number;
     if (config.path_hash_mode_supported && typeof data.path_hash_mode === 'number')
       update.path_hash_mode = data.path_hash_mode as number;
+    if (config.repeat_supported && typeof data.repeat_enabled === 'boolean')
+      update.repeat_enabled = data.repeat_enabled;
     return update;
   };
 
@@ -954,6 +980,37 @@ export function SettingsRadioSection({
               sent with 2-byte or 3-byte hops will be dropped by any node on older firmware.
             </p>
           </div>
+        </div>
+      )}
+
+      {config.repeat_supported && (
+        <div className="space-y-2">
+          <div className="flex items-start gap-3 rounded-md border border-border/60 p-3">
+            <Checkbox
+              id="repeat-enabled"
+              checked={repeatEnabled}
+              onCheckedChange={(checked) => setRepeatEnabled(checked === true)}
+              disabled={!repeatEnabled && !repeatFreqAllowed}
+              className="mt-0.5"
+            />
+            <div className="space-y-1">
+              <Label htmlFor="repeat-enabled">Repeater Mode</Label>
+              <p className="text-[0.8125rem] text-muted-foreground">
+                When enabled, this node rebroadcasts other nodes&apos; packets. Firmware only allows
+                it on specific frequencies and rejects the change otherwise.
+              </p>
+            </div>
+          </div>
+          {allowedRepeatFreqs.length > 0 && (
+            <div className="rounded-md border border-warning/50 bg-warning/10 p-3 text-xs text-warning">
+              <p className="font-semibold mb-1">Compatibility Warning</p>
+              <p>
+                Repeat mode only works on the frequencies this node&apos;s firmware was built to
+                allow: {allowedRepeatFreqs.map(formatFreqRange).join(', ')} MHz. This list is
+                compiled into the firmware and can&apos;t be changed from RemoteTerm.
+              </p>
+            </div>
+          )}
         </div>
       )}
 

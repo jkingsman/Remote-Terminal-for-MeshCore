@@ -129,6 +129,25 @@ class TestGetRadioConfig:
         assert response.multi_acks_enabled is True
 
     @pytest.mark.asyncio
+    async def test_maps_repeat_state_to_response(self):
+        mc = _mock_meshcore_with_info()
+
+        with (
+            patch("app.routers.radio.radio_manager.require_connected", return_value=mc),
+            patch.object(radio_manager, "repeat_enabled", True),
+            patch.object(radio_manager, "repeat_supported", True),
+            patch.object(radio_manager, "allowed_repeat_freqs", [(433.0, 433.0), (910.0, 915.0)]),
+        ):
+            response = await get_radio_config()
+
+        assert response.repeat_enabled is True
+        assert response.repeat_supported is True
+        assert [(r.min_mhz, r.max_mhz) for r in response.allowed_repeat_freqs] == [
+            (433.0, 433.0),
+            (910.0, 915.0),
+        ]
+
+    @pytest.mark.asyncio
     async def test_maps_any_nonzero_advert_location_policy_to_current(self):
         mc = _mock_meshcore_with_info()
         mc.self_info["adv_loc_policy"] = 1
@@ -289,6 +308,31 @@ class TestUpdateRadioConfig:
         assert exc.value.status_code == 422
         assert "Failed to set path hash mode" in str(exc.value.detail)
         assert radio_manager.path_hash_mode == 0
+        mc.commands.send_appstart.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_propagates_radio_error_when_enabling_repeat(self):
+        mc = _mock_meshcore_with_info()
+        mc.commands.set_radio = AsyncMock(
+            return_value=_radio_result(EventType.ERROR, {"error_code": 6})
+        )
+
+        with (
+            patch("app.routers.radio.radio_manager.require_connected", return_value=mc),
+            patch.object(radio_manager, "_meshcore", mc),
+            patch.object(radio_manager, "repeat_supported", True),
+            patch.object(radio_manager, "repeat_enabled", False),
+            patch.object(radio_manager, "allowed_repeat_freqs", [(918.0, 918.0)]),
+        ):
+            with pytest.raises(HTTPException) as exc:
+                await update_radio_config(RadioConfigUpdate(repeat_enabled=True))
+
+        assert exc.value.status_code == 422
+        assert "only allowed on: 918.000 MHz" in str(exc.value.detail)
+        mc.commands.set_radio.assert_awaited_once_with(
+            freq=910.525, bw=62.5, sf=7, cr=5, repeat=True
+        )
+        assert radio_manager.repeat_enabled is False
         mc.commands.send_appstart.assert_not_awaited()
 
 

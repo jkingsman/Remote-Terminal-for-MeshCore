@@ -2,6 +2,8 @@ import asyncio
 import logging
 from datetime import UTC, datetime
 
+from meshcore import EventType
+
 logger = logging.getLogger(__name__)
 
 POST_CONNECT_SETUP_TIMEOUT_SECONDS = 300
@@ -91,6 +93,9 @@ async def run_post_connect_setup(radio_manager) -> None:
                 radio_manager.max_channels = 40
                 radio_manager.path_hash_mode = 0
                 radio_manager.path_hash_mode_supported = False
+                radio_manager.repeat_enabled = False
+                radio_manager.repeat_supported = False
+                radio_manager.allowed_repeat_freqs = []
                 try:
                     device_query = await mc.commands.send_device_query()
                     payload = (
@@ -121,10 +126,15 @@ async def run_post_connect_setup(radio_manager) -> None:
                         radio_manager.path_hash_mode = payload["path_hash_mode"]
                         radio_manager.path_hash_mode_supported = True
 
+                    if isinstance(payload.get("repeat"), bool):
+                        radio_manager.repeat_enabled = payload["repeat"]
+                        radio_manager.repeat_supported = True
+
                     if _captured_frame:
                         # Raw-frame fallback / completion:
                         # byte 1 = fw_ver, byte 2 = max_contacts/2, byte 3 = max_channels,
-                        # bytes 8:20 = fw_build, 20:60 = model, 60:80 = ver, byte 81 = path_hash_mode
+                        # bytes 8:20 = fw_build, 20:60 = model, 60:80 = ver,
+                        # byte 80 = repeat, byte 81 = path_hash_mode
                         raw = _captured_frame[-1]
                         fw_ver = raw[1] if len(raw) > 1 else 0
                         if fw_ver >= 3:
@@ -140,6 +150,9 @@ async def run_post_connect_setup(radio_manager) -> None:
                                 radio_manager.device_model = _decode_fixed_string(raw, 20, 40)
                             if radio_manager.firmware_version is None:
                                 radio_manager.firmware_version = _decode_fixed_string(raw, 60, 20)
+                        if not radio_manager.repeat_supported and fw_ver >= 9 and len(raw) >= 81:
+                            radio_manager.repeat_enabled = bool(raw[80])
+                            radio_manager.repeat_supported = True
                         if (
                             not radio_manager.path_hash_mode_supported
                             and fw_ver >= 10
@@ -161,6 +174,21 @@ async def run_post_connect_setup(radio_manager) -> None:
                         logger.info("Path hash mode: %d (supported)", radio_manager.path_hash_mode)
                     else:
                         logger.debug("Firmware does not report path_hash_mode")
+                    if radio_manager.repeat_supported:
+                        try:
+                            freq_result = await mc.commands.get_allowed_repeat_freq()
+                            if (
+                                freq_result is not None
+                                and freq_result.type == EventType.ALLOWED_REPEAT_FREQ
+                            ):
+                                radio_manager.allowed_repeat_freqs = [
+                                    (r["min"] / 1000, r["max"] / 1000)
+                                    for r in freq_result.payload.get("freqs", [])
+                                ]
+                            else:
+                                logger.debug("Radio did not report allowed repeat frequencies")
+                        except Exception as exc:
+                            logger.debug("Failed to query allowed repeat frequencies: %s", exc)
                     if radio_manager.device_info_loaded:
                         logger.info(
                             "Radio device info: model=%s build=%s version=%s max_contacts=%s max_channels=%d",

@@ -579,6 +579,9 @@ class TestManualDisconnectCleanup:
         rm.max_channels = 8
         rm.path_hash_mode = 2
         rm.path_hash_mode_supported = True
+        rm.repeat_enabled = True
+        rm.repeat_supported = True
+        rm.allowed_repeat_freqs = [(910.525, 910.525)]
         rm.note_channel_slot_loaded("AA" * 16, 0)
         set_private_key(b"\x01" * 64)
 
@@ -599,6 +602,9 @@ class TestManualDisconnectCleanup:
         assert rm.max_channels == 40
         assert rm.path_hash_mode == 0
         assert rm.path_hash_mode_supported is False
+        assert rm.repeat_enabled is False
+        assert rm.repeat_supported is False
+        assert rm.allowed_repeat_freqs == []
         assert rm.get_cached_channel_slot("AA" * 16) is None
 
     @pytest.mark.asyncio
